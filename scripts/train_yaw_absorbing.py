@@ -7,6 +7,7 @@ import math
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from livingtwin_mujoco_rl.checkpoint import load_checkpoint
@@ -39,6 +40,20 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"]["learning_rate"]))
     normalizer = RunningMeanStd((AbsorbingYawPlanarPushEnv.observation_size,))
     load_checkpoint(summary["final_checkpoint"], model, optimizer, normalizer)
+    normalization_report = {
+        "count": float(normalizer.count),
+        "mean": normalizer.mean.tolist(),
+        "variance": normalizer.var.tolist(),
+        "standard_deviation": np.sqrt(normalizer.var).tolist(),
+        "all_finite": bool(np.all(np.isfinite(normalizer.mean)) and np.all(np.isfinite(normalizer.var))),
+        "minimum_variance": float(np.min(normalizer.var)),
+        "maximum_variance": float(np.max(normalizer.var)),
+        "maximum_absolute_mean": float(np.max(np.abs(normalizer.mean))),
+        "absorbing_raw_observation_included_during_training": True,
+    }
+    (output / "OBSERVATION_NORMALIZATION.json").write_text(
+        json.dumps(normalization_report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     seeds = list(range(int(config["evaluation"]["common_seed_start"]), int(config["evaluation"]["common_seed_start"]) + int(config["evaluation_episodes"])))
     reload_metrics, _ = evaluate_absorbing_policy(
         model, normalizer, asset_path=config["asset_path"], env_config=config["environment"],
@@ -56,6 +71,7 @@ def main() -> None:
     report = {
         **summary, "code_commit": commit, "final_common_evaluation": training_metrics,
         "checkpoint_reload": reload_report, "numeric_metrics_finite": numeric_finite,
+        "observation_normalization": normalization_report,
         "training_curve": str(curve.resolve()), "replay": replay,
     }
     (output / "FINAL_REPORT.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

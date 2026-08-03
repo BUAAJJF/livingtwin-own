@@ -19,6 +19,7 @@ def summarize_absorbing_episodes(rows: Sequence[Mapping[str, Any]]) -> dict[str,
         "position_success_rate": float(np.mean([bool(row["position_success"]) for row in rows])),
         "yaw_success_rate": float(np.mean([bool(row["yaw_success"]) for row in rows])),
         "failure_rate": float(np.mean([bool(row["failure"]) for row in rows])),
+        "mean_absorbing_state_fraction": float(np.mean([float(row["absorbing_state_fraction"]) for row in rows])),
         "mean_absorption_step": float(np.mean([float(row["absorption_step"]) for row in rows if row["failure"]])) if any(row["failure"] for row in rows) else 0.0,
         "mean_final_position_error_m": float(np.mean(position)),
         "median_final_position_error_m": float(np.median(position)),
@@ -75,6 +76,10 @@ def evaluate_absorbing_policy(
                 "success": bool(final_info["success"]),
                 "failure": bool(final_info["failure"]),
                 "absorption_step": final_info["absorption_step"],
+                "absorbing_state_fraction": float(
+                    (action_count - int(final_info["absorption_step"]) + 1) / action_count
+                    if final_info["failure"] else 0.0
+                ),
                 "position_success": bool(final_info["position_success"]),
                 "yaw_success": bool(final_info["yaw_success"]),
                 "final_position_error_m": float(final_info["position_error_m"]),
