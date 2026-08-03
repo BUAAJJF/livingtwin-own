@@ -1,0 +1,28 @@
+schema_version: planar_push_ppo_baseline_v1
+env_config: configs/env.yaml
+paired_seeds: [2101, 2102, 2103]
+num_envs: 64
+total_environment_steps: 1048576
+rollout_steps: 256
+evaluation_interval_steps: 131072
+evaluation_episodes: 100
+checkpoint_interval_steps: 131072
+network:
+  hidden_sizes: [128, 128]
+training:
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  update_epochs: 4
+  minibatch_size: 2048
+  value_coefficient: 0.5
+  entropy_coefficient: 0.0
+  maximum_gradient_norm: 0.5
+  target_kl: 0.03
+evaluation:
+  deterministic: true
+  seed_start: 610000
+baseline_gate:
+  required_success_rate: 0.90
+
