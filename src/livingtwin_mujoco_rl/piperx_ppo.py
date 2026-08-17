@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import random
 import time
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import torch
 
-from livingtwin_mujoco_rl.checkpoint import save_checkpoint
+from livingtwin_mujoco_rl.checkpoint import load_checkpoint, restore_rng_state, save_checkpoint
 from livingtwin_mujoco_rl.piperx_goal_push_env import PiperGoalPushEnv
 from livingtwin_mujoco_rl.piperx_vector_env import VectorPiperGoalPushEnv
 from livingtwin_mujoco_rl.networks import ActorCritic
@@ -28,16 +29,23 @@ class Rollout:
     values: torch.Tensor
 
 
+def _goal_direction_label(delta: np.ndarray) -> str:
+    labels = ("right", "upper_right", "up", "upper_left", "left", "lower_left", "down", "lower_right")
+    angle = math.atan2(float(delta[1]), float(delta[0]))
+    return labels[int(math.floor((angle + math.pi / 8.0) / (math.pi / 4.0))) % len(labels)]
+
+
 def evaluate_goal_policy(model: ActorCritic, normalizer: RunningMeanStd, config: Mapping[str, Any], seeds: Sequence[int]) -> tuple[dict[str, float], list[dict[str, Any]]]:
     rows = []
     for seed in seeds:
         env = PiperGoalPushEnv(config, int(seed)); observation, _ = env.reset(int(seed)); total = 0.0
+        initial_goal_delta = env.goal - env._object_xy()
         for _ in range(int(config["task"]["episode_steps"])):
             with torch.no_grad():
                 action = model.deterministic(torch.as_tensor(normalizer.normalize(observation), dtype=torch.float32)).cpu().numpy()
             observation, reward, terminated, truncated, info = env.step(action); total += reward
             if terminated or truncated: break
-        rows.append({"seed": int(seed), "success": bool(info["success"]), "final_distance_m": float(info["distance_m"]), "episode_steps": int(info["step_count"]), "oob": bool(info.get("oob", False)), "ik_failure": bool(info.get("ik_failure", False)), "table_collision": bool(info.get("table_collision", False)), "episode_return": float(total)})
+        rows.append({"seed": int(seed), "initial_goal_direction_rad": float(math.atan2(initial_goal_delta[1], initial_goal_delta[0])), "goal_direction": _goal_direction_label(initial_goal_delta), "success": bool(info["success"]), "final_distance_m": float(info["distance_m"]), "episode_steps": int(info["step_count"]), "oob": bool(info.get("oob", False)), "ik_failure": bool(info.get("ik_failure", False)), "table_collision": bool(info.get("table_collision", False)), "episode_return": float(total)})
     distances = np.asarray([r["final_distance_m"] for r in rows], dtype=float)
     metrics = {"success_rate": float(np.mean([r["success"] for r in rows])), "median_final_distance_m": float(np.median(distances)), "p90_final_distance_m": float(np.quantile(distances, 0.9)), "mean_episode_steps": float(np.mean([r["episode_steps"] for r in rows])), "oob_rate": float(np.mean([r["oob"] for r in rows])), "ik_failure_rate": float(np.mean([r["ik_failure"] for r in rows])), "table_collision_rate": float(np.mean([r["table_collision"] for r in rows]))}
     return metrics, rows
@@ -229,6 +237,7 @@ def train(
     *,
     seed: int,
     output_dir: str | Path,
+    resume_checkpoint: str | Path | None = None,
 ) -> dict[str, Any]:
     output = Path(output_dir).resolve()
     if output.exists() and any(output.iterdir()):
@@ -247,7 +256,6 @@ def train(
     observation, _ = vector_env.reset(seed=seed * 100_000)
     observation_size = int(observation.shape[-1])
     normalizer = RunningMeanStd((observation_size,))
-    normalizer.update(observation)
     model = ActorCritic(
         observation_size,
         PiperGoalPushEnv.action_size,
@@ -256,16 +264,41 @@ def train(
     optimizer = torch.optim.Adam(
         model.parameters(), lr=float(config["training"]["learning_rate"])
     )
-    generator = torch.Generator().manual_seed(seed + 77)
-    global_step = 0
-    next_evaluation = int(config["evaluation_interval_steps"])
-    next_checkpoint = int(config["checkpoint_interval_steps"])
-    update_index = 0
     total_steps = int(config["total_environment_steps"])
     rollout_steps = int(config["rollout_steps"])
     batch_environment_steps = rollout_steps * num_envs
     if total_steps % batch_environment_steps != 0:
         raise ValueError("total_environment_steps must be divisible by rollout_steps*num_envs")
+    generator = torch.Generator().manual_seed(seed + 77)
+    global_step = 0
+    update_index = 0
+    if resume_checkpoint is None:
+        normalizer.update(observation)
+    else:
+        payload = load_checkpoint(resume_checkpoint, model, optimizer, normalizer)
+        global_step = int(payload["global_step"])
+        if int(payload["seed"]) != int(seed):
+            raise ValueError("resume checkpoint seed must match --seed")
+        if global_step >= total_steps:
+            raise ValueError("resume checkpoint is already at or beyond total_environment_steps")
+        if "ppo_generator_state" in payload:
+            generator.set_state(payload["ppo_generator_state"])
+            generator_restore = "checkpoint"
+        else:
+            prior_updates = global_step // batch_environment_steps
+            for _ in range(prior_updates * int(config["training"]["update_epochs"])):
+                torch.randperm(batch_environment_steps, generator=generator)
+            generator_restore = "replayed_full_epochs_from_seed"
+        restore_rng_state(payload["rng_state"])
+        update_index = global_step // batch_environment_steps
+        (output / "RESUME_PROVENANCE.json").write_text(json.dumps({
+            "resume_checkpoint": str(Path(resume_checkpoint).resolve()),
+            "checkpoint_global_step": global_step,
+            "checkpoint_seed": int(payload["seed"]),
+            "generator_restore": generator_restore,
+        }, indent=2, sort_keys=True) + "\n")
+    next_evaluation = ((global_step // int(config["evaluation_interval_steps"])) + 1) * int(config["evaluation_interval_steps"])
+    next_checkpoint = ((global_step // int(config["checkpoint_interval_steps"])) + 1) * int(config["checkpoint_interval_steps"])
 
     frozen_config = json.loads(json.dumps(config))
     (output / "FROZEN_CONFIG.json").write_text(
@@ -328,6 +361,7 @@ def train(
                 global_step=global_step,
                 config=frozen_config,
                 seed=seed,
+                ppo_generator_state=generator.get_state(),
             )
             next_checkpoint += int(config["checkpoint_interval_steps"])
 

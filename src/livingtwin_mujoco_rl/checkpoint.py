@@ -20,6 +20,12 @@ def capture_rng_state() -> dict[str, Any]:
     }
 
 
+def restore_rng_state(state: Mapping[str, Any]) -> None:
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"])
+
+
 def save_checkpoint(
     path: str | Path,
     model: ActorCritic,
@@ -29,6 +35,7 @@ def save_checkpoint(
     global_step: int,
     config: Mapping[str, Any],
     seed: int,
+    ppo_generator_state: torch.Tensor | None = None,
 ) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -44,6 +51,8 @@ def save_checkpoint(
         "rng_state": capture_rng_state(),
         "config": dict(config),
     }
+    if ppo_generator_state is not None:
+        payload["ppo_generator_state"] = ppo_generator_state.detach().cpu()
     temporary = target.with_suffix(target.suffix + ".tmp")
     torch.save(payload, temporary)
     os.replace(temporary, target)
@@ -66,4 +75,3 @@ def load_checkpoint(
         optimizer.load_state_dict(payload["optimizer_state"])
     normalizer.load_state_dict(payload["observation_normalization"])
     return payload
-
