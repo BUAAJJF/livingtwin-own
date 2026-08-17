@@ -41,6 +41,7 @@ environment:
     cube_initial_x_range_m: [0.36, 0.54]
     cube_initial_y_range_m: [-0.16, 0.16]
     goal_distance_range_m: [0.06, 0.14]
+    goal_angle_range_rad: [-0.60, 0.60]
     goal_xy_m: [0.50, 0.0]
     workspace_xy_bounds_m: [0.27, 0.63, -0.27, 0.27]
     precontact_gap_m: 0.012

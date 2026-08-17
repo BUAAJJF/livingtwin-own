@@ -51,7 +51,7 @@ class PiperGoalPushEnv:
         y0 = self.rng.uniform(*task["cube_initial_y_range_m"])
         lo_x, hi_x, lo_y, hi_y = self._legal_xy()
         radius = self.rng.uniform(*task["goal_distance_range_m"])
-        angle = self.rng.uniform(-math.pi, math.pi)
+        angle = self.rng.uniform(*task.get("goal_angle_range_rad", [-math.pi, math.pi]))
         self.goal[:] = np.clip([x0 + radius * math.cos(angle), y0 + radius * math.sin(angle)], [lo_x, lo_y], [hi_x, hi_y])
         table_z = float(task["table_center_xyz_m"][2]) + float(task["table_half_size_xyz_m"][2])
         half_z = float(task["object_halfsize_xyz_m"][2])
