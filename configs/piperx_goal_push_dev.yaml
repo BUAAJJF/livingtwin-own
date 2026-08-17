@@ -50,6 +50,8 @@ environment:
     episode_steps: 80
   action:
     delta_xy_scale_m: 0.008
+    sustained_push_travel_range_m: [0.011, 0.033]
+    sustained_push_speed_mps: 0.350
   control:
     duration_s: 0.50
   observation:
