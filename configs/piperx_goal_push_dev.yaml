@@ -2,9 +2,9 @@ schema_version: piperx_goal_push_ppo_v1
 num_envs: 4
 total_environment_steps: 32768
 rollout_steps: 128
-evaluation_interval_steps: 8192
-evaluation_episodes: 16
-checkpoint_interval_steps: 8192
+evaluation_interval_steps: 4096
+evaluation_episodes: 64
+checkpoint_interval_steps: 4096
 network:
   hidden_sizes: [128, 128]
 training:
@@ -20,7 +20,7 @@ training:
   target_kl: 0.03
 evaluation:
   seed_start: 910000
-evaluation_episodes: 16
+evaluation_episodes: 64
 environment:
   asset:
     root: /home/wenjing/assets/piperx-mjlab
@@ -44,7 +44,7 @@ environment:
     goal_xy_m: [0.50, 0.0]
     workspace_xy_bounds_m: [0.27, 0.63, -0.27, 0.27]
     precontact_gap_m: 0.012
-    ee_contact_z_m: 0.14
+    ee_contact_z_m: 0.105
     success_radius_m: 0.025
     episode_steps: 80
   action:
