@@ -60,8 +60,14 @@ class PiperGoalPushEnv:
         self.data.qvel[self.object_dof : self.object_dof + 6] = 0.0
         self.controller.current_q = np.asarray(task.get("robot_home_override", self.config["robot"]["home_joint_positions_rad"]), dtype=np.float64).copy()
         self.controller.reset()
-        pre_x = float(x0) - float(task["object_halfsize_xyz_m"][0]) - float(task["precontact_gap_m"])
-        pre_target = np.asarray([np.clip(pre_x, lo_x, hi_x), y0, float(task["ee_contact_z_m"])], dtype=np.float64)
+        goal_direction = self.goal - np.asarray([x0, y0], dtype=np.float64)
+        norm = float(np.linalg.norm(goal_direction))
+        if norm < 1.0e-8:
+            goal_direction = np.asarray([1.0, 0.0])
+        else:
+            goal_direction /= norm
+        pre_xy = np.asarray([x0, y0], dtype=np.float64) - goal_direction * (float(max(task["object_halfsize_xyz_m"][:2])) + float(task["precontact_gap_m"]))
+        pre_target = np.asarray([np.clip(pre_xy[0], lo_x, hi_x), np.clip(pre_xy[1], lo_y, hi_y), float(task["ee_contact_z_m"])], dtype=np.float64)
         self.controller.move_to_target(pre_target)
         self.model.site_pos[self.model.site("goal_site").id, :2] = self.goal
         mujoco.mj_forward(self.model, self.data)
