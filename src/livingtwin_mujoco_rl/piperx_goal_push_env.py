@@ -58,24 +58,23 @@ class PiperGoalPushEnv:
 
         ``action[0]`` is goal-forward and ``action[1]`` is goal-left.  The
         vector angle selects the approach/push direction; its clipped Euclidean
-        norm maps continuously to the historically validated 11--33 mm travel.
+        norm maps continuously from zero to the configured push-travel cap.
         """
         local = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         norm = min(float(np.linalg.norm(local)), 1.0)
-        if norm < 0.05:
+        if norm == 0.0:
             return {"no_op": True, "local_action": local.tolist()}
         forward = self.goal - self._object_xy()
         forward /= max(float(np.linalg.norm(forward)), 1.0e-9)
         lateral = np.asarray([-forward[1], forward[0]], dtype=np.float64)
         direction = local[0] * forward + local[1] * lateral
         direction /= max(float(np.linalg.norm(direction)), 1.0e-9)
-        travel_lo, travel_hi = (float(value) for value in self.config["action"]["sustained_push_travel_range_m"])
         return {
             "no_op": False,
             "local_action": local.tolist(),
             "direction": direction,
             "direction_rad": float(math.atan2(direction[1], direction[0])),
-            "travel_m": float(travel_lo + norm * (travel_hi - travel_lo)),
+            "travel_m": float(norm * self.config["action"]["max_push_travel_m"]),
             "speed_mps": float(self.config["action"]["sustained_push_speed_mps"]),
         }
 
@@ -113,6 +112,7 @@ class PiperGoalPushEnv:
 
     def step(self, action: Sequence[float]) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         before = self._distance()
+        object_before = self._object_xy()
         decoded = self._decode_action(action)
         if decoded["no_op"]:
             result: dict[str, Any] = {"unrecoverable": False, "gripper_puck_contact": False, "gripper_table_contact": False, "oob": False}
@@ -144,5 +144,14 @@ class PiperGoalPushEnv:
             "table_collision": table_collision, "oob": oob,
             "safety_termination": failure, "action_no_op": bool(decoded["no_op"]),
             "executed_push": {key: value for key, value in decoded.items() if key != "direction"},
+            "raw_action": np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0).tolist(),
+            "decoded_push_direction_rad": float(decoded.get("direction_rad", float("nan"))),
+            "commanded_after_touch_travel_m": float(decoded.get("travel_m", 0.0)),
+            "achieved_ee_after_touch_travel_m": float(result.get("contact_after_touch_displacement_achieved_m", 0.0)),
+            "after_touch_travel_reached": bool(result.get("contact_after_touch_displacement_reached", False)),
+            "cube_delta_xy_m": (self._object_xy() - object_before).tolist(),
+            "pre_settled_goal_distance_m": before,
+            "post_settled_goal_distance_m": after,
+            "contact_duration_s": float(result.get("contact_duration_s", 0.0)),
         }
         return self.observation(), reward, terminated, truncated, self.info(success, reason)

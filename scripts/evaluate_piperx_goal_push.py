@@ -28,8 +28,8 @@ def main() -> None:
     model = ActorCritic(observation.shape[-1], 2, config["network"]["hidden_sizes"])
     normalizer = RunningMeanStd((observation.shape[-1],))
     load_checkpoint(args.checkpoint, model, None, normalizer)
-    metrics, rows = evaluate_goal_policy(model, normalizer, config["environment"], range(args.seed_start, args.seed_start + args.episodes))
-    print(json.dumps({"metrics": metrics, "episodes": rows}, indent=2, sort_keys=True))
+    metrics, rows, decisions = evaluate_goal_policy(model, normalizer, config["environment"], range(args.seed_start, args.seed_start + args.episodes))
+    print(json.dumps({"metrics": metrics, "episodes": rows, "decisions": decisions}, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

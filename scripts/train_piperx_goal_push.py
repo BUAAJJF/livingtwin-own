@@ -29,9 +29,9 @@ def main() -> None:
     model = ActorCritic(observation.shape[-1], 2, config["network"]["hidden_sizes"])
     normalizer = RunningMeanStd((observation.shape[-1],))
     load_checkpoint(summary["final_checkpoint"], model, None, normalizer)
-    metrics, rows = evaluate_goal_policy(model, normalizer, config["environment"], range(config["evaluation"]["seed_start"], config["evaluation"]["seed_start"] + config["evaluation_episodes"]))
+    metrics, rows, decisions = evaluate_goal_policy(model, normalizer, config["environment"], range(config["evaluation"]["seed_start"], config["evaluation"]["seed_start"] + config["evaluation_episodes"]))
     output = Path(args.output)
-    (output / "NOMINAL_EVALUATION.json").write_text(json.dumps({"metrics": metrics, "episodes": rows}, indent=2, sort_keys=True) + "\n")
+    (output / "NOMINAL_EVALUATION.json").write_text(json.dumps({"metrics": metrics, "episodes": rows, "decisions": decisions}, indent=2, sort_keys=True) + "\n")
     print(json.dumps({**summary, "nominal_evaluation": metrics}, indent=2, sort_keys=True))
 
 

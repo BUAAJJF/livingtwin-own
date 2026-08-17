@@ -35,20 +35,38 @@ def _goal_direction_label(delta: np.ndarray) -> str:
     return labels[int(math.floor((angle + math.pi / 8.0) / (math.pi / 4.0))) % len(labels)]
 
 
-def evaluate_goal_policy(model: ActorCritic, normalizer: RunningMeanStd, config: Mapping[str, Any], seeds: Sequence[int]) -> tuple[dict[str, float], list[dict[str, Any]]]:
+def evaluate_goal_policy(model: ActorCritic, normalizer: RunningMeanStd, config: Mapping[str, Any], seeds: Sequence[int]) -> tuple[dict[str, float], list[dict[str, Any]], list[dict[str, Any]]]:
     rows = []
+    decision_rows = []
     for seed in seeds:
         env = PiperGoalPushEnv(config, int(seed)); observation, _ = env.reset(int(seed)); total = 0.0
         initial_goal_delta = env.goal - env._object_xy()
-        for _ in range(int(config["task"]["episode_steps"])):
+        for decision_index in range(int(config["task"]["episode_steps"])):
             with torch.no_grad():
                 action = model.deterministic(torch.as_tensor(normalizer.normalize(observation), dtype=torch.float32)).cpu().numpy()
             observation, reward, terminated, truncated, info = env.step(action); total += reward
+            decision_rows.append({
+                "seed": int(seed), "decision_index": decision_index,
+                "goal_direction": _goal_direction_label(initial_goal_delta),
+                "raw_action": json.dumps(info["raw_action"]),
+                "decoded_push_direction_rad": float(info["decoded_push_direction_rad"]),
+                "commanded_after_touch_travel_m": float(info["commanded_after_touch_travel_m"]),
+                "achieved_ee_after_touch_travel_m": float(info["achieved_ee_after_touch_travel_m"]),
+                "cube_delta_xy_m": json.dumps(info["cube_delta_xy_m"]),
+                "contact_established": bool(info["contact_established"]),
+                "ik_failure": bool(info["ik_failure"]),
+                "table_collision": bool(info["table_collision"]),
+                "oob": bool(info["oob"]),
+                "safety_termination": bool(info["safety_termination"]),
+                "pre_settled_goal_distance_m": float(info["pre_settled_goal_distance_m"]),
+                "post_settled_goal_distance_m": float(info["post_settled_goal_distance_m"]),
+                "terminated": bool(terminated), "truncated": bool(truncated),
+            })
             if terminated or truncated: break
-        rows.append({"seed": int(seed), "initial_goal_direction_rad": float(math.atan2(initial_goal_delta[1], initial_goal_delta[0])), "goal_direction": _goal_direction_label(initial_goal_delta), "success": bool(info["success"]), "final_distance_m": float(info["distance_m"]), "episode_steps": int(info["step_count"]), "oob": bool(info.get("oob", False)), "ik_failure": bool(info.get("ik_failure", False)), "table_collision": bool(info.get("table_collision", False)), "episode_return": float(total)})
+        rows.append({"seed": int(seed), "initial_goal_distance_m": float(np.linalg.norm(initial_goal_delta)), "initial_goal_direction_rad": float(math.atan2(initial_goal_delta[1], initial_goal_delta[0])), "goal_direction": _goal_direction_label(initial_goal_delta), "success": bool(info["success"]), "settled_final_position_error_m": float(info["distance_m"]), "final_distance_m": float(info["distance_m"]), "episode_steps": int(info["step_count"]), "termination_reason": str(info["terminated_reason"]), "oob": bool(info.get("oob", False)), "ik_failure": bool(info.get("ik_failure", False)), "table_collision": bool(info.get("table_collision", False)), "episode_return": float(total)})
     distances = np.asarray([r["final_distance_m"] for r in rows], dtype=float)
     metrics = {"success_rate": float(np.mean([r["success"] for r in rows])), "median_final_distance_m": float(np.median(distances)), "p90_final_distance_m": float(np.quantile(distances, 0.9)), "mean_episode_steps": float(np.mean([r["episode_steps"] for r in rows])), "oob_rate": float(np.mean([r["oob"] for r in rows])), "ik_failure_rate": float(np.mean([r["ik_failure"] for r in rows])), "table_collision_rate": float(np.mean([r["table_collision"] for r in rows]))}
-    return metrics, rows
+    return metrics, rows, decision_rows
 
 
 def set_global_seed(seed: int) -> None:
@@ -342,7 +360,7 @@ def train(
             count = int(config["evaluation_episodes"])
             seed_start = int(config["evaluation"]["seed_start"])
             eval_seeds = [seed_start + index for index in range(count)]
-            metrics, episode_rows = evaluate_goal_policy(model, normalizer, env_config, eval_seeds)
+            metrics, episode_rows, decision_rows = evaluate_goal_policy(model, normalizer, env_config, eval_seeds)
             append_csv(
                 output / "evaluations.csv",
                 {"global_step": global_step, **metrics},
@@ -350,6 +368,9 @@ def train(
             detail_path = output / f"evaluation_episodes_step_{global_step:09d}.csv"
             for episode_row in episode_rows:
                 append_csv(detail_path, episode_row)
+            decision_path = output / f"evaluation_decisions_step_{global_step:09d}.csv"
+            for decision_row in decision_rows:
+                append_csv(decision_path, decision_row)
             next_evaluation += int(config["evaluation_interval_steps"])
 
         if global_step >= next_checkpoint or global_step == total_steps:
