@@ -66,7 +66,7 @@ environment:
     grasp_site_position_in_gripper_base_m: [0.0, 0.0, 0.1265]
     strike_tip_radius_m: 0.012
     strike_tip_half_height_m: 0.008
-    strike_tip_axis_world: [0.9911807, 0.0, -0.1325170]
+    strike_tip_axis_world: [0.0, 0.0, -1.0]
     table_clearance_m: 0.001
     approach_gap_m: 0.018
   ik:
@@ -81,7 +81,7 @@ environment:
   robot:
     arm_joint_names: [joint1, joint2, joint3, joint4, joint5, joint6]
     home_joint_positions_rad: [0.0, 1.57, -1.35, 0.0, 0.0, 0.0]
-    gripper_joint_positions_m: {gripper_joint1: 0.022, gripper_joint2: -0.022}
+    gripper_joint_positions_m: {gripper_joint1: 0.025, gripper_joint2: -0.025}
     actuator_stiffness: [80.0, 80.0, 80.0, 40.0, 10.0, 10.0]
     actuator_damping: [5.0, 5.0, 5.0, 5.0, 1.5, 1.5]
     actuator_force_limit: 100.0

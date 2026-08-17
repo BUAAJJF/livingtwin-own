@@ -22,7 +22,7 @@ class PiperGoalPushEnv:
         execution_config = copy.deepcopy(self.config)
         execution_config["sustained_push"] = True
         execution_config["direct_gripper"] = {
-            "marker_above_puck_center_m": 0.0115,
+            "marker_above_puck_center_m": 0.035,
             "exploration_bounds_xy_m": list(execution_config["task"]["workspace_xy_bounds_m"]),
         }
         self.executor = DirectPushEnv(execution_config, friction=float(self.config["task"]["table_friction"][0]))
