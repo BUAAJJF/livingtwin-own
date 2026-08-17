@@ -1,0 +1,88 @@
+schema_version: piperx_goal_push_ppo_v1
+num_envs: 4
+total_environment_steps: 32768
+rollout_steps: 128
+evaluation_interval_steps: 4096
+evaluation_episodes: 64
+checkpoint_interval_steps: 4096
+network:
+  hidden_sizes: [128, 128]
+training:
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  update_epochs: 4
+  minibatch_size: 512
+  value_coefficient: 0.5
+  entropy_coefficient: 0.0
+  maximum_gradient_norm: 0.5
+  target_kl: 0.03
+evaluation:
+  seed_start: 910000
+evaluation_episodes: 64
+environment:
+  asset:
+    root: /home/wenjing/assets/piperx-mjlab
+    source_commit: 71e490c46ae8ffd7c5c70b62ac900f90425e2d1b
+    urdf_relative_path: src/piper_mjlab/assets/agilex_piper_x/piper_x.urdf
+    urdf_sha256: c1bc091b4013eeb72dc4e39c230156f28c517cab3d546138007d99393b281bf6
+    tree_sha256: 3183613f1032099908670c10104c27c684b7129b7cc97c23edbf5a1923bc2fe4
+  task:
+    object_type: box
+    object_halfsize_xyz_m: [0.025, 0.025, 0.025]
+    puck_radius_m: 0.025
+    puck_half_height_m: 0.025
+    puck_mass_kg: 0.60
+    puck_center_xy_m: [0.45, 0.0]
+    table_center_xyz_m: [0.45, 0.0, 0.04]
+    table_half_size_xyz_m: [0.35, 0.35, 0.02]
+    table_friction: [0.40, 0.005, 0.0001]
+    cube_initial_x_range_m: [0.36, 0.54]
+    cube_initial_y_range_m: [-0.16, 0.16]
+    goal_distance_range_m: [0.06, 0.14]
+    goal_xy_m: [0.50, 0.0]
+    workspace_xy_bounds_m: [0.27, 0.63, -0.27, 0.27]
+    precontact_gap_m: 0.012
+    ee_contact_z_m: 0.14
+    success_radius_m: 0.025
+    episode_steps: 80
+  action:
+    delta_xy_scale_m: 0.008
+  control:
+    duration_s: 0.30
+  observation:
+    include_object_velocity: true
+  reward:
+    progress_scale: 10.0
+    success_bonus: 10.0
+    oob_penalty: 5.0
+    safety_penalty: 2.0
+    step_cost: 0.001
+  strike_interface:
+    grasp_site_position_in_gripper_base_m: [0.0, 0.0, 0.1265]
+    strike_tip_radius_m: 0.012
+    strike_tip_half_height_m: 0.008
+    strike_tip_axis_world: [0.9911807, 0.0, -0.1325170]
+    table_clearance_m: 0.001
+    approach_gap_m: 0.018
+  ik:
+    maximum_iterations: 400
+    position_tolerance_m: 0.003
+    orientation_axis_tolerance: 0.20
+    orientation_axis_weight: 0.03
+    damping: 0.0001
+    step_size: 0.5
+    hard_joint_margin_rad: 0.005
+    warning_joint_margin_rad: 0.05
+  robot:
+    arm_joint_names: [joint1, joint2, joint3, joint4, joint5, joint6]
+    home_joint_positions_rad: [0.0, 1.57, -1.35, 0.0, 0.0, 0.0]
+    gripper_joint_positions_m: {gripper_joint1: 0.022, gripper_joint2: -0.022}
+    actuator_stiffness: [80.0, 80.0, 80.0, 40.0, 10.0, 10.0]
+    actuator_damping: [5.0, 5.0, 5.0, 5.0, 1.5, 1.5]
+    actuator_force_limit: 100.0
+    enabled_collision_bodies: [link6, gripper_base]
+  simulation:
+    timestep_s: 0.002
+    gravity_mps2: [0.0, 0.0, -9.81]
