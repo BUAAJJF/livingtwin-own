@@ -49,21 +49,33 @@ class PiperCartesianController:
         if not result["converged"]:
             return {"ik_failure": True, "table_collision": False, "target": target, "position_error_m": float(result["position_error_m"])}
         q_target = np.asarray(result["q"], dtype=np.float64)
+        start_q = self.data.qpos[self.qpos_addr].copy()
         steps = max(1, int(round(float(self.config["control"]["duration_s"]) / self.model.opt.timestep)))
         table_collision = False
         for index in range(steps):
             alpha = (index + 1) / steps
-            self.data.ctrl[:] = (1.0 - alpha) * self.current_q + alpha * q_target
+            self.data.ctrl[:] = (1.0 - alpha) * start_q + alpha * q_target
             mujoco.mj_step(self.model, self.data)
             names = {self.model.geom(int(c.geom1)).name for c in self.data.contact[: self.data.ncon]}
             names |= {self.model.geom(int(c.geom2)).name for c in self.data.contact[: self.data.ncon]}
             if "strike_table" in names and "strike_puck_geom" not in names:
                 table_collision = True
-        self.current_q = q_target
+        settled = False
+        tolerance = float(self.config["ik"]["position_tolerance_m"])
+        for _ in range(4 * steps):
+            self.data.ctrl[:] = q_target
+            mujoco.mj_step(self.model, self.data)
+            if float(np.linalg.norm(self.ee_position() - target)) <= tolerance:
+                settled = True
+                break
+        self.current_q = self.data.qpos[self.qpos_addr].copy()
         return {
-            "ik_failure": False,
+            "ik_failure": not settled,
+            "tracking_failure": not settled,
             "table_collision": table_collision,
             "target": target,
             "position_error_m": float(result["position_error_m"]),
+            "achieved_position_error_m": float(np.linalg.norm(self.ee_position() - target)),
+            "joint_residual_rad": float(np.max(np.abs(self.current_q - q_target))),
             "unexpected_contacts": unexpected_contacts(self.model, self.data),
         }

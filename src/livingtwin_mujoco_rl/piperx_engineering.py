@@ -419,6 +419,8 @@ def solve_strike_ik(
     config: Mapping[str, Any],
     goal: Sequence[float],
     initial_q: Sequence[float],
+    desired_opening_axis_world: Sequence[float] | None = None,
+    desired_tip_axis_world: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     data = mujoco.MjData(model)
     names = config["robot"]["arm_joint_names"]
@@ -429,6 +431,10 @@ def solve_strike_ik(
     site_id = model.site("strike_site").id
     desired_axis = np.asarray(config["strike_interface"]["strike_tip_axis_world"], dtype=np.float64)
     desired_axis = desired_axis / np.linalg.norm(desired_axis)
+    if desired_tip_axis_world is not None:
+        desired_axis = np.asarray(desired_tip_axis_world, dtype=np.float64)
+        desired_axis = desired_axis / np.linalg.norm(desired_axis)
+    desired_opening = None if desired_opening_axis_world is None else np.asarray(desired_opening_axis_world, dtype=np.float64) / np.linalg.norm(desired_opening_axis_world)
     orientation_weight = float(config["ik"]["orientation_axis_weight"])
     iterations = 0
     for iterations in range(1, int(config["ik"]["maximum_iterations"]) + 1):
@@ -437,9 +443,11 @@ def solve_strike_ik(
         position_error = np.asarray(goal, dtype=np.float64) - data.site_xpos[site_id]
         current_axis = data.site_xmat[site_id].reshape(3, 3)[:, 2]
         axis_error = np.cross(current_axis, desired_axis)
+        opening_error = np.zeros(3) if desired_opening is None else np.cross(data.site_xmat[site_id].reshape(3, 3)[:, 1], desired_opening)
         if (
             float(np.linalg.norm(position_error)) <= float(config["ik"]["position_tolerance_m"])
             and float(np.linalg.norm(axis_error)) <= float(config["ik"]["orientation_axis_tolerance"])
+            and float(np.linalg.norm(opening_error)) <= float(config["ik"]["orientation_axis_tolerance"])
         ):
             break
         jacobian_position = np.zeros((3, model.nv))
@@ -448,7 +456,7 @@ def solve_strike_ik(
         jacobian = np.vstack(
             [jacobian_position[:, dof], orientation_weight * jacobian_rotation[:, dof]]
         )
-        error = np.concatenate([position_error, orientation_weight * axis_error])
+        error = np.concatenate([position_error, orientation_weight * (axis_error + opening_error)])
         damping = float(config["ik"]["damping"])
         delta = jacobian.T @ np.linalg.solve(
             jacobian @ jacobian.T + damping * np.eye(6), error
@@ -464,17 +472,20 @@ def solve_strike_ik(
     current_axis = data.site_xmat[site_id].reshape(3, 3)[:, 2]
     dot = float(np.clip(np.dot(current_axis, desired_axis), -1.0, 1.0))
     orientation_error_rad = float(math.acos(dot))
+    opening_error_rad = 0.0 if desired_opening is None else float(math.acos(np.clip(np.dot(data.site_xmat[site_id].reshape(3, 3)[:, 1], desired_opening), -1.0, 1.0)))
     joint_margin = np.minimum(q - ranges[:, 0], ranges[:, 1] - q)
     contacts = unexpected_contacts(model, data)
     return {
         "converged": (
             position_error_m <= float(config["ik"]["position_tolerance_m"])
             and orientation_error_rad <= float(config["ik"]["orientation_axis_tolerance"])
+            and opening_error_rad <= float(config["ik"]["orientation_axis_tolerance"])
         ),
         "q": q,
         "position": data.site_xpos[site_id].copy(),
         "position_error_m": position_error_m,
         "orientation_axis_error_rad": orientation_error_rad,
+        "opening_axis_error_rad": opening_error_rad,
         "iterations": iterations,
         "minimum_joint_margin_rad": float(np.min(joint_margin)),
         "joint_margin_warning": bool(np.min(joint_margin) < float(config["ik"]["warning_joint_margin_rad"])),

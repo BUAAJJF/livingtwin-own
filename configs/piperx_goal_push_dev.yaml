@@ -50,7 +50,7 @@ environment:
     episode_steps: 80
   action:
     delta_xy_scale_m: 0.008
-    max_push_travel_m: 0.033
+    max_push_travel_m: 0.080
     sustained_push_speed_mps: 0.350
   control:
     duration_s: 0.50
@@ -69,6 +69,7 @@ environment:
     strike_tip_axis_world: [0.0, 0.0, -1.0]
     table_clearance_m: 0.001
     approach_gap_m: 0.018
+    closed_pusher_surface_offset_m: 0.011102637
   ik:
     maximum_iterations: 400
     position_tolerance_m: 0.003
@@ -81,7 +82,7 @@ environment:
   robot:
     arm_joint_names: [joint1, joint2, joint3, joint4, joint5, joint6]
     home_joint_positions_rad: [0.0, 1.57, -1.35, 0.0, 0.0, 0.0]
-    gripper_joint_positions_m: {gripper_joint1: 0.025, gripper_joint2: -0.025}
+    gripper_joint_positions_m: {gripper_joint1: 0.0, gripper_joint2: 0.0}
     actuator_stiffness: [80.0, 80.0, 80.0, 40.0, 10.0, 10.0]
     actuator_damping: [5.0, 5.0, 5.0, 5.0, 1.5, 1.5]
     actuator_force_limit: 100.0

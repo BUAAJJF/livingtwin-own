@@ -33,6 +33,10 @@ def build_direct_model(config: Mapping[str, Any]) -> mujoco.MjModel:
     proxy.contype = 0
     proxy.conaffinity = 0
     proxy.group = 5
+    # Non-colliding reference for the measured paired distal mesh center.
+    gripper = spec.body("gripper_base")
+    strike = config["strike_interface"]["grasp_site_position_in_gripper_base_m"]
+    gripper.add_site(name="closed_tip_site", pos=[strike[0], strike[1], strike[2] + 0.0115], size=[0.002, 0.002, 0.002], group=5)
     for body_name in ("gripper_link1", "gripper_link2"):
         body = spec.body(body_name)
         for geom in body.geoms:
@@ -71,6 +75,7 @@ class DirectPushEnv:
         self.puck_qpos = int(self.puck_joint.qposadr[0])
         self.puck_dof = int(self.puck_joint.dofadr[0])
         self.site_id = self.model.site("strike_site").id
+        self.closed_tip_site_id = self.model.site("closed_tip_site").id
         self.table_id = self.model.geom("strike_table").id
         self.puck_id = self.model.geom("strike_puck_geom").id
         self.finger_ids = {
@@ -106,6 +111,18 @@ class DirectPushEnv:
     def puck_v(self) -> np.ndarray:
         return self.data.qvel[self.puck_dof:self.puck_dof + 2].copy()
 
+    def contact_surface(self, center: np.ndarray, direction: np.ndarray) -> np.ndarray:
+        matrix = np.zeros(9); mujoco.mju_quat2Mat(matrix, self.data.qpos[self.puck_qpos + 3:self.puck_qpos + 7])
+        rotation = matrix.reshape(3, 3)[:2, :2]
+        local = rotation.T @ direction
+        half = np.asarray(self.config["task"]["object_halfsize_xyz_m"][:2], dtype=float)
+        return center - rotation @ (local * float(np.min(half / np.maximum(np.abs(local), 1e-12))))
+
+    @staticmethod
+    def opening_axis(direction: np.ndarray) -> np.ndarray:
+        # local-z remains down; local-y is the side-wall tangent for the -x face.
+        return np.asarray([-direction[1], direction[0], 0.0])
+
     def goal(self, center: np.ndarray, direction: np.ndarray, phase: str, magnitude: float) -> np.ndarray:
         task = self.config["task"]
         strike = self.config["strike_interface"]
@@ -114,32 +131,75 @@ class DirectPushEnv:
         # This height was selected from native mesh geometry, not target performance.
         marker_offset = float(self.config.get("direct_gripper", {}).get("marker_above_puck_center_m", 0.0115))
         z = table_z + float(task["puck_half_height_m"]) + marker_offset
-        radius = float(task["puck_radius_m"])
+        surface = self.contact_surface(center, direction)
         gap = float(strike["approach_gap_m"])
         if phase == "pre":
-            xy = center - direction * (radius + gap)
+            xy = surface - direction * gap
             return np.r_[xy, z]
         if phase == "post":
-            xy = center + direction * (radius + magnitude)
+            xy = surface + direction * magnitude
             return np.r_[xy, z]
         if phase == "high":
-            xy = center - direction * (radius + gap + 0.02)
+            xy = surface - direction * (gap + 0.02)
             return np.r_[xy, z + 0.05]
         if phase == "retract":
-            xy = center - direction * (radius + gap + 0.02)
+            xy = surface - direction * (gap + 0.02)
             return np.r_[xy, z + 0.05]
         raise ValueError(phase)
 
-    def solve(self, goal: np.ndarray, seed: np.ndarray, *, orientation: bool = True) -> np.ndarray | None:
+    def solve(self, goal: np.ndarray, seed: np.ndarray, *, orientation: bool = True, direction: np.ndarray | None = None) -> np.ndarray | None:
         solver = solve_strike_ik if orientation else solve_position_ik
-        result = solver(self.model, self.config, goal, seed)
+        kwargs = {} if not orientation or direction is None else {"desired_opening_axis_world": self.opening_axis(direction)}
+        result = solver(self.model, self.config, goal, seed, **kwargs)
+        # A closed symmetric pair admits the equivalent +x-side branch: flipping
+        # local x/y by pi about downward local-z keeps the selected distal side
+        # normal toward the command while swapping identical fingers.
+        if not result["converged"] and orientation and direction is not None:
+            kwargs = {"desired_opening_axis_world": -self.opening_axis(direction)}
+            result = solver(self.model, self.config, goal, seed, **kwargs)
         if not result["converged"]:
             home = np.asarray(self.config["robot"]["home_joint_positions_rad"], dtype=float)
-            result = solver(self.model, self.config, goal, home)
+            result = solver(self.model, self.config, goal, home, **kwargs)
         return np.asarray(result["q"]) if result["converged"] else None
 
-    def move(self, target: np.ndarray, duration: float, trace: list[dict[str, Any]], phase: str) -> None:
-        start = self.current_q.copy()
+    def _actual_q(self) -> np.ndarray:
+        return self.data.qpos[self.qpos_addr].copy()
+
+    def _target_site(self, target: np.ndarray) -> np.ndarray:
+        probe = mujoco.MjData(self.model)
+        set_robot_state(self.model, probe, self.config, target)
+        mujoco.mj_forward(self.model, probe)
+        return probe.site_xpos[self.site_id].copy()
+
+    def closed_side_normal(self, q: np.ndarray, direction: np.ndarray) -> np.ndarray:
+        """Select the symmetric distal +/-x side whose outward normal faces d."""
+        probe = mujoco.MjData(self.model)
+        set_robot_state(self.model, probe, self.config, q)
+        mujoco.mj_forward(self.model, probe)
+        axis = probe.site_xmat[self.site_id].reshape(3, 3)[:, 0]
+        return -axis if float(np.dot(-axis[:2], direction)) >= float(np.dot(axis[:2], direction)) else axis
+
+    def distal_mesh_support(self, q: np.ndarray, direction: np.ndarray) -> tuple[float, np.ndarray]:
+        """Actual paired distal-end mesh support along the planned side-wall normal."""
+        probe = mujoco.MjData(self.model)
+        set_robot_state(self.model, probe, self.config, q)
+        mujoco.mj_forward(self.model, probe)
+        site = probe.site_xpos[self.site_id]
+        rotation = probe.site_xmat[self.site_id].reshape(3, 3)
+        points: list[np.ndarray] = []
+        for geom_id in self.finger_ids.values():
+            mesh = int(self.model.geom_dataid[geom_id]); first = int(self.model.mesh_vertadr[mesh]); count = int(self.model.mesh_vertnum[mesh])
+            vertices = self.model.mesh_vert[first:first + count]
+            world = vertices @ probe.geom_xmat[geom_id].reshape(3, 3).T + probe.geom_xpos[geom_id]
+            local = (world - site) @ rotation
+            distal = world[np.isclose(local[:, 2], np.max(local[:, 2]), atol=1.0e-6)]
+            points.append(distal)
+        distal_points = np.concatenate(points)
+        support = float(np.max((distal_points - site) @ np.r_[direction, 0.0]))
+        return support, np.mean(distal_points, axis=0)
+
+    def move(self, target: np.ndarray, duration: float, trace: list[dict[str, Any]], phase: str) -> dict[str, Any]:
+        start = self._actual_q()
         steps = max(1, round(duration / self.model.opt.timestep))
         for step in range(steps):
             alpha = _smoothstep((step + 1) / steps)
@@ -147,7 +207,22 @@ class DirectPushEnv:
             mujoco.mj_step(self.model, self.data)
             self.time_step_index += 1
             trace.append(self.sample(phase))
-        self.current_q = target.copy()
+        expected = self._target_site(target)
+        tolerance = float(self.config["ik"]["position_tolerance_m"])
+        # Hold until measured convergence, bounded by four existing controller
+        # windows.  The budget is a safety timeout; it is never a success signal.
+        settled = False
+        for _ in range(max(1, round(4.0 * float(self.config["control"]["duration_s"]) / self.model.opt.timestep))):
+            self.data.ctrl[:] = target
+            mujoco.mj_step(self.model, self.data)
+            self.time_step_index += 1
+            trace.append(self.sample(phase))
+            if float(np.linalg.norm(self.data.site_xpos[self.site_id] - expected)) <= tolerance:
+                settled = True
+                break
+        actual = self.data.site_xpos[self.site_id].copy()
+        self.current_q = self._actual_q()
+        return {"settled": settled, "target_site": expected, "actual_site": actual, "position_residual_m": float(np.linalg.norm(actual - expected)), "joint_residual_rad": float(np.max(np.abs(self.current_q - target)))}
 
     def move_push_after_touch(
         self,
@@ -158,7 +233,7 @@ class DirectPushEnv:
         after_touch_displacement: float,
     ) -> dict[str, Any]:
         """Stop the existing push path after a fixed EE displacement from first contact."""
-        start = self.current_q.copy()
+        start = self._actual_q()
         steps = max(1, round(duration / self.model.opt.timestep))
         first_contact_site: np.ndarray | None = None
         achieved = 0.0
@@ -177,16 +252,56 @@ class DirectPushEnv:
             if first_contact_site is not None:
                 achieved = float(np.dot(site_xy - first_contact_site, direction))
                 if achieved >= after_touch_displacement:
-                    self.current_q = command.copy()
+                    self.current_q = self._actual_q()
                     reached = True
                     break
         if not reached:
-            self.current_q = target.copy()
+            # The commanded Cartesian endpoint is unchanged; continue holding it
+            # until the measured after-touch displacement is reached or the same
+            # bounded execution budget used by the other phases expires.
+            for _ in range(max(1, round(4.0 * float(self.config["control"]["duration_s"]) / self.model.opt.timestep))):
+                self.data.ctrl[:] = target
+                mujoco.mj_step(self.model, self.data)
+                self.time_step_index += 1
+                sample = self.sample("push")
+                trace.append(sample)
+                site_xy = np.asarray([sample["site_x"], sample["site_y"]], dtype=float)
+                if first_contact_site is None and sample["finger_puck"]:
+                    first_contact_site = site_xy.copy()
+                if first_contact_site is not None:
+                    achieved = float(np.dot(site_xy - first_contact_site, direction))
+                    if achieved >= after_touch_displacement:
+                        reached = True
+                        break
+        if not reached:
+            self.current_q = self._actual_q()
         return {
             "first_contact_detected": first_contact_site is not None,
             "after_touch_displacement_achieved_m": achieved,
             "after_touch_displacement_reached": reached,
         }
+
+    def move_until_contact(self, target: np.ndarray, duration: float, trace: list[dict[str, Any]]) -> bool:
+        """Bounded acquisition stroke; first physical finger contact defines push start."""
+        start = self._actual_q()
+        steps = max(1, round(duration / self.model.opt.timestep))
+        for step in range(steps):
+            alpha = _smoothstep((step + 1) / steps)
+            self.data.ctrl[:] = (1.0 - alpha) * start + alpha * target
+            mujoco.mj_step(self.model, self.data); self.time_step_index += 1
+            trace.append(self.sample("contact"))
+            if trace[-1]["finger_puck"]:
+                self.current_q = self._actual_q()
+                return True
+        for _ in range(max(1, round(4.0 * float(self.config["control"]["duration_s"]) / self.model.opt.timestep))):
+            self.data.ctrl[:] = target
+            mujoco.mj_step(self.model, self.data); self.time_step_index += 1
+            trace.append(self.sample("contact"))
+            if trace[-1]["finger_puck"]:
+                self.current_q = self._actual_q()
+                return True
+        self.current_q = self._actual_q()
+        return False
 
     def sample(self, phase: str) -> dict[str, Any]:
         finger1_puck = pair_contact(self.model, self.data, {self.finger_ids["gripper_link1_collision_1"]}, {self.puck_id})
@@ -232,14 +347,19 @@ class DirectPushEnv:
                 "command_direction_rad": float(direction_rad), "command_magnitude_m": float(magnitude),
                 "command_speed_mps": float(speed),
             }, []
-        pre_q = self.solve(self.goal(center, unit, "pre", magnitude), high_q)
-        post_q = self.solve(self.goal(center, unit, "post", magnitude), pre_q if pre_q is not None else high_q)
-        retract_q = self.solve(
-            self.goal(center, unit, "retract", magnitude),
-            post_q if post_q is not None else high_q,
-            orientation=False,
-        )
-        if any(q is None for q in (pre_q, post_q, retract_q)):
+        surface = self.contact_surface(center, unit)
+        pre_q = self.solve(self.goal(center, unit, "pre", magnitude), high_q, direction=unit)
+        if pre_q is None:
+            return {"unrecoverable": True, "reason": "pre_ik"}, []
+        support, _ = self.distal_mesh_support(pre_q, unit)
+        contact_z = self.goal(center, unit, "pre", magnitude)[2]
+        pre_q = self.solve(np.r_[surface - unit * (support + float(self.config["strike_interface"]["approach_gap_m"])), contact_z], pre_q, direction=unit)
+        if pre_q is None:
+            return {"unrecoverable": True, "reason": "mesh_pre_ik"}, []
+        support, _ = self.distal_mesh_support(pre_q, unit)
+        contact_goal = np.r_[surface - unit * support + unit * float(self.config["ik"]["position_tolerance_m"]), contact_z]
+        contact_q = self.solve(contact_goal, pre_q, direction=unit)
+        if any(q is None for q in (pre_q, contact_q)):
             return {
                 "unrecoverable": True, "reason": "push_ik",
                 "puck_before_x": float(center[0]), "puck_before_y": float(center[1]),
@@ -247,16 +367,28 @@ class DirectPushEnv:
                 "command_speed_mps": float(speed),
             }, []
         trace: list[dict[str, Any]] = []
-        self.move(high_q, 0.30, trace, "reposition_high")
-        self.move(pre_q, 0.18, trace, "approach")
-        path = float(np.linalg.norm(self.goal(center, unit, "post", magnitude) - self.goal(center, unit, "pre", magnitude)))
+        high_tracking = self.move(high_q, 0.30, trace, "reposition_high")
+        if not high_tracking["settled"]:
+            return {"unrecoverable": True, "reason": "high_tracking", "tracking": high_tracking}, trace
+        pre_tracking = self.move(pre_q, 0.18, trace, "approach")
+        if not pre_tracking["settled"]:
+            return {"unrecoverable": True, "reason": "pre_tracking", "tracking": pre_tracking}, trace
+        if not self.move_until_contact(contact_q, 0.18, trace):
+            return {"unrecoverable": True, "reason": "contact_not_established"}, trace
+        endpoint = self.data.site_xpos[self.site_id].copy() + np.r_[unit * float(magnitude), 0.0]
+        post_q = self.solve(endpoint, self.current_q, direction=unit)
+        if post_q is None:
+            return {"unrecoverable": True, "reason": "after_touch_ik"}, trace
+        path = float(magnitude)
         after_touch_displacement = (
             float(magnitude)
             if self.config.get("sustained_push", False)
             else self.config.get("direct_gripper", {}).get("contact_after_touch_displacement_m")
         )
         if after_touch_displacement is None:
-            self.move(post_q, max(0.06, path / speed), trace, "push")
+            push_tracking = self.move(post_q, max(0.06, path / speed), trace, "push")
+            if not push_tracking["settled"]:
+                return {"unrecoverable": True, "reason": "push_tracking", "tracking": push_tracking}, trace
             contact_standardization = {
                 "first_contact_detected": False,
                 "after_touch_displacement_achieved_m": float("nan"),
@@ -270,7 +402,12 @@ class DirectPushEnv:
                 unit,
                 float(after_touch_displacement),
             )
-        self.move(retract_q, 0.12, trace, "retract")
+        retract_q = self.solve(self.goal(center, unit, "retract", magnitude), self.current_q, orientation=False)
+        if retract_q is None:
+            return {"unrecoverable": True, "reason": "retract_ik"}, trace
+        retract_tracking = self.move(retract_q, 0.12, trace, "retract")
+        if not retract_tracking["settled"]:
+            return {"unrecoverable": True, "reason": "retract_tracking", "tracking": retract_tracking}, trace
         settle_steps = 0
         while settle_steps < round(2.0 / self.model.opt.timestep):
             self.data.ctrl[:] = retract_q
