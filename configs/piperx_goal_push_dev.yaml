@@ -1,4 +1,4 @@
-schema_version: piperx_goal_push_ppo_v1
+schema_version: piperx_goal_push_ppo_v2
 num_envs: 4
 total_environment_steps: 131072
 rollout_steps: 128
@@ -57,11 +57,11 @@ environment:
   observation:
     include_object_velocity: true
   reward:
-    progress_scale: 10.0
-    success_bonus: 10.0
-    oob_penalty: 5.0
-    safety_penalty: 2.0
-    step_cost: 0.001
+    log_distance_epsilon_m: 0.005
+    step_cost: 0.01
+    success_bonus: 1.0
+    execution_failure_penalty: 1.0
+    unsafe_termination_penalty: 2.0
   strike_interface:
     grasp_site_position_in_gripper_base_m: [0.0, 0.0, 0.1265]
     strike_tip_radius_m: 0.012

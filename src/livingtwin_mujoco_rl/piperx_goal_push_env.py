@@ -56,29 +56,51 @@ class PiperGoalPushEnv:
         return (2.0 * (q - self.joint_ranges[:, 0]) / (self.joint_ranges[:, 1] - self.joint_ranges[:, 0]) - 1.0).astype(np.float32)
 
     def _decode_action(self, action: Sequence[float]) -> dict[str, Any]:
-        """Map a bounded local vector to one short sustained push or a no-op.
-
-        ``action[0]`` is goal-forward and ``action[1]`` is goal-left.  The
-        vector angle selects the approach/push direction; its clipped Euclidean
-        norm maps continuously from zero to the configured push-travel cap.
-        """
+        """Decode independent goal-relative angle and absolute travel controls."""
         local = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-        norm = min(float(np.linalg.norm(local)), 1.0)
-        if norm == 0.0:
-            return {"no_op": True, "local_action": local.tolist()}
         forward = self.goal - self._object_xy()
         forward /= max(float(np.linalg.norm(forward)), 1.0e-9)
         lateral = np.asarray([-forward[1], forward[0]], dtype=np.float64)
-        direction = local[0] * forward + local[1] * lateral
+        direction_offset = float(local[0]) * (math.pi / 2.0)
+        direction = math.cos(direction_offset) * forward + math.sin(direction_offset) * lateral
         direction /= max(float(np.linalg.norm(direction)), 1.0e-9)
+        travel = float(self.config["action"]["max_push_travel_m"]) * (float(local[1]) + 1.0) / 2.0
         return {
-            "no_op": False,
+            # Exact -1 is an interface limit of tanh; no finite-output deadzone
+            # is introduced solely to manufacture a no-op.
+            "no_op": bool(travel == 0.0),
             "local_action": local.tolist(),
+            "action_theta": float(local[0]),
+            "action_magnitude": float(local[1]),
+            "direction_offset_rad": direction_offset,
+            "direction_offset_deg": float(math.degrees(direction_offset)),
+            "goal_forward_alignment": float(math.cos(direction_offset)),
             "direction": direction,
             "direction_rad": float(math.atan2(direction[1], direction[0])),
-            "travel_m": float(norm * self.config["action"]["max_push_travel_m"]),
+            "travel_m": travel,
             "speed_mps": float(self.config["action"]["sustained_push_speed_mps"]),
         }
+
+    @staticmethod
+    def _reward_terms(
+        reward_config: Mapping[str, Any],
+        *,
+        distance_before: float,
+        distance_after: float,
+        success: bool,
+        execution_failure: bool,
+        unsafe_termination: bool,
+    ) -> dict[str, float]:
+        epsilon = float(reward_config["log_distance_epsilon_m"])
+        progress = math.log((distance_before + epsilon) / (distance_after + epsilon))
+        total = progress - float(reward_config["step_cost"])
+        if success:
+            total += float(reward_config["success_bonus"])
+        if execution_failure:
+            total -= float(reward_config["execution_failure_penalty"])
+        if unsafe_termination:
+            total -= float(reward_config["unsafe_termination_penalty"])
+        return {"progress": progress, "total": total}
 
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         if seed is not None:
@@ -127,17 +149,21 @@ class PiperGoalPushEnv:
         oob = bool(result.get("oob", False) or not (lo_x <= obj[0] <= hi_x and lo_y <= obj[1] <= hi_y))
         ik_failure = bool(result.get("unrecoverable", False))
         table_collision = bool(result.get("gripper_table_contact", False))
-        failure = bool(ik_failure or table_collision or result.get("numerical_anomaly", False))
+        numerical_failure = bool(result.get("numerical_anomaly", False))
+        failure = bool(ik_failure or table_collision or numerical_failure)
         success = after <= float(self.config["task"]["success_radius_m"])
         timeout = self.step_count >= int(self.config["task"]["episode_steps"])
         terminated = bool(success or oob or failure)
         truncated = bool(timeout and not terminated)
-        reward = float(self.config["reward"]["progress_scale"]) * (before - after) + float(self.config["reward"]["success_bonus"]) * success
-        if oob:
-            reward -= float(self.config["reward"]["oob_penalty"])
-        if failure:
-            reward -= float(self.config["reward"]["safety_penalty"])
-        reward -= float(self.config["reward"]["step_cost"])
+        reward_terms = self._reward_terms(
+            self.config["reward"],
+            distance_before=before,
+            distance_after=after,
+            success=success,
+            execution_failure=ik_failure,
+            unsafe_termination=bool(oob or table_collision),
+        )
+        reward = reward_terms["total"]
         reason = "success" if success else "oob" if oob else "safety_failure" if failure else "timeout" if timeout else "running"
         self.last_info = {
             "ik_failure": ik_failure, "push_ik_failure": ik_failure,
@@ -147,6 +173,10 @@ class PiperGoalPushEnv:
             "safety_termination": failure, "action_no_op": bool(decoded["no_op"]),
             "executed_push": {key: value for key, value in decoded.items() if key != "direction"},
             "raw_action": np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0).tolist(),
+            "action_theta": float(decoded.get("action_theta", 0.0)),
+            "action_magnitude": float(decoded.get("action_magnitude", -1.0)),
+            "direction_offset_deg": float(decoded.get("direction_offset_deg", 0.0)),
+            "goal_forward_alignment": float(decoded.get("goal_forward_alignment", 1.0)),
             "decoded_push_direction_rad": float(decoded.get("direction_rad", float("nan"))),
             "commanded_after_touch_travel_m": float(decoded.get("travel_m", 0.0)),
             "achieved_ee_after_touch_travel_m": float(result.get("contact_after_touch_displacement_achieved_m", 0.0)),
@@ -155,5 +185,6 @@ class PiperGoalPushEnv:
             "pre_settled_goal_distance_m": before,
             "post_settled_goal_distance_m": after,
             "contact_duration_s": float(result.get("contact_duration_s", 0.0)),
+            "reward_log_progress": float(reward_terms["progress"]),
         }
         return self.observation(), reward, terminated, truncated, self.info(success, reason)

@@ -49,6 +49,10 @@ def evaluate_goal_policy(model: ActorCritic, normalizer: RunningMeanStd, config:
                 "seed": int(seed), "decision_index": decision_index,
                 "goal_direction": _goal_direction_label(initial_goal_delta),
                 "raw_action": json.dumps(info["raw_action"]),
+                "action_theta": float(info["action_theta"]),
+                "action_magnitude": float(info["action_magnitude"]),
+                "direction_offset_deg": float(info["direction_offset_deg"]),
+                "goal_forward_alignment": float(info["goal_forward_alignment"]),
                 "decoded_push_direction_rad": float(info["decoded_push_direction_rad"]),
                 "commanded_after_touch_travel_m": float(info["commanded_after_touch_travel_m"]),
                 "achieved_ee_after_touch_travel_m": float(info["achieved_ee_after_touch_travel_m"]),
@@ -60,6 +64,7 @@ def evaluate_goal_policy(model: ActorCritic, normalizer: RunningMeanStd, config:
                 "safety_termination": bool(info["safety_termination"]),
                 "pre_settled_goal_distance_m": float(info["pre_settled_goal_distance_m"]),
                 "post_settled_goal_distance_m": float(info["post_settled_goal_distance_m"]),
+                "reward_log_progress": float(info["reward_log_progress"]),
                 "terminated": bool(terminated), "truncated": bool(truncated),
             })
             if terminated or truncated: break
