@@ -356,6 +356,26 @@ def object_airborne(
   return (z - height).clamp_min(0.0)
 
 
+def object_outside_box(
+  env: "ManagerBasedRlEnv",
+  object_name: str,
+  x_range: tuple[float, float],
+  y_range: tuple[float, float],
+) -> torch.Tensor:
+  """How far the cube has strayed past the region goals can be placed in.
+
+  Termination alone is a cliff with no slope leading up to it: by the time it
+  fires the cube is already gone.  This charges for the overshoot itself, so
+  there is a gradient pushing the policy to keep the cube where it can still
+  work with it.
+  """
+  obj: Entity = env.scene[object_name]
+  pos = obj.data.root_link_pos_w - env.scene.env_origins
+  over_x = (x_range[0] - pos[:, 0]).clamp_min(0.0) + (pos[:, 0] - x_range[1]).clamp_min(0.0)
+  over_y = (y_range[0] - pos[:, 1]).clamp_min(0.0) + (pos[:, 1] - y_range[1]).clamp_min(0.0)
+  return over_x + over_y
+
+
 def link_below_height(
   env: "ManagerBasedRlEnv", min_height: float, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:

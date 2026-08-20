@@ -253,7 +253,14 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=-20.0,
       params={"min_height": 0.02, "asset_cfg": ghost_links()},
     ),
-    "terminated": RewardTermCfg(func=mdp.is_terminated, weight=-100.0),
+    "cube_past_goals": RewardTermCfg(
+      func=push_mdp.object_outside_box,
+      weight=-15.0,
+      params={"object_name": CUBE, "x_range": GOAL_BOUNDS_X, "y_range": GOAL_BOUNDS_Y},
+    ),
+    # Losing the cube used to cost -2.0, exactly one goal, against the ~20 a
+    # good episode banks -- so being reckless at the boundary was nearly free.
+    "terminated": RewardTermCfg(func=mdp.is_terminated, weight=-500.0),
   }
 
   terminations = {
@@ -264,10 +271,13 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       # them lands where the arm cannot get behind it any more, and with no
       # episode timeout in play mode it would sit there forever; ending the
       # episode instead makes losing the cube cost something.
+      # Wider than the goal box by more than one push length, so a single
+      # overshoot is recoverable; cube_past_goals supplies the pressure to
+      # come back before it gets this far.
       params={
         "object_name": CUBE,
-        "x_range": (0.24, 0.56),
-        "y_range": (-0.26, 0.26),
+        "x_range": (0.22, 0.60),
+        "y_range": (-0.28, 0.28),
         "z_max": 0.20,
       },
     ),
