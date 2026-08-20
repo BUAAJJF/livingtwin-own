@@ -57,6 +57,9 @@ class PushCommandCfg(LiftingCommandCfg):
   dwell_steps: int = 3
   """Consecutive in-radius steps required before a goal counts as reached."""
   resample_on_success: bool = True
+  stall_timeout_s: float = 4.0
+  """How long without completing a goal counts as stalled.  Healthy play
+  completes one every 0.3 s, so this only fires on genuine failure."""
 
   def __post_init__(self) -> None:
     if self.min_goal_separation <= self.success_threshold:
@@ -97,8 +100,22 @@ class PushCommand(LiftingCommand):
     self.goals_completed = zeros.clone()
     self._dwell = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
     self._resetting = False
+    # Counted off the global step counter rather than accumulated locally:
+    # _update_metrics also runs on the reset path, so a local accumulator
+    # would advance twice on any step where some env resets.
+    self._last_goal_step = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+    self.metrics["idle_time"] = zeros.clone()
     self.metrics["planar_error"] = zeros.clone()
     self.metrics["goals_completed"] = self.goals_completed
+
+  @property
+  def idle_time(self) -> torch.Tensor:
+    """Seconds since this env last completed a goal (or was reset)."""
+    steps = self._env.common_step_counter - self._last_goal_step
+    return steps.clamp_min(0).float() * self._env.step_dt
+
+  def stall_phase(self) -> torch.Tensor:
+    return (self.idle_time / max(self.cfg.stall_timeout_s, 1e-6)).clamp(0.0, 1.0)
 
   def _cube_xy_local(self) -> torch.Tensor:
     return (self.object.data.root_link_pos_w - self._env.scene.env_origins)[:, :2]
@@ -125,9 +142,12 @@ class PushCommand(LiftingCommand):
       # zeroing it here resamples within the very same step.
       self.time_left[hit] = 0.0
 
+    self._last_goal_step[hit] = self._env.common_step_counter
+
     self.metrics["planar_error"] = error
     self.metrics["at_goal"] = inside.float()
     self.metrics["goals_completed"] = self.goals_completed
+    self.metrics["idle_time"] = self.idle_time
 
   def _place_cube(self, env_ids: torch.Tensor) -> torch.Tensor:
     """Drop the cube at a fresh pose and return its local xy."""
@@ -217,6 +237,7 @@ class PushCommand(LiftingCommand):
     self.just_succeeded[env_ids] = 0.0
     self.goals_completed[env_ids] = 0.0
     self._dwell[env_ids] = 0
+    self._last_goal_step[env_ids] = self._env.common_step_counter
     return extras
 
   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
@@ -267,6 +288,16 @@ def object_lin_vel_b(
   robot: Entity = env.scene[asset_cfg.name]
   obj: Entity = env.scene[object_name]
   return quat_apply(quat_inv(robot.data.root_link_quat_w), obj.data.root_link_lin_vel_w)
+
+
+def stall_phase(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """How close this env is to being declared stalled.
+
+  Without it the stall termination would be invisible to the policy and the
+  MDP would stop being Markov in exactly the dimension that ends the episode.
+  """
+  command = cast(PushCommand, env.command_manager.get_term(command_name))
+  return command.stall_phase().unsqueeze(-1)
 
 
 def goal_phase(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
@@ -415,6 +446,16 @@ def link_below_height(
 ##
 # Terminations.
 ##
+
+
+def stalled(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """No goal completed for stall_timeout_s.
+
+  A stalled arm is motionless in a state the policy has no answer for, and
+  nothing in the dynamics ever clears it -- so the episode has to.
+  """
+  command = cast(PushCommand, env.command_manager.get_term(command_name))
+  return command.idle_time > command.cfg.stall_timeout_s
 
 
 def object_out_of_bounds(

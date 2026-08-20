@@ -99,6 +99,9 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # The goal resamples on a timer, so without the remaining phase the value
     # function cannot tell a fresh goal from one about to expire.
     "goal_phase": ObservationTermCfg(func=push_mdp.goal_phase, params={"command_name": GOAL}),
+    # The stall termination ends the episode; hiding its timer from the policy
+    # would make the MDP non-Markov in exactly that dimension.
+    "stall_phase": ObservationTermCfg(func=push_mdp.stall_phase, params={"command_name": GOAL}),
     "actions": ObservationTermCfg(func=mdp.last_action),
   }
 
@@ -128,6 +131,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       min_goal_separation=0.06,
       dwell_steps=3,
       resample_on_success=True,
+      stall_timeout_s=4.0,
       goal_z=CUBE_HALF_SIZE,
       cube_clearance_m=0.12,
       cube_spawn_x=CUBE_SPAWN_X,
@@ -283,6 +287,13 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "y_range": (-0.28, 0.28),
         "z_max": 0.20,
       },
+    ),
+    # A stalled arm sits motionless in a state it has no answer for, and the
+    # dynamics never clear it. Ending the episode both frees the env and makes
+    # the failure cost something, which is what gives the policy a reason to
+    # avoid the state at all.
+    "stalled": TerminationTermCfg(
+      func=push_mdp.stalled, params={"command_name": GOAL}
     ),
     "nan": TerminationTermCfg(func=mdp.nan_detection),
   }
