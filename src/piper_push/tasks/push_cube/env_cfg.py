@@ -55,8 +55,8 @@ GOAL = "push_goal"
 
 # Where the cube may start and where goals may be placed.  Both sit well inside
 # the PiPER-X's ~0.62 m reach so that a goal is never unreachable.
-CUBE_SPAWN_X = (0.32, 0.48)
-CUBE_SPAWN_Y = (-0.15, 0.15)
+CUBE_SPAWN_X = (0.29, 0.51)
+CUBE_SPAWN_Y = (-0.19, 0.19)
 GOAL_BOUNDS_X = (0.28, 0.52)
 GOAL_BOUNDS_Y = (-0.20, 0.20)
 
@@ -129,6 +129,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       dwell_steps=3,
       resample_on_success=True,
       goal_z=CUBE_HALF_SIZE,
+      cube_clearance_m=0.12,
       cube_spawn_x=CUBE_SPAWN_X,
       cube_spawn_y=CUBE_SPAWN_Y,
       goal_radius_range=(0.07, 0.16),
@@ -149,7 +150,9 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=mdp.reset_joints_by_offset,
       mode="reset",
       params={
-        "position_range": (-0.05, 0.05),
+        # Wide on purpose: a narrow spread means every episode starts from the
+        # same posture, and the policy has no idea what to do anywhere else.
+        "position_range": (-0.3, 0.3),
         "velocity_range": (0.0, 0.0),
         # Arm joints only, so the gripper stays exactly shut.
         "asset_cfg": arm(),

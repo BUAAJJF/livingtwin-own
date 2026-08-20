@@ -44,6 +44,9 @@ class PushCommandCfg(LiftingCommandCfg):
   """Height of the goal marker: the cube's centre when it rests on the table."""
   cube_spawn_x: tuple[float, float] = (0.34, 0.46)
   cube_spawn_y: tuple[float, float] = (-0.12, 0.12)
+  cube_clearance_m: float = 0.12
+  """Keep the cube this far from the gripper at reset, so a randomised arm
+  posture does not start inside the cube and fling it."""
   goal_radius_range: tuple[float, float] = (0.06, 0.16)
   """How far ahead of the cube a new goal is placed."""
   goal_bounds_x: tuple[float, float] = (0.28, 0.52)
@@ -87,6 +90,8 @@ class PushCommand(LiftingCommand):
     # The base class teleports the object on every resample when this is set.
     cfg.object_pose_range = None
     super().__init__(cfg, env)
+    self._robot: Entity = env.scene["robot"]
+    self._ee_site = self._robot.find_sites(("grasp_site",))[0]
     zeros = torch.zeros(self.num_envs, device=self.device)
     self.just_succeeded = zeros.clone()
     self.goals_completed = zeros.clone()
@@ -133,7 +138,23 @@ class PushCommand(LiftingCommand):
     upper = torch.tensor(
       [self.cfg.cube_spawn_x[1], self.cfg.cube_spawn_y[1]], device=self.device
     )
+    # The arm was randomised by a reset event moments ago, but derived
+    # quantities only refresh on the next forward(); ask for one so the
+    # clearance test below sees where the gripper actually is.
+    self._env.sim.forward()
+    ee_xy = (
+      self._robot.data.site_pos_w[:, self._ee_site].squeeze(1)
+      - self._env.scene.env_origins
+    )[env_ids, :2]
+
     xy = sample_uniform(lower, upper, (count, 2), device=self.device)
+    for _ in range(4):
+      too_close = torch.norm(xy - ee_xy, dim=-1) < self.cfg.cube_clearance_m
+      if not bool(too_close.any()):
+        break
+      retry = sample_uniform(lower, upper, (count, 2), device=self.device)
+      xy = torch.where(too_close.unsqueeze(-1), retry, xy)
+
     # A hair above the half-extent so it settles instead of interpenetrating.
     z = torch.full((count, 1), self.cfg.goal_z + 1e-4, device=self.device)
     yaw = sample_uniform(-math.pi, math.pi, (count,), device=self.device)
