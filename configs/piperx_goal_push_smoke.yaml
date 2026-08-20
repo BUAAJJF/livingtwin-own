@@ -22,7 +22,7 @@ evaluation:
   seed_start: 910000
 environment:
   asset:
-    root: /home/wenjing/assets/piperx-mjlab
+    root: piperx-mjlab
     source_commit: 71e490c46ae8ffd7c5c70b62ac900f90425e2d1b
     urdf_relative_path: src/piper_mjlab/assets/agilex_piper_x/piper_x.urdf
     urdf_sha256: c1bc091b4013eeb72dc4e39c230156f28c517cab3d546138007d99393b281bf6

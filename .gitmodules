@@ -1,0 +1,3 @@
+[submodule "piperx-mjlab"]
+	path = piperx-mjlab
+url = git@github.com:orcabotics/piperx-mjlab.git
