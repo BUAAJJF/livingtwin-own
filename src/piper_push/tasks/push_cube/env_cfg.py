@@ -255,6 +255,14 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=-20.0,
       params={"object_name": CUBE, "height": 0.055},
     ),
+    # Pushing happens at ee z ~ 0.03 m and the 99th percentile of healthy play
+    # is 0.16 m, so 0.25 m is clear of anything useful and well below the
+    # ~0.45 m the arm settles at when it has flung itself.
+    "ee_too_high": RewardTermCfg(
+      func=push_mdp.ee_above_height,
+      weight=-25.0,
+      params={"max_height": 0.25, "asset_cfg": ee()},
+    ),
     "arm_below_table": RewardTermCfg(
       func=push_mdp.link_below_height,
       weight=-20.0,

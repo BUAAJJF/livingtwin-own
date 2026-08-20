@@ -428,6 +428,21 @@ def object_outside_box(
   return over_x + over_y
 
 
+def ee_above_height(
+  env: "ManagerBasedRlEnv", max_height: float, asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+  """How far the gripper has risen above the height pushing happens at.
+
+  There was a floor penalty but no ceiling, and nothing else bounds the working
+  volume. A fast push ends with the cube sliding away and the load vanishing,
+  and the arm carries on along its commanded trajectory into a pose it has no
+  business being in; from there it never comes back.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  z = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)[:, 2] - env.scene.env_origins[:, 2]
+  return (z - max_height).clamp_min(0.0)
+
+
 def link_below_height(
   env: "ManagerBasedRlEnv", min_height: float, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
