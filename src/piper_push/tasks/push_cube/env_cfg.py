@@ -9,8 +9,6 @@ being fast is simply that more goals fit in the same wall clock.
 
 from __future__ import annotations
 
-import math
-
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import dr
@@ -25,8 +23,8 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
+from mjlab.envs import mdp
 from mjlab.tasks.manipulation import mdp as manip_mdp
-from mjlab.tasks.velocity import mdp
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
@@ -35,11 +33,22 @@ from piper_push import robot as piper
 from piper_push.cube import CUBE_HALF_SIZE, get_cube_spec
 from piper_push.tasks.push_cube import mdp as push_mdp
 
-ROBOT = SceneEntityCfg("robot")
-ARM = SceneEntityCfg("robot", joint_names=piper.ARM_JOINT_EXPR)
-ARM_ACTUATORS = SceneEntityCfg("robot", actuator_names=piper.ARM_JOINT_EXPR)
-EE = SceneEntityCfg("robot", site_names=piper.GRASP_SITE)
-GHOSTS = SceneEntityCfg("robot", body_names=piper.GHOST_LINKS)
+# SceneEntityCfg.resolve() fills ids in place, so each term gets a fresh one
+# rather than sharing a single mutated instance.
+def arm() -> SceneEntityCfg:
+  return SceneEntityCfg("robot", joint_names=piper.ARM_JOINT_EXPR)
+
+
+def arm_actuators() -> SceneEntityCfg:
+  return SceneEntityCfg("robot", actuator_names=piper.ARM_JOINT_EXPR)
+
+
+def ee() -> SceneEntityCfg:
+  return SceneEntityCfg("robot", site_names=piper.GRASP_SITE)
+
+
+def ghost_links() -> SceneEntityCfg:
+  return SceneEntityCfg("robot", body_names=piper.GHOST_LINKS)
 
 CUBE = "cube"
 GOAL = "push_goal"
@@ -59,13 +68,13 @@ STEPS_PER_ITERATION = 32
 def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   actor_terms = {
     "joint_pos": ObservationTermCfg(
-      func=mdp.joint_pos_rel, params={"asset_cfg": ARM}, noise=Unoise(n_min=-0.01, n_max=0.01)
+      func=mdp.joint_pos_rel, params={"asset_cfg": arm()}, noise=Unoise(n_min=-0.01, n_max=0.01)
     ),
     "joint_vel": ObservationTermCfg(
-      func=mdp.joint_vel_rel, params={"asset_cfg": ARM}, noise=Unoise(n_min=-0.5, n_max=0.5)
+      func=mdp.joint_vel_rel, params={"asset_cfg": arm()}, noise=Unoise(n_min=-0.5, n_max=0.5)
     ),
     "ee_pose": ObservationTermCfg(
-      func=push_mdp.ee_pose_b, params={"asset_cfg": EE}, noise=Unoise(n_min=-0.005, n_max=0.005)
+      func=push_mdp.ee_pose_b, params={"asset_cfg": ee()}, noise=Unoise(n_min=-0.005, n_max=0.005)
     ),
     "cube_pose": ObservationTermCfg(
       func=push_mdp.object_pose_b,
@@ -79,7 +88,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
     "ee_to_cube": ObservationTermCfg(
       func=manip_mdp.ee_to_object_distance,
-      params={"object_name": CUBE, "asset_cfg": EE},
+      params={"object_name": CUBE, "asset_cfg": ee()},
       noise=Unoise(n_min=-0.005, n_max=0.005),
     ),
     "cube_to_goal": ObservationTermCfg(
@@ -120,6 +129,8 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       dwell_steps=3,
       resample_on_success=True,
       goal_z=CUBE_HALF_SIZE,
+      cube_spawn_x=CUBE_SPAWN_X,
+      cube_spawn_y=CUBE_SPAWN_Y,
       goal_radius_range=(0.07, 0.16),
       goal_bounds_x=GOAL_BOUNDS_X,
       goal_bounds_y=GOAL_BOUNDS_Y,
@@ -141,22 +152,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "position_range": (-0.05, 0.05),
         "velocity_range": (0.0, 0.0),
         # Arm joints only, so the gripper stays exactly shut.
-        "asset_cfg": ARM,
-      },
-    ),
-    "reset_cube": EventTermCfg(
-      func=mdp.reset_root_state_uniform,
-      mode="reset",
-      params={
-        "pose_range": {
-          "x": CUBE_SPAWN_X,
-          "y": CUBE_SPAWN_Y,
-          # Half-extent plus a hair, so it settles instead of interpenetrating.
-          "z": (CUBE_HALF_SIZE + 1e-4, CUBE_HALF_SIZE + 1e-4),
-          "yaw": (-math.pi, math.pi),
-        },
-        "velocity_range": {},
-        "asset_cfg": SceneEntityCfg(CUBE),
+        "asset_cfg": arm(),
       },
     ),
     # Startup-only randomisation: paid once, never in the hot loop.
@@ -208,7 +204,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "object_name": CUBE,
         "reaching_std": 0.15,
         "bringing_std": 0.15,
-        "asset_cfg": EE,
+        "asset_cfg": ee(),
       },
     ),
     "push_alignment": RewardTermCfg(
@@ -218,7 +214,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "command_name": GOAL,
         "object_name": CUBE,
         "contact_std": 0.08,
-        "asset_cfg": EE,
+        "asset_cfg": ee(),
       },
     ),
     # -- energy -------------------------------------------------------------
@@ -226,14 +222,14 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # anywhere in this model, so holding still is free (tau != 0 but qdot == 0)
     # and only actual mechanical work is charged.
     "mech_power": RewardTermCfg(
-      func=mdp.electrical_power_cost, weight=-3.0e-3, params={"asset_cfg": ARM}
+      func=mdp.electrical_power_cost, weight=-3.0e-3, params={"asset_cfg": arm()}
     ),
     "joint_torques": RewardTermCfg(
-      func=mdp.joint_torques_l2, weight=-1.0e-5, params={"asset_cfg": ARM_ACTUATORS}
+      func=mdp.joint_torques_l2, weight=-1.0e-5, params={"asset_cfg": arm_actuators()}
     ),
     # -- move as little as possible, as smoothly as possible ----------------
-    "joint_vel": RewardTermCfg(func=mdp.joint_vel_l2, weight=-2.0e-3, params={"asset_cfg": ARM}),
-    "joint_acc": RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.0e-7, params={"asset_cfg": ARM}),
+    "joint_vel": RewardTermCfg(func=mdp.joint_vel_l2, weight=-2.0e-3, params={"asset_cfg": arm()}),
+    "joint_acc": RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.0e-7, params={"asset_cfg": arm()}),
     "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.15),
     "action_acc": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.08),
     # Free below max_vel, quadratic above.  The function returns a positive
@@ -241,11 +237,11 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "joint_vel_hinge": RewardTermCfg(
       func=manip_mdp.joint_velocity_hinge_penalty,
       weight=-0.5,
-      params={"max_vel": 1.5, "asset_cfg": ARM},
+      params={"max_vel": 1.5, "asset_cfg": arm()},
     ),
     # -- stay physical ------------------------------------------------------
     "joint_pos_limits": RewardTermCfg(
-      func=mdp.joint_pos_limits, weight=-20.0, params={"asset_cfg": ARM}
+      func=mdp.joint_pos_limits, weight=-20.0, params={"asset_cfg": arm()}
     ),
     "cube_airborne": RewardTermCfg(
       func=push_mdp.object_airborne,
@@ -255,7 +251,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "arm_below_table": RewardTermCfg(
       func=push_mdp.link_below_height,
       weight=-20.0,
-      params={"min_height": 0.02, "asset_cfg": GHOSTS},
+      params={"min_height": 0.02, "asset_cfg": ghost_links()},
     ),
     "terminated": RewardTermCfg(func=mdp.is_terminated, weight=-100.0),
   }

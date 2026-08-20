@@ -18,6 +18,7 @@ from mjlab.tasks.manipulation.mdp.commands import LiftingCommand, LiftingCommand
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   quat_apply,
+  quat_from_euler_xyz,
   quat_inv,
   quat_mul,
   sample_uniform,
@@ -41,6 +42,8 @@ class PushCommandCfg(LiftingCommandCfg):
 
   goal_z: float = 0.025
   """Height of the goal marker: the cube's centre when it rests on the table."""
+  cube_spawn_x: tuple[float, float] = (0.34, 0.46)
+  cube_spawn_y: tuple[float, float] = (-0.12, 0.12)
   goal_radius_range: tuple[float, float] = (0.06, 0.16)
   """How far ahead of the cube a new goal is placed."""
   goal_bounds_x: tuple[float, float] = (0.28, 0.52)
@@ -69,9 +72,13 @@ class PushCommand(LiftingCommand):
 
   Subclasses ``LiftingCommand`` because several stock manipulation terms
   (``object_to_goal_distance``, ``target_position``) ``isinstance``-check it.
-  Unlike the base class this never teleports the cube: the cube is placed by a
-  reset event, and every goal is drawn relative to wherever the cube currently
-  sits.
+  The cube is placed here rather than by a reset event.  That is not a style
+  choice: ``_reset_idx`` runs events before command resampling but only calls
+  ``sim.forward()`` afterwards, so a command that read the cube's pose on the
+  reset path would see the *previous* episode's position and scatter the first
+  goal of every episode.  Placing the cube here means the sampled position is
+  known directly.  Mid-episode resamples leave the cube alone and read its live
+  pose, which by then is current.
   """
 
   cfg: PushCommandCfg
@@ -84,6 +91,7 @@ class PushCommand(LiftingCommand):
     self.just_succeeded = zeros.clone()
     self.goals_completed = zeros.clone()
     self._dwell = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+    self._resetting = False
     self.metrics["planar_error"] = zeros.clone()
     self.metrics["goals_completed"] = self.goals_completed
 
@@ -116,9 +124,34 @@ class PushCommand(LiftingCommand):
     self.metrics["at_goal"] = inside.float()
     self.metrics["goals_completed"] = self.goals_completed
 
+  def _place_cube(self, env_ids: torch.Tensor) -> torch.Tensor:
+    """Drop the cube at a fresh pose and return its local xy."""
+    count = len(env_ids)
+    lower = torch.tensor(
+      [self.cfg.cube_spawn_x[0], self.cfg.cube_spawn_y[0]], device=self.device
+    )
+    upper = torch.tensor(
+      [self.cfg.cube_spawn_x[1], self.cfg.cube_spawn_y[1]], device=self.device
+    )
+    xy = sample_uniform(lower, upper, (count, 2), device=self.device)
+    # A hair above the half-extent so it settles instead of interpenetrating.
+    z = torch.full((count, 1), self.cfg.goal_z + 1e-4, device=self.device)
+    yaw = sample_uniform(-math.pi, math.pi, (count,), device=self.device)
+    quat = quat_from_euler_xyz(
+      torch.zeros(count, device=self.device), torch.zeros(count, device=self.device), yaw
+    )
+    pose = torch.cat([xy + self._env.scene.env_origins[env_ids, :2], z, quat], dim=-1)
+    self.object.write_root_link_pose_to_sim(pose, env_ids=env_ids)
+    self.object.write_root_link_velocity_to_sim(
+      torch.zeros(count, 6, device=self.device), env_ids=env_ids
+    )
+    return xy
+
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     count = len(env_ids)
-    cube_xy = self._cube_xy_local()[env_ids]
+    cube_xy = (
+      self._place_cube(env_ids) if self._resetting else self._cube_xy_local()[env_ids]
+    )
     lower = torch.tensor(
       [self.cfg.goal_bounds_x[0], self.cfg.goal_bounds_y[0]], device=self.device
     )
@@ -155,7 +188,11 @@ class PushCommand(LiftingCommand):
     self.episode_success[env_ids] = 0.0
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> dict[str, float]:
-    extras = super().reset(env_ids)
+    self._resetting = True
+    try:
+      extras = super().reset(env_ids)
+    finally:
+      self._resetting = False
     self.just_succeeded[env_ids] = 0.0
     self.goals_completed[env_ids] = 0.0
     self._dwell[env_ids] = 0
@@ -268,8 +305,11 @@ class goal_progress:
     return progress.clamp(-clip, clip)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    self._previous[env_ids] = 0.0
-    self._counter[env_ids] = -1
+    index = slice(None) if env_ids is None else env_ids
+    self._previous[index] = 0.0
+    # Anything the live counter cannot equal, so the first step after a reset
+    # is treated as stale and pays no progress.
+    self._counter[index] = -1
 
 
 def goal_reached_bonus(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
