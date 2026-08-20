@@ -289,11 +289,14 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       },
     ),
     # A stalled arm sits motionless in a state it has no answer for, and the
-    # dynamics never clear it. Ending the episode both frees the env and makes
-    # the failure cost something, which is what gives the policy a reason to
-    # avoid the state at all.
+    # dynamics never clear it, so the episode has to. Marked as a timeout: the
+    # state is not really terminal, so the value function should bootstrap
+    # through it, and no extra penalty is warranted -- stalling already forgoes
+    # about 14 reward per step, which dwarfs anything worth adding. Without the
+    # timeout flag an untrained policy, which cannot reach any goal, would eat
+    # the termination penalty every 4 s and might never get started.
     "stalled": TerminationTermCfg(
-      func=push_mdp.stalled, params={"command_name": GOAL}
+      func=push_mdp.stalled, params={"command_name": GOAL}, time_out=True
     ),
     "nan": TerminationTermCfg(func=mdp.nan_detection),
   }
