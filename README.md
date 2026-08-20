@@ -1,65 +1,94 @@
-# MuJoCo single-cube planar pushing PPO baseline
+# PiPER-X cube pushing — end-to-end joint-space PPO
 
-This repository is an independent, state-based, single-object PPO baseline. It
-does not import LivingTwin calibration code, checkpoints, posterior models, or
-planning code.
+An AgileX PiPER-X with its gripper shut pushes a 50 mm cube to randomly placed
+goals on a table. Everything is end to end: the policy reads proprioception,
+its own end-effector pose, the cube's pose and the goal, and writes six joint
+position targets at 50 Hz. There is no IK, no scripted push primitive, and no
+learned dynamics model.
 
-The scientific protocol is frozen in `PROTOCOL.md` and the YAML files under
-`configs/`. Formal training is forbidden until `scripts/run_preflight.py`
-reports PASS for checks A--F.
+Built on [mjlab](https://pypi.org/project/mjlab/) (MuJoCo-Warp physics on GPU)
+with rsl_rl PPO, so thousands of environments run in parallel and a usable
+policy takes minutes rather than days.
 
-Typical commands:
+> Earlier work on this problem — an IK-driven staged push primitive, a learned
+> local dynamics twin, and a CEM planner — lives on the `piperx/cube-policy-v2`
+> and `piperx/puck-sustained-push` branches.
 
-```bash
-.venv/bin/pip install -e .
-.venv/bin/python scripts/run_preflight.py --config configs/smoke.yaml
-.venv/bin/python scripts/train.py --config configs/smoke.yaml --seed 1101 --output results/smoke_seed_1101
-```
+## Task
 
-## Piper X goal-conditioned continuous pushing
+| | |
+|---|---|
+| Observation (45-D) | 6 joint positions, 6 joint velocities, end-effector pose (position + 6-D rotation), cube pose (position + 6-D rotation), cube linear velocity, EE→cube, cube→goal, goal phase, last action |
+| Action (6-D) | joint position targets for `joint1`…`joint6`, offset from the home pose |
+| Gripper | permanently shut — its actuator is never written, so it holds `ctrl = 0` |
+| Goal | a point on the table 7–16 cm from the cube; resamples on a timer **and** the moment it is reached |
+| Objective | reach as many goals as possible per episode, with minimum mechanical work and no jitter |
 
-The Piper X task uses the laboratory `orcabotics/piperx-mjlab` repository as
-a pinned git submodule. Clone this repository with its submodules:
+Episodes are a fixed 8 s and never end on success, so "fast" is rewarded
+directly: more goals fit in the same wall clock.
 
-```bash
-git clone --recurse-submodules https://github.com/orcabotics/LivingTwin.git
-cd LivingTwin
-git submodule update --init --recursive
-python3.10 -m venv .venv
-.venv/bin/pip install -e .
-```
+## Setup
 
-The Piper X asset path in `configs/piperx_goal_push_dev.yaml` and the frozen
-Policy V2 config is the repository-relative `piperx-mjlab` directory. The
-submodule must be checked out at the commit recorded by the superproject.
-
-Train a nominal Policy V2 run:
+One shared micromamba environment is used for every mjlab project on the
+machine, so torch and Warp are installed once rather than per repository.
 
 ```bash
-.venv/bin/python scripts/train_piperx_goal_push.py \
-  --config configs/piperx_goal_push_dev.yaml \
-  --seed 20260818 \
-  --output results/piperx_goalpush_ppo_policy_v2_new
+git clone --recurse-submodules <this repo> && cd LivingTwin
+git submodule update --init              # PiPER-X URDF + meshes
+
+micromamba create -y -n mjlab -c conda-forge python=3.11 pip
+micromamba run -n mjlab pip install "mjlab==1.6.0"
+micromamba run -n mjlab pip install -e .
+
+micromamba run -n mjlab list-envs --keyword Push   # -> Mjlab-Push-Cube-PiperX
 ```
 
-Evaluate a checkpoint:
+## Look before you train
 
 ```bash
-.venv/bin/python scripts/evaluate_piperx_goal_push.py \
-  --config configs/piperx_goal_push_dev.yaml \
-  --checkpoint results/piperx_goalpush_ppo_policy_v2_nominal_20260818T190900Z/checkpoints/step_000049152.pt \
-  --episodes 64 --seed-start 910000
+scripts/play.sh          # zero-action policy, 4 envs
 ```
 
-Run the live Viser viewer (the checkpoint and `FROZEN_CONFIG.json` are kept at
-the same paths under `results/`):
+Check that the gripper is shut and stays shut, that the cube rests flat, that
+the goal marker sits on the table, and that the arm is not sweeping through the
+floor.
+
+## Train
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/run_piperx_gate1_live_viewer.py \
-  --policy-run results/piperx_goalpush_ppo_policy_v2_nominal_20260818T190900Z \
-  --checkpoint results/piperx_goalpush_ppo_policy_v2_nominal_20260818T190900Z/checkpoints/step_000049152.pt \
-  --host 0.0.0.0 --port 8799
+tmux new -s piperpush
+NUM_ENVS=8192 ITERS=20  RUN_NAME=smoke  scripts/train.sh   # measure throughput
+NUM_ENVS=8192 ITERS=500 RUN_NAME=v1     scripts/train.sh   # the real run
 ```
 
-The viewer includes the known-success single episode, continuous Policy V2
-play, and the frozen staged-controller inspection cases.
+Size the real run from the smoke run's reported steps/s rather than guessing.
+For more speed, `GPUS="[0, 1, 2, 3]"` fans out over GPUs with torchrunx.
+
+Metrics worth watching in wandb: `Metrics/push_goal/goals_completed` (goals per
+episode — the headline number), `Metrics/push_goal/planar_error`,
+`Episode_Reward/mech_power`, and `Episode_Reward/action_rate`.
+
+Checkpoints land in
+`logs/rsl_rl/piperx_push_cube/<timestamp>_<run_name>/model_<iter>.pt`.
+
+## Replay
+
+```bash
+scripts/play.sh logs/rsl_rl/piperx_push_cube/<run>/model_500.pt
+```
+
+Add `--video True --video-length 1000` to record instead of render, which is
+what you want on a headless box.
+
+## Layout
+
+```
+src/piper_push/
+├── robot.py                     PiPER-X as a closed-gripper pusher
+├── cube.py                      the 50 mm cube
+└── tasks/push_cube/
+    ├── env_cfg.py               scene, observations, rewards, terminations
+    ├── mdp.py                   push goal command + the terms mjlab lacks
+    └── rl_cfg.py                PPO hyperparameters
+piperx-mjlab/                    submodule, pinned — URDF and meshes only
+```

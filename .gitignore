@@ -1,8 +1,7 @@
-.venv/
-.bootstrap/
 __pycache__/
 *.py[cod]
-.pytest_cache/
-results/
 *.egg-info/
-
+.venv/
+logs/
+outputs/
+wandb/

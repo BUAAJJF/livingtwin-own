@@ -1,29 +1,17 @@
 [build-system]
-requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "livingtwin-mujoco-rl"
+name = "piper-push"
 version = "0.1.0"
-description = "Minimal reproducible MuJoCo single-cube planar pushing PPO baseline"
-requires-python = ">=3.10,<3.11"
-dependencies = [
-  "numpy==2.2.6",
-  "mujoco==3.3.7",
-  "torch==2.7.1",
-  "PyYAML==6.0.2",
-  "matplotlib==3.10.3",
-  "imageio==2.37.0",
-  "imageio-ffmpeg==0.6.0",
-  "viser==1.0.30",
-]
+description = "End-to-end joint-space PPO: AgileX PiPER-X pushes a cube to random goals (mjlab)"
+requires-python = ">=3.10,<3.14"
+dependencies = ["mjlab==1.6.0"]
 
-[project.optional-dependencies]
-test = ["pytest==8.4.1"]
+# mjlab imports this at startup to discover tasks.
+[project.entry-points."mjlab.tasks"]
+piper_push = "piper_push.tasks"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
