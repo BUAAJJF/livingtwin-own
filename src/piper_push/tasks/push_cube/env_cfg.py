@@ -55,8 +55,8 @@ GOAL = "push_goal"
 
 # Where the cube may start and where goals may be placed.  Both sit well inside
 # the PiPER-X's ~0.62 m reach so that a goal is never unreachable.
-CUBE_SPAWN_X = (0.34, 0.46)
-CUBE_SPAWN_Y = (-0.12, 0.12)
+CUBE_SPAWN_X = (0.32, 0.48)
+CUBE_SPAWN_Y = (-0.15, 0.15)
 GOAL_BOUNDS_X = (0.28, 0.52)
 GOAL_BOUNDS_Y = (-0.20, 0.20)
 
@@ -260,10 +260,14 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     "cube_lost": TerminationTermCfg(
       func=push_mdp.object_out_of_bounds,
+      # Only slightly wider than the goal bounds.  A cube shoved well past
+      # them lands where the arm cannot get behind it any more, and with no
+      # episode timeout in play mode it would sit there forever; ending the
+      # episode instead makes losing the cube cost something.
       params={
         "object_name": CUBE,
-        "x_range": (0.18, 0.66),
-        "y_range": (-0.32, 0.32),
+        "x_range": (0.24, 0.56),
+        "y_range": (-0.26, 0.26),
         "z_max": 0.20,
       },
     ),
@@ -347,7 +351,9 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
 
   if play:
-    cfg.episode_length_s = int(1e9)
+    # Finite, unlike the usual play override: without a timeout a stalled env
+    # sits motionless forever and misrepresents what the policy does.
+    cfg.episode_length_s = 30.0
     cfg.curriculum = {}
     cfg.observations["actor"].enable_corruption = False
 
