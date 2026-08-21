@@ -198,6 +198,38 @@ def test_bin_is_reachable_and_outside_the_spawn_sector():
   assert angle < lo or angle > hi, "the bin sits inside the object spawn sector"
 
 
+def test_every_guard_region_contains_the_bin_and_the_way_to_it():
+  """Three separate bugs in one night were a guard term forbidding the task.
+
+  object_thrown charged the release, object_in_bin paid for not finishing, and
+  object_astray charged 1.83 a step for carrying the object to a bin that sat
+  28 degrees outside the sector it policed -- while reading -0.023, because a
+  penalty being obeyed costs nothing and looks harmless.
+
+  So: every region a guard polices has to contain the bin, and the straight
+  line from the spawn sector to it.
+  """
+  from piper_push.tasks.pick_place import env_cfg as pick_cfg
+
+  bx, by = objects.BIN_CENTER
+  bin_r, bin_a = float(np.hypot(bx, by)), float(np.arctan2(by, bx))
+  # Sample the corridor from the far edge of the spawn sector to the bin.
+  sx = pick_cfg.SPAWN_RADIUS[1] * np.cos(pick_cfg.SPAWN_ANGLE[1])
+  sy = pick_cfg.SPAWN_RADIUS[1] * np.sin(pick_cfg.SPAWN_ANGLE[1])
+  for u in np.linspace(0.0, 1.0, 21):
+    x, y = sx + (bx - sx) * u, sy + (by - sy) * u
+    r, a = float(np.hypot(x, y)), float(np.arctan2(y, x))
+    for name, (rr, aa) in (
+      ("object_astray", (pick_cfg.OBJECT_ALLOWED_RADIUS, pick_cfg.OBJECT_ALLOWED_ANGLE)),
+      ("object_lost", (pick_cfg.OBJECT_LOST_RADIUS, pick_cfg.OBJECT_LOST_ANGLE)),
+      ("ee_envelope", (pick_cfg.EE_ENVELOPE_RADIUS, pick_cfg.EE_ENVELOPE_ANGLE)),
+    ):
+      assert rr[0] <= r <= rr[1], f"{name} excludes radius {r:.3f} on the way to the bin"
+      assert aa[0] <= a <= aa[1], f"{name} excludes azimuth {a:.3f} on the way to the bin"
+  assert pick_cfg.OBJECT_ALLOWED_ANGLE[0] < bin_a < pick_cfg.OBJECT_ALLOWED_ANGLE[1]
+  assert pick_cfg.OBJECT_ALLOWED_RADIUS[0] < bin_r < pick_cfg.OBJECT_ALLOWED_RADIUS[1]
+
+
 def test_release_height_is_inside_the_straight_down_envelope():
   """S0: straight down runs out at 150 mm for r <= 0.35 and 130 mm at 0.42."""
   from piper_push.tasks.pick_place import mdp as pick_mdp

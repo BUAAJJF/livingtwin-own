@@ -48,6 +48,14 @@ EE_ENVELOPE_RADIUS = (0.14, 0.54)
 EE_ENVELOPE_ANGLE = (-1.05, 1.05)  # +-60 deg
 OBJECT_LOST_RADIUS = (0.10, 0.58)
 OBJECT_LOST_ANGLE = (-1.22, 1.22)
+# Where the object is ALLOWED to be, which is not the same as where it starts.
+# The bin sits at -0.63 rad and the spawn sector stops at -0.14, so a guard
+# policing the spawn sector charges 10 x 0.372 x 0.49 = 1.83 per step for
+# carrying the object to the bin, against a carry that pays 1.08.  Measured:
+# drop_error sat at 0.21 m for 3000 iterations, which is exactly the sector
+# boundary, and the penalty read -0.023 because the policy was obeying it.
+OBJECT_ALLOWED_RADIUS = (0.15, 0.55)
+OBJECT_ALLOWED_ANGLE = (-0.95, 0.90)
 # S0: straight down runs out at 150 mm for r <= 0.35 and 130 mm at r = 0.42.
 # Release happens at 115 mm, so 0.30 is clear of every useful pose and well
 # under where the arm ends up if it flings itself.
@@ -377,8 +385,8 @@ def make_pick_place_env_cfg(
       weight=-10.0,
       params={
         "command_name": TASK,
-        "radius_range": SPAWN_RADIUS,
-        "angle_range": SPAWN_ANGLE,
+        "radius_range": OBJECT_ALLOWED_RADIUS,
+        "angle_range": OBJECT_ALLOWED_ANGLE,
       },
     ),
     # -- stay inside the machine's envelope ----------------------------------
