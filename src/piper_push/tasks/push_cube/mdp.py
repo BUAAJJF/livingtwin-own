@@ -471,6 +471,28 @@ def ee_above_height(
   return (z - max_height).clamp_min(0.0)
 
 
+def ee_outside_workspace(
+  env: "ManagerBasedRlEnv",
+  radius_range: tuple[float, float],
+  half_angle: float,
+  asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  """How far the gripper has strayed outside the region pushing happens in.
+
+  The ceiling penalty bounded the working volume from above and stalls stopped
+  going up -- they went sideways instead.  A revolute base can swing the whole
+  arm 145 degrees away from the workspace with joints pinned against their
+  clips, which is 9 sigma from anything training saw, and from there nothing
+  brings it back.  Healthy play never leaves +-60 degrees.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  xy = (
+    robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)[:, :2]
+    - env.scene.env_origins[:, :2]
+  )
+  return sector_violation(xy, radius_range, half_angle)
+
+
 def link_below_height(
   env: "ManagerBasedRlEnv", min_height: float, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:

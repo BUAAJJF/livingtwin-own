@@ -64,6 +64,12 @@ GOAL = "push_goal"
 # the 0.31 m the gripper reaches in 95% of play.
 WORKSPACE_RADIUS = (0.39, 0.58)
 WORKSPACE_HALF_ANGLE = 0.5585  # 32 degrees
+# The gripper ranges wider than the goal sector -- it has to stand behind
+# cubes at the edge -- but healthy play stays inside +-60 degrees and a radius
+# of [0.30, 0.70]; stalls sit at +-145 degrees with joints pinned at their
+# clips.  This envelope contains all real work and charges for the rest.
+EE_ENVELOPE_RADIUS = (0.28, 0.70)
+EE_ENVELOPE_HALF_ANGLE = 0.7854  # 45 degrees
 # One push length of slack beyond the goal region before the cube counts lost.
 CUBE_LOST_RADIUS = (0.32, 0.68)
 CUBE_LOST_HALF_ANGLE = 0.7854  # 45 degrees
@@ -268,6 +274,16 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=push_mdp.ee_above_height,
       weight=-60.0,
       params={"max_height": 0.25, "asset_cfg": ee()},
+    ),
+    # The vertical twin of ee_too_high: bound the working volume sideways too.
+    "ee_out_of_reach": RewardTermCfg(
+      func=push_mdp.ee_outside_workspace,
+      weight=-25.0,
+      params={
+        "radius_range": EE_ENVELOPE_RADIUS,
+        "half_angle": EE_ENVELOPE_HALF_ANGLE,
+        "asset_cfg": ee(),
+      },
     ),
     "arm_below_table": RewardTermCfg(
       func=push_mdp.link_below_height,
