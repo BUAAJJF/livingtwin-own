@@ -544,6 +544,43 @@ def reset_arm_valid_posture(
   robot.write_joint_state_to_sim(final, zero, joint_ids=joint_ids, env_ids=env_ids)
 
 
+def push_too_high(
+  env: "ManagerBasedRlEnv",
+  object_name: str,
+  contact_radius: float,
+  max_push_height: float,
+  asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  """Charge for reaching over the cube instead of pushing into it.
+
+  Rigid-body statics: a horizontal push applied at height h to a box of
+  half-width w resting on friction mu slides it only while h < w/mu, and tips
+  it above that.  Here w = 25 mm, so the ceiling is 83 mm at mu = 0.30 -- above
+  the cube entirely, nothing can tip it -- but 41.7 mm at mu = 0.60, well below
+  the 50 mm top.  The policy settles at fingertips ~55 mm, which slides the
+  cube in the 67% of envs under mu = 0.5 and flips it in the rest: stalled
+  samples have the cube at 90 degrees of tilt and a median friction of 0.562,
+  against 0.88 degrees and 0.441 when healthy.
+
+  Friction is not observable, so the robust height is the one that works at the
+  worst mu, and this charges for exceeding it near the cube.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  obj: Entity = env.scene[object_name]
+  ee = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
+  tip_z = ee[:, 2] - FINGERTIP_DROP_M - env.scene.env_origins[:, 2]
+  planar = torch.norm(ee[:, :2] - obj.data.root_link_pos_w[:, :2], dim=-1)
+  near = planar < contact_radius
+  return torch.where(near, (tip_z - max_push_height).clamp_min(0.0), 0.0)
+
+
+def object_tilt(env: "ManagerBasedRlEnv", object_name: str) -> torch.Tensor:
+  """Radians the cube has been rotated off upright.  Yaw is free by symmetry."""
+  obj: Entity = env.scene[object_name]
+  upright = matrix_from_quat(obj.data.root_link_quat_w)[:, 2, 2]
+  return torch.arccos(upright.clamp(-1.0, 1.0))
+
+
 def ee_outside_workspace(
   env: "ManagerBasedRlEnv",
   radius_range: tuple[float, float],

@@ -288,6 +288,23 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": ee(),
       },
     ),
+    # w/mu = 41.7 mm at the friction ceiling, so anything above that tips the
+    # cube instead of sliding it.  Contact radius covers the cube's half-width
+    # plus the pad, and the cube's own top is 50 mm, so this only bites when
+    # the gripper is reaching over it.
+    "push_too_high": RewardTermCfg(
+      func=push_mdp.push_too_high,
+      weight=-30.0,
+      params={
+        "object_name": CUBE,
+        "contact_radius": 0.09,
+        "max_push_height": 0.040,
+        "asset_cfg": ee(),
+      },
+    ),
+    "cube_tipped": RewardTermCfg(
+      func=push_mdp.object_tilt, weight=-2.0, params={"object_name": CUBE}
+    ),
     "arm_below_table": RewardTermCfg(
       func=push_mdp.link_below_height,
       weight=-20.0,
