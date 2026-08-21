@@ -22,3 +22,14 @@ register_mjlab_task(
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_cube"),
   runner_cls=ManipulationOnPolicyRunner,
 )
+
+# Halfway through the shape curriculum: the distribution's midpoint plus half
+# its spread.  Registered rather than reachable from the CLI because
+# shape_variety shapes the event ranges at build time, not a config field.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Mid",
+  env_cfg=make_pick_place_env_cfg(shape_variety=0.5),
+  play_env_cfg=make_pick_place_env_cfg(play=True, shape_variety=0.5),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_mid"),
+  runner_cls=ManipulationOnPolicyRunner,
+)

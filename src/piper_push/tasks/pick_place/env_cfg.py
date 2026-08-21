@@ -307,6 +307,10 @@ def make_pick_place_env_cfg(
     "transport": RewardTermCfg(
       func=pick_mdp.transport, weight=5.0, params={"command_name": TASK, "std": 0.15}
     ),
+    # Off unless a sweep turns it on; see mdp.object_in_bin for why it exists.
+    "object_in_bin": RewardTermCfg(
+      func=pick_mdp.object_in_bin, weight=0.0, params={"command_name": TASK}
+    ),
     "place": RewardTermCfg(
       func=pick_mdp.place_bonus, weight=300.0, params={"command_name": TASK}
     ),

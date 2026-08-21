@@ -496,6 +496,27 @@ def lift_height(
   return (z.clamp(0.0, target) / target) * cmd.grasped.float()
 
 
+def object_in_bin(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """Dense credit for the object being down inside the bin, held or not.
+
+  Off by default (weight 0).  It exists because the last step of the task is a
+  cliff: while the object is held over the bin the transport reward is already
+  saturated, so nothing points toward opening the hand, and the 300-point
+  placement bonus has to be found by chance.  This is the ramp up to it.
+
+  It cannot be collected without the object genuinely being in the bin, and the
+  placement bonus still requires the release, the settle and the dwell.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  pos = cmd._object_pos_local()
+  inside = (
+    (pos[:, :2] - torch.tensor(cmd.cfg.bin_center, device=pos.device)).abs()
+    < torch.tensor(cmd.cfg.bin_inner, device=pos.device)
+  ).all(dim=-1)
+  below_rim = pos[:, 2] - cmd.object_half_size[:, 2] < cmd.cfg.bin_rim_z
+  return (inside & below_rim).float()
+
+
 def object_thrown(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   """Airborne without being held -- except over the bin, where that is the task.
 
