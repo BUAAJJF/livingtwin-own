@@ -39,9 +39,11 @@ def pick_place_ppo_runner_cfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      # A grasp needs the hand to hold still against the object; entropy shows
-      # up directly as the jitter that shakes it loose.
-      entropy_coef=0.003,
+      # A grasp needs the hand to hold still against the object, so entropy is
+      # not free here -- but 0.003 collapsed the action std from 0.6 to 0.13 by
+      # iteration 529, before the policy had found that letting go over the bin
+      # is worth anything, and a deterministic policy never finds it.
+      entropy_coef=0.006,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,

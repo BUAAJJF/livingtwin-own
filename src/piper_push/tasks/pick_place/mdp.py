@@ -163,6 +163,11 @@ class PickCommand(CommandTerm):
     self.objects_placed = zeros.clone()
     self._grasp_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self._place_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    # Paid once per object.  A rising-edge bonus that pays every time is a
+    # grab-drop-grab loop worth more than finishing the task, and the policy
+    # will find it long before it finds the bin.
+    self._grasp_paid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self.grasp_attempts = torch.zeros(self.num_envs, device=self.device)
     self._resetting = False
 
     origin = env.scene.env_origins
@@ -175,6 +180,9 @@ class PickCommand(CommandTerm):
     self.metrics["objects_placed"] = self.objects_placed
     self.metrics["grasp_rate"] = zeros.clone()
     self.metrics["drop_error"] = zeros.clone()
+    # Attempts per placement is the number that exposes a grab-drop loop: a
+    # policy doing the task has one, a policy farming the bonus has many.
+    self.metrics["grasp_attempts"] = self.grasp_attempts
 
   # -- geometry ------------------------------------------------------------
 
@@ -224,7 +232,11 @@ class PickCommand(CommandTerm):
       secure, self._grasp_count + 1, torch.zeros_like(self._grasp_count)
     )
     grasped_now = self._grasp_count >= self.cfg.grasp_dwell
-    self.just_grasped = (grasped_now & ~self.grasped).float()
+    fresh = grasped_now & ~self.grasped
+    self.just_grasped = (fresh & ~self._grasp_paid).float()
+    if not self._resetting:
+      self.grasp_attempts += fresh.float()
+    self._grasp_paid |= grasped_now
     self.grasped = grasped_now
 
     # -- placement
@@ -261,6 +273,7 @@ class PickCommand(CommandTerm):
         self._place_object(respawn)
         self._place_count[respawn] = 0
         self.placed[respawn] = False
+        self._grasp_paid[respawn] = False
 
   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
     del env_ids
@@ -269,6 +282,8 @@ class PickCommand(CommandTerm):
     self._place_object(env_ids)
     self._grasp_count[env_ids] = 0
     self._place_count[env_ids] = 0
+    self._grasp_paid[env_ids] = False
+    self.grasp_attempts[env_ids] = 0.0
     self.grasped[env_ids] = False
     self.placed[env_ids] = False
 
@@ -482,11 +497,23 @@ def lift_height(
 
 
 def object_thrown(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
-  """Airborne without being held. Knocking the object into the air is the
-  cheapest way to satisfy a naive height reward, so it is charged directly."""
+  """Airborne without being held -- except over the bin, where that is the task.
+
+  Knocking the object into the air is the cheapest way to satisfy any height
+  reward, so it is charged directly.  But an unconditional version charges the
+  release: the instant the gripper opens over the bin the object is unheld and
+  falling, and the policy learns never to let go.  The term then reads as
+  harmless (measured -0.0002) precisely because it is being obeyed.
+  """
   cmd: PickCommand = env.command_manager.get_term(command_name)
-  z = cmd._object_pos_local()[:, 2] - cmd.object_half_size[:, 2]
-  return (z - cmd.cfg.drop_penalty_height).clamp_min(0.0) * (~cmd.grasped).float()
+  pos = cmd._object_pos_local()
+  z = pos[:, 2] - cmd.object_half_size[:, 2]
+  over_bin = (
+    (pos[:, :2] - torch.tensor(cmd.cfg.bin_center, device=pos.device)).abs()
+    < torch.tensor(cmd.cfg.bin_inner, device=pos.device)
+  ).all(dim=-1)
+  loose = (~cmd.grasped) & (~over_bin)
+  return (z - cmd.cfg.drop_penalty_height).clamp_min(0.0) * loose.float()
 
 
 def object_outside_spawn(
