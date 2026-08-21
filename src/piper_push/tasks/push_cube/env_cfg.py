@@ -145,7 +145,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       resample_on_success=True,
       stall_timeout_s=4.0,
       goal_z=CUBE_HALF_SIZE,
-      cube_clearance_m=0.12,
+      cube_clearance_m=0.06,  # 3-D now, so resets may start over the cube
       workspace_radius=WORKSPACE_RADIUS,
       workspace_half_angle=WORKSPACE_HALF_ANGLE,
       goal_radius_range=(0.07, 0.16),
@@ -161,15 +161,20 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       params={"pose_range": {}, "velocity_range": {}},
     ),
     "reset_arm": EventTermCfg(
-      func=mdp.reset_joints_by_offset,
+      func=push_mdp.reset_arm_valid_posture,
       mode="reset",
       params={
-        # Wide on purpose: a narrow spread means every episode starts from the
-        # same posture, and the policy has no idea what to do anywhere else.
-        "position_range": (-0.3, 0.3),
-        "velocity_range": (0.0, 0.0),
+        # Wide on purpose, and wider than it looks it needs to be.  Healthy
+        # pushing lives in a corridor 7 mm tall (ee z 0.062-0.077), which is a
+        # policy specialised to one sweep and lost anywhere else: 94.7% of
+        # stalls are the gripper hovering 6-10 cm over the cube, a state a
+        # +-0.3 rad reset around one posture never produces.  Recovery cannot
+        # be learned from states training never visits.
+        "position_range": (-1.0, 1.0),
         # Arm joints only, so the gripper stays exactly shut.
         "asset_cfg": arm(),
+        "ee_cfg": ee(),
+        "link_cfg": ghost_links(),
       },
     ),
     # Startup-only randomisation: paid once, never in the hot loop.
@@ -396,18 +401,18 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,  # 200 Hz physics, 50 Hz control.
-    # Long enough to contain the failure being trained against.  Idle time is
-    # measured from the last goal and starts at zero, so an 8 s episode can
-    # only hold an 8 s stall if the policy scores nothing at all for its whole
-    # length -- against an average of 25 goals per 8 s.  Deep stalls were
-    # therefore structurally impossible to experience, the penalties aimed at
-    # them never fired, and the episode length was doing exactly what the 4 s
-    # stall cutoff used to do one level up.  Stalls run 35 s at the median in
-    # play, so 30 s exposes most of one.
-    episode_length_s=30.0,
+    # Back to 8 s.  30 s was tried on the theory that deep stalls had to be
+    # inside an episode to be learned from, and the penalties aimed at them did
+    # start firing -- but stalls got worse, not better (9.80% of play time
+    # against 7.62%), and learning from scratch was 23x slower because frequent
+    # resets are themselves the curriculum that teaches pushing.
+    episode_length_s=8.0,
   )
 
   if play:
+    # Finite, unlike the usual play override: without a timeout a stalled env
+    # sits motionless forever and misrepresents what the policy does.
+    cfg.episode_length_s = 30.0
     # Deployment backstop only. Training deliberately runs without it: with the
     # cutoff in place the policy never experiences being stuck for longer than
     # the cutoff, so it never learns to get out -- it just waits for the reset.

@@ -36,6 +36,10 @@ _ROBOT = SceneEntityCfg("robot")
 ##
 
 
+FINGERTIP_DROP_M = 0.0115
+"""How far the closed fingertips hang below ``grasp_site``."""
+
+
 def sector_sample(
   count: int, radius_range: tuple[float, float], half_angle: float, device: str
 ) -> torch.Tensor:
@@ -85,9 +89,15 @@ class PushCommandCfg(LiftingCommandCfg):
   """
   workspace_half_angle: float = 0.5585
   """32 degrees either side of straight ahead."""
-  cube_clearance_m: float = 0.12
-  """Keep the cube this far from the gripper at reset, so a randomised arm
-  posture does not start inside the cube and fling it."""
+  cube_clearance_m: float = 0.06
+  """Margin the gripper must keep from the cube at reset, either beside its
+  footprint or above its top face.
+
+  A flat 0.12 m planar clearance did more than prevent interpenetration: it
+  made "gripper directly above the cube" impossible to start from, and that is
+  precisely where 94.7% of stalls sit.  Splitting the test into beside-or-above
+  admits the hovering state while still keeping the fingertips out of the
+  cube."""
   goal_radius_range: tuple[float, float] = (0.06, 0.16)
   """How far ahead of the cube a new goal is placed."""
   min_goal_separation: float = 0.05
@@ -196,14 +206,27 @@ class PushCommand(LiftingCommand):
     # quantities only refresh on the next forward(); ask for one so the
     # clearance test below sees where the gripper actually is.
     self._env.sim.forward()
-    ee_xy = (
+    ee = (
       self._robot.data.site_pos_w[:, self._ee_site].squeeze(1)
       - self._env.scene.env_origins
-    )[env_ids, :2]
+    )[env_ids]
+
+    # The fingertips hang 11.5 mm below grasp_site, so a reset is legal when
+    # the gripper is either clear of the cube's footprint or genuinely above
+    # its top face -- the latter being exactly the hovering state stalls sit
+    # in, which a planar-only test made impossible to start from.
+    tip_z = ee[:, 2] - FINGERTIP_DROP_M
+    cube_top = 2.0 * self.cfg.goal_z
+
+    def too_close_to_cube(xy: torch.Tensor) -> torch.Tensor:
+      planar = torch.norm(xy - ee[:, :2], dim=-1)
+      clear_beside = planar > self.cfg.cube_clearance_m
+      clear_above = tip_z > cube_top + self.cfg.cube_clearance_m
+      return ~(clear_beside | clear_above)
 
     xy = sector_sample(count, *sector, self.device)
     for _ in range(4):
-      too_close = torch.norm(xy - ee_xy, dim=-1) < self.cfg.cube_clearance_m
+      too_close = too_close_to_cube(xy)
       if not bool(too_close.any()):
         break
       retry = sector_sample(count, *sector, self.device)
@@ -469,6 +492,56 @@ def ee_above_height(
   robot: Entity = env.scene[asset_cfg.name]
   z = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)[:, 2] - env.scene.env_origins[:, 2]
   return (z - max_height).clamp_min(0.0)
+
+
+def reset_arm_valid_posture(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor,
+  position_range: tuple[float, float],
+  asset_cfg: SceneEntityCfg,
+  ee_cfg: SceneEntityCfg,
+  link_cfg: SceneEntityCfg,
+  min_ee_height: float = 0.04,
+  min_link_height: float = 0.03,
+  attempts: int = 6,
+) -> None:
+  """Start the arm anywhere it can legally be, not just near one posture.
+
+  Healthy pushing occupies a corridor 7 mm tall, and a policy that narrow is
+  lost the moment a hard push knocks it out -- which is what a stall is.  The
+  cure is coverage, but a wide offset applied blind is unusable: at +-1.0 rad
+  19.5% of resets put the gripper under the table and the cube gets flung.  So
+  sample wide and reject, keeping only postures that hold the arm above the
+  table; anything still failing after `attempts` keeps the default pose.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  joint_ids = asset_cfg.joint_ids
+  default = robot.data.default_joint_pos[env_ids][:, joint_ids]
+  limits = robot.data.soft_joint_pos_limits[env_ids][:, joint_ids]
+  zero = torch.zeros_like(default)
+  accepted = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
+  chosen = default.clone()
+  origins = env.scene.env_origins[env_ids]
+  for _ in range(attempts):
+    candidate = default + sample_uniform(
+      *position_range, default.shape, device=env.device
+    )
+    candidate = torch.max(torch.min(candidate, limits[..., 1]), limits[..., 0])
+    chosen = torch.where(accepted.unsqueeze(-1), chosen, candidate)
+    robot.write_joint_state_to_sim(chosen, zero, joint_ids=joint_ids, env_ids=env_ids)
+    env.sim.forward()
+    ee_z = (
+      robot.data.site_pos_w[env_ids][:, ee_cfg.site_ids].squeeze(1)[:, 2]
+      - origins[:, 2]
+    )
+    link_z = (
+      robot.data.body_link_pos_w[env_ids][:, link_cfg.body_ids, 2] - origins[:, 2:3]
+    )
+    accepted |= (ee_z > min_ee_height) & (link_z.min(dim=1).values > min_link_height)
+    if bool(accepted.all()):
+      break
+  final = torch.where(accepted.unsqueeze(-1), chosen, default)
+  robot.write_joint_state_to_sim(final, zero, joint_ids=joint_ids, env_ids=env_ids)
 
 
 def ee_outside_workspace(
