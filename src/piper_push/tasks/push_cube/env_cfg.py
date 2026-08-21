@@ -260,7 +260,7 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # ~0.45 m the arm settles at when it has flung itself.
     "ee_too_high": RewardTermCfg(
       func=push_mdp.ee_above_height,
-      weight=-25.0,
+      weight=-60.0,
       params={"max_height": 0.25, "asset_cfg": ee()},
     ),
     "arm_below_table": RewardTermCfg(
@@ -295,16 +295,6 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "y_range": (-0.28, 0.28),
         "z_max": 0.20,
       },
-    ),
-    # A stalled arm sits motionless in a state it has no answer for, and the
-    # dynamics never clear it, so the episode has to. Marked as a timeout: the
-    # state is not really terminal, so the value function should bootstrap
-    # through it, and no extra penalty is warranted -- stalling already forgoes
-    # about 14 reward per step, which dwarfs anything worth adding. Without the
-    # timeout flag an untrained policy, which cannot reach any goal, would eat
-    # the termination penalty every 4 s and might never get started.
-    "stalled": TerminationTermCfg(
-      func=push_mdp.stalled, params={"command_name": GOAL}, time_out=True
     ),
     "nan": TerminationTermCfg(func=mdp.nan_detection),
   }
@@ -389,6 +379,13 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Finite, unlike the usual play override: without a timeout a stalled env
     # sits motionless forever and misrepresents what the policy does.
     cfg.episode_length_s = 30.0
+    # Deployment backstop only. Training deliberately runs without it: with the
+    # cutoff in place the policy never experiences being stuck for longer than
+    # the cutoff, so it never learns to get out -- it just waits for the reset.
+    # The 8 s episode already bounds what a stall can cost in training.
+    cfg.terminations["stalled"] = TerminationTermCfg(
+      func=push_mdp.stalled, params={"command_name": GOAL}, time_out=True
+    )
     cfg.curriculum = {}
     cfg.observations["actor"].enable_corruption = False
 
