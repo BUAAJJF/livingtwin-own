@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import torch
 from mjlab.entity import Entity
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
@@ -467,6 +468,57 @@ def pads_touching(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   found = cmd._pads.data.found
   assert found is not None
   return ((found > 0).all(dim=1) & ~cmd.grasped).float()
+
+
+def holding(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """Paid every step the object is held.
+
+  Without it, taking hold of the object is a pay CUT.  ``reach`` and
+  ``pads_touching`` are both gated on not-grasped and switch off together at
+  the instant of the grasp, while ``lift`` and ``transport`` are still near
+  zero because the object has only just left the table: measured, 2.66 per step
+  before against 0.75 after.  A one-shot acquisition bonus pays for that once;
+  every step afterwards the policy is worse off for holding on, and across five
+  configurations and 3000 iterations four of them learned to touch the object
+  and never close on it.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  return cmd.grasped.float()
+
+
+class transport_progress:
+  """Distance the held object closed on the drop point since the last step.
+
+  A progress term rather than a potential, and that is the point: a potential
+  saturates when the object arrives over the bin, so hovering there collects it
+  forever and letting go costs a fortune.  Progress pays for the trip and
+  nothing for standing still, which leaves the placement bonus as the only
+  thing left to earn.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: "ManagerBasedRlEnv"):
+    del cfg
+    self._env = env
+    self._previous = torch.zeros(env.num_envs, device=env.device)
+    self._valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+  def __call__(
+    self, env: "ManagerBasedRlEnv", command_name: str, clip: float = 0.05
+  ) -> torch.Tensor:
+    cmd: PickCommand = env.command_manager.get_term(command_name)
+    dist = torch.linalg.norm(cmd.command - cmd._object_pos_local(), dim=-1)
+    delta = (self._previous - dist).clamp(-clip, clip)
+    # No credit for the step the object was picked up or put down on: the
+    # distance jumps then for reasons that are not travel.
+    out = delta * (self._valid & cmd.grasped).float()
+    self._previous = dist
+    self._valid = cmd.grasped.clone()
+    return out
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if env_ids is None:
+      env_ids = slice(None)
+    self._valid[env_ids] = False
 
 
 def grasp_bonus(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:

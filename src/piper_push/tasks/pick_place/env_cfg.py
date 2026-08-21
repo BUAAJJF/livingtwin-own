@@ -73,6 +73,23 @@ def ghost_links() -> SceneEntityCfg:
   return SceneEntityCfg("robot", body_names=piper.GHOST_LINKS)
 
 
+def _ramp(
+  name: str, a: float, b: float, c: float, at_b: int = 200, at_c: int = 500
+) -> CurriculumTermCfg:
+  """Three-stage weight schedule, in iterations."""
+  return CurriculumTermCfg(
+    func=mdp.reward_curriculum,
+    params={
+      "reward_name": name,
+      "stages": [
+        {"step": 0, "weight": a},
+        {"step": at_b * STEPS_PER_ITERATION, "weight": b},
+        {"step": at_c * STEPS_PER_ITERATION, "weight": c},
+      ],
+    },
+  )
+
+
 def make_pick_place_env_cfg(
   play: bool = False,
   profile: str = "bare_gripper",
@@ -284,10 +301,25 @@ def make_pick_place_env_cfg(
   }
 
   rewards = {
-    # -- find it, hold it, move it ------------------------------------------
+    # -- the ladder ----------------------------------------------------------
+    # Every rung pays more than the one below it, and the guidance rungs decay
+    # so that by the end only the events are worth anything.  Computed rather
+    # than guessed; the numbers are in the commit message.
+    #
+    #                                    early   late
+    #   far from the object               0.20   0.05
+    #   at the object, pads on it         1.33   0.31
+    #   just grasped, 18 mm up            1.41   0.40
+    #   carrying, halfway                 2.26   0.61
+    #   held over the bin                 3.00   0.80
+    #   released, object in the bin       3.00   1.00
+    #
+    # and hovering over the bin is worth 3.00/step early against 1.49 for
+    # completing a cycle, but 0.80 against 1.49 once the guidance has decayed:
+    # the decay is what makes letting go the best thing left to do.
     "reach": RewardTermCfg(
       func=pick_mdp.reach_object,
-      weight=2.0,
+      weight=1.0,
       params={
         "command_name": TASK,
         "object_name": OBJECT,
@@ -296,27 +328,41 @@ def make_pick_place_env_cfg(
       },
     ),
     "pads_touching": RewardTermCfg(
-      func=pick_mdp.pads_touching, weight=1.0, params={"command_name": TASK}
+      func=pick_mdp.pads_touching, weight=0.5, params={"command_name": TASK}
     ),
-    "grasp": RewardTermCfg(
-      func=pick_mdp.grasp_bonus, weight=60.0, params={"command_name": TASK}
+    # Without this, closing on the object is a pay cut: reach and pads_touching
+    # are both gated on not-grasped and switch off together at exactly the
+    # moment lift and transport are still near zero.  Four of five
+    # configurations spent 3000 iterations learning to touch and never close.
+    "holding": RewardTermCfg(
+      func=pick_mdp.holding, weight=1.2, params={"command_name": TASK}
     ),
     "lift": RewardTermCfg(
-      func=pick_mdp.lift_height, weight=2.0, params={"command_name": TASK, "target": 0.12}
+      func=pick_mdp.lift_height, weight=0.8, params={"command_name": TASK, "target": 0.12}
     ),
     "transport": RewardTermCfg(
-      func=pick_mdp.transport, weight=5.0, params={"command_name": TASK, "std": 0.15}
+      func=pick_mdp.transport, weight=1.0, params={"command_name": TASK, "std": 0.15}
     ),
-    # Off unless a sweep turns it on; see mdp.object_in_bin for why it exists.
     "object_in_bin": RewardTermCfg(
-      func=pick_mdp.object_in_bin, weight=0.0, params={"command_name": TASK}
+      func=pick_mdp.object_in_bin, weight=3.0, params={"command_name": TASK}
+    ),
+    # -- the engine ----------------------------------------------------------
+    # Progress, not a potential.  A potential saturates over the bin, so
+    # hovering there collects it forever; progress pays for the trip and
+    # nothing for standing still.
+    "transport_progress": RewardTermCfg(
+      func=pick_mdp.transport_progress,
+      weight=25.0,
+      params={"command_name": TASK, "clip": 0.05},
+    ),
+    # -- the events ----------------------------------------------------------
+    "grasp": RewardTermCfg(
+      func=pick_mdp.grasp_bonus, weight=40.0, params={"command_name": TASK}
     ),
     "place": RewardTermCfg(
-      func=pick_mdp.place_bonus, weight=300.0, params={"command_name": TASK}
+      func=pick_mdp.place_bonus, weight=250.0, params={"command_name": TASK}
     ),
     # -- do not cheat --------------------------------------------------------
-    # Batting the object into the air is the cheapest way to satisfy any height
-    # reward, so it is charged whenever the object is up without being held.
     "thrown": RewardTermCfg(
       func=pick_mdp.object_thrown, weight=-20.0, params={"command_name": TASK}
     ),
@@ -352,8 +398,6 @@ def make_pick_place_env_cfg(
     "joint_pos_limits": RewardTermCfg(
       func=mdp.joint_pos_limits, weight=-20.0, params={"asset_cfg": arm()}
     ),
-    # The command path already caps the target's slew at 0.9x the safety
-    # shell's trip; this charges the dynamic overspeed it cannot prevent.
     "over_trip": RewardTermCfg(
       func=pick_mdp.joint_speed_over_trip,
       weight=-5.0,
@@ -432,31 +476,20 @@ def make_pick_place_env_cfg(
     curriculum={
       # Learn the task first, then tighten the style.  At full weight from step
       # zero the smoothness penalties are three times the reach reward
-      # (measured on the first smoke: action_acc -0.49 and action_rate -0.32
-      # against reach +0.22), and the safest policy is to stop moving.  This is
-      # the same cliff the pushing task fell off.
-      "action_rate_weight": CurriculumTermCfg(
-        func=mdp.reward_curriculum,
-        params={
-          "reward_name": "action_rate",
-          "stages": [
-            {"step": 0, "weight": -0.02},
-            {"step": 200 * STEPS_PER_ITERATION, "weight": -0.06},
-            {"step": 500 * STEPS_PER_ITERATION, "weight": -0.15},
-          ],
-        },
-      ),
-      "action_acc_weight": CurriculumTermCfg(
-        func=mdp.reward_curriculum,
-        params={
-          "reward_name": "action_acc",
-          "stages": [
-            {"step": 0, "weight": -0.01},
-            {"step": 200 * STEPS_PER_ITERATION, "weight": -0.03},
-            {"step": 500 * STEPS_PER_ITERATION, "weight": -0.08},
-          ],
-        },
-      ),
+      # (measured: action_acc -0.49 and action_rate -0.32 against reach +0.22),
+      # and the safest policy is to stop moving.
+      "action_rate_weight": _ramp("action_rate", -0.02, -0.06, -0.15),
+      "action_acc_weight": _ramp("action_acc", -0.01, -0.03, -0.08),
+      # And let the guidance fade, so the events end up being the only thing
+      # worth anything.  Every one of these is a state the policy can sit in;
+      # at their starting weights, hovering over the bin pays twice what
+      # finishing the job does.
+      "reach_decay": _ramp("reach", 1.0, 0.5, 0.25, 600, 1400),
+      "pads_decay": _ramp("pads_touching", 0.5, 0.25, 0.10, 600, 1400),
+      "holding_decay": _ramp("holding", 1.2, 0.7, 0.35, 600, 1400),
+      "lift_decay": _ramp("lift", 0.8, 0.4, 0.20, 600, 1400),
+      "transport_decay": _ramp("transport", 1.0, 0.5, 0.25, 600, 1400),
+      "in_bin_decay": _ramp("object_in_bin", 3.0, 2.0, 1.0, 600, 1400),
     },
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
