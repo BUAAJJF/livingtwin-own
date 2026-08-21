@@ -43,7 +43,10 @@ def pick_place_ppo_runner_cfg(
       # not free here -- but 0.003 collapsed the action std from 0.6 to 0.13 by
       # iteration 529, before the policy had found that letting go over the bin
       # is worth anything, and a deterministic policy never finds it.
-      entropy_coef=0.006,
+      # 0.012: of five schedules the one with this coefficient reached the
+      # highest grasp rate (0.984 against 0.91-0.94), so the extra exploration
+      # is not costing the delicate part of the task anything.
+      entropy_coef=0.012,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,

@@ -335,13 +335,16 @@ def make_pick_place_env_cfg(
     # moment lift and transport are still near zero.  Four of five
     # configurations spent 3000 iterations learning to touch and never close.
     "holding": RewardTermCfg(
-      func=pick_mdp.holding, weight=1.2, params={"command_name": TASK}
+      func=pick_mdp.holding, weight=0.8, params={"command_name": TASK}
     ),
     "lift": RewardTermCfg(
       func=pick_mdp.lift_height, weight=0.8, params={"command_name": TASK, "target": 0.12}
     ),
     "transport": RewardTermCfg(
-      func=pick_mdp.transport, weight=1.0, params={"command_name": TASK, "std": 0.15}
+      # std 0.30, not 0.15: a 0.15 kernel is already saturated 20 cm out, which
+      # is where the object starts, so the potential had no gradient along the
+      # carry at all.  The policy grasped, lifted, and stood still holding it.
+      func=pick_mdp.transport, weight=1.5, params={"command_name": TASK, "std": 0.30}
     ),
     "object_in_bin": RewardTermCfg(
       func=pick_mdp.object_in_bin, weight=3.0, params={"command_name": TASK}
@@ -352,7 +355,10 @@ def make_pick_place_env_cfg(
     # nothing for standing still.
     "transport_progress": RewardTermCfg(
       func=pick_mdp.transport_progress,
-      weight=25.0,
+      # 25 made the whole 0.30 m carry worth 7.5 points against 70 for standing
+      # still the same 100 steps: the trip did not pay for itself.  120 makes
+      # carrying 1.08 a step against 0.54 for holding position.
+      weight=120.0,
       params={"command_name": TASK, "clip": 0.05},
     ),
     # -- the events ----------------------------------------------------------
@@ -486,9 +492,9 @@ def make_pick_place_env_cfg(
       # finishing the job does.
       "reach_decay": _ramp("reach", 1.0, 0.5, 0.25, 600, 1400),
       "pads_decay": _ramp("pads_touching", 0.5, 0.25, 0.10, 600, 1400),
-      "holding_decay": _ramp("holding", 1.2, 0.7, 0.35, 600, 1400),
+      "holding_decay": _ramp("holding", 0.8, 0.4, 0.20, 600, 1400),
       "lift_decay": _ramp("lift", 0.8, 0.4, 0.20, 600, 1400),
-      "transport_decay": _ramp("transport", 1.0, 0.5, 0.25, 600, 1400),
+      "transport_decay": _ramp("transport", 1.5, 1.0, 0.60, 600, 1400),
       "in_bin_decay": _ramp("object_in_bin", 3.0, 2.0, 1.0, 600, 1400),
     },
     viewer=ViewerConfig(

@@ -549,10 +549,15 @@ def lift_height(
 
 
 def object_in_bin(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
-  """Dense credit for the object being down inside the bin, held or not.
+  """Dense credit for the object being down inside the bin, and NOT held.
 
-  Off by default (weight 0).  It exists because the last step of the task is a
-  cliff: while the object is held over the bin the transport reward is already
+  The "and not held" is the whole design.  Paid regardless of the grip it is
+  one more state the policy can sit in, and the arithmetic says sitting in it
+  beats finishing: 2.00 a step against 1.48 for completing a cycle.  Gated on
+  the release it is a bridge to the placement bonus instead of a substitute
+  for it.
+
+  It exists because the last step of the task is a cliff: while the object is held over the bin the transport reward is already
   saturated, so nothing points toward opening the hand, and the 300-point
   placement bonus has to be found by chance.  This is the ramp up to it.
 
@@ -566,7 +571,7 @@ def object_in_bin(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
     < torch.tensor(cmd.cfg.bin_inner, device=pos.device)
   ).all(dim=-1)
   below_rim = pos[:, 2] - cmd.object_half_size[:, 2] < cmd.cfg.bin_rim_z
-  return (inside & below_rim).float()
+  return (inside & below_rim & ~cmd.grasped).float()
 
 
 def object_thrown(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:

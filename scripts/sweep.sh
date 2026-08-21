@@ -52,59 +52,58 @@ for s in 0 1 2; do
   NOBRIDGE="$NOBRIDGE --env.curriculum.in-bin-decay.params.stages.$s.weight 0.0"
 done
 
+FAST=""
+for k in reach-decay pads-decay holding-decay lift-decay transport-decay in-bin-decay; do
+  FAST="$FAST --env.curriculum.$k.params.stages.1.step 9600 --env.curriculum.$k.params.stages.2.step 25600"
+done
+LOWHOLD="--env.curriculum.holding-decay.params.stages.2.weight 0.05"
+STAGE1="q1_base q1_hotprog q1_bigplace q1_fastdecay q1_lowhold"
+
 say "=== STAGE 1: five schedules on the fixed cube, 3000 iterations, 4096 envs ==="
-run 2 r1_base      Mjlab-Pick-Place-PiperX-Cube 3000 4096 &
-run 3 r1_slow      Mjlab-Pick-Place-PiperX-Cube 3000 4096 $SLOW &
-run 4 r1_nobridge  Mjlab-Pick-Place-PiperX-Cube 3000 4096 $NOBRIDGE &
-run 5 r1_bigplace  Mjlab-Pick-Place-PiperX-Cube 3000 4096 --env.rewards.place.weight 600.0 &
-run 6 r1_explore   Mjlab-Pick-Place-PiperX-Cube 3000 4096 --agent.algorithm.entropy-coef 0.012 &
+run 2 q1_base      Mjlab-Pick-Place-PiperX-Cube 3000 4096 &
+run 3 q1_hotprog   Mjlab-Pick-Place-PiperX-Cube 3000 4096 \
+      --env.rewards.transport_progress.weight 240.0 &
+run 4 q1_bigplace  Mjlab-Pick-Place-PiperX-Cube 3000 4096 --env.rewards.place.weight 600.0 &
+run 5 q1_fastdecay Mjlab-Pick-Place-PiperX-Cube 3000 4096 $FAST &
+run 6 q1_lowhold   Mjlab-Pick-Place-PiperX-Cube 3000 4096 $LOWHOLD &
 wait
 say "stage 1 finished"
 
-BEST=""; BEST_P="-1"
-for n in r1_base r1_slow r1_nobridge r1_bigplace r1_explore; do
-  p=$(placed "$n")
-  say "  $n: placed=$p grasp_rate=$(grasped "$n") attempts=$(attempts "$n")"
-  if awk -v a="$p" -v b="$BEST_P" 'BEGIN{exit !(a>b)}'; then BEST="$n"; BEST_P="$p"; fi
+BEST=""; BEST_S="-1"
+for n in $STAGE1; do
+  p=$(placed "$n"); g=$(grasped "$n")
+  s=$(awk -v a="$p" -v b="$g" 'BEGIN{printf "%.6f", a*1000 + b}')
+  say "  $n: placed=$p grasp_rate=$g attempts=$(attempts "$n") score=$s"
+  if awk -v a="$s" -v b="$BEST_S" 'BEGIN{exit !(a>b)}'; then BEST="$n"; BEST_S="$s"; fi
 done
-say "winner: $BEST (placed=$BEST_P)"
+say "winner: $BEST (score=$BEST_S)"
 
 EXTRA=""
 case "$BEST" in
-  r1_slow)     EXTRA="$SLOW" ;;
-  r1_nobridge) EXTRA="$NOBRIDGE" ;;
-  r1_bigplace) EXTRA="--env.rewards.place.weight 600.0" ;;
-  r1_explore)  EXTRA="--agent.algorithm.entropy-coef 0.012" ;;
+  q1_hotprog)   EXTRA="--env.rewards.transport_progress.weight 240.0" ;;
+  q1_bigplace)  EXTRA="--env.rewards.place.weight 600.0" ;;
+  q1_fastdecay) EXTRA="$FAST" ;;
+  q1_lowhold)   EXTRA="$LOWHOLD" ;;
 esac
 say "carrying forward: ${EXTRA:-<defaults>}"
 printf '%s\n' "$BEST" > "$OUT/winner_name.txt"
 printf '%s\n' "$EXTRA" > "$OUT/winner_flags.txt"
 
 say "=== STAGE 2: the winner, longer and across the shape curriculum ==="
-run 2 r2_cube  Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA &
-run 3 r2_mid   Mjlab-Pick-Place-PiperX-Mid  4000 8192 $EXTRA &
-run 4 r2_full  Mjlab-Pick-Place-PiperX      4000 8192 $EXTRA &
-run 5 r2_seed2 Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA --agent.seed 17 &
+run 2 q2_cube  Mjlab-Pick-Place-PiperX-Cube 3500 8192 $EXTRA &
+run 3 q2_mid   Mjlab-Pick-Place-PiperX-Mid  3500 8192 $EXTRA &
+run 4 q2_full  Mjlab-Pick-Place-PiperX      3500 8192 $EXTRA &
+run 5 q2_seed2 Mjlab-Pick-Place-PiperX-Cube 3500 8192 $EXTRA --agent.seed 17 &
 # A control on whether the smoothness ramp was needed or merely harmless.
-run 6 r2_noramp Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA \
+run 6 q2_noramp Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA \
       --env.curriculum.action-rate-weight.params.stages.0.weight -0.15 \
       --env.curriculum.action-rate-weight.params.stages.1.weight -0.15 \
       --env.curriculum.action-acc-weight.params.stages.0.weight -0.08 \
       --env.curriculum.action-acc-weight.params.stages.1.weight -0.08 &
 wait
 say "stage 2 finished"
-for n in r2_cube r2_mid r2_full r2_seed2 r2_noramp; do
+for n in q2_cube q2_mid q2_full q2_seed2 q2_noramp; do
   say "  $n: placed=$(placed "$n") grasp_rate=$(grasped "$n") attempts=$(attempts "$n")"
 done
 
-say "=== STAGE 3: both shape levels, twice each, long ==="
-run 2 r3_full_a Mjlab-Pick-Place-PiperX     3200 8192 $EXTRA --agent.seed 1 &
-run 3 r3_full_b Mjlab-Pick-Place-PiperX     3200 8192 $EXTRA --agent.seed 23 &
-run 4 r3_mid_a  Mjlab-Pick-Place-PiperX-Mid 3200 8192 $EXTRA --agent.seed 1 &
-run 5 r3_mid_b  Mjlab-Pick-Place-PiperX-Mid 3200 8192 $EXTRA --agent.seed 23 &
-wait
-say "stage 3 finished"
-for n in r3_full_a r3_full_b r3_mid_a r3_mid_b; do
-  say "  $n: placed=$(placed "$n") grasp_rate=$(grasped "$n") attempts=$(attempts "$n")"
-done
 say "=== CAMPAIGN COMPLETE ==="
