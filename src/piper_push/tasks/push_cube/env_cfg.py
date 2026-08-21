@@ -53,9 +53,7 @@ def ghost_links() -> SceneEntityCfg:
 CUBE = "cube"
 GOAL = "push_goal"
 
-# Where the cube may start and where goals may be placed.  Both sit well inside
-# the PiPER-X's ~0.62 m reach so that a goal is never unreachable.
-# An annular sector about the base, not a box.  The old box reached in to
+# Where the cube may start and where goals may be placed: an annular sector about the base, not a box.  The old box reached in to
 # x=0.28, and its near-centre corner is the arm's blind spot: pushing a cube
 # outward from there needs the gripper at a radius it cannot reach, while
 # pushing inward stays easy, so the cube ratcheted toward the base until it
@@ -398,17 +396,21 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,  # 200 Hz physics, 50 Hz control.
-    episode_length_s=8.0,
+    # Long enough to contain the failure being trained against.  Idle time is
+    # measured from the last goal and starts at zero, so an 8 s episode can
+    # only hold an 8 s stall if the policy scores nothing at all for its whole
+    # length -- against an average of 25 goals per 8 s.  Deep stalls were
+    # therefore structurally impossible to experience, the penalties aimed at
+    # them never fired, and the episode length was doing exactly what the 4 s
+    # stall cutoff used to do one level up.  Stalls run 35 s at the median in
+    # play, so 30 s exposes most of one.
+    episode_length_s=30.0,
   )
 
   if play:
-    # Finite, unlike the usual play override: without a timeout a stalled env
-    # sits motionless forever and misrepresents what the policy does.
-    cfg.episode_length_s = 30.0
     # Deployment backstop only. Training deliberately runs without it: with the
     # cutoff in place the policy never experiences being stuck for longer than
     # the cutoff, so it never learns to get out -- it just waits for the reset.
-    # The 8 s episode already bounds what a stall can cost in training.
     cfg.terminations["stalled"] = TerminationTermCfg(
       func=push_mdp.stalled, params={"command_name": GOAL}, time_out=True
     )
