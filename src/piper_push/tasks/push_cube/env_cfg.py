@@ -288,22 +288,33 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": ee(),
       },
     ),
-    # w/mu = 41.7 mm at the friction ceiling, so anything above that tips the
-    # cube instead of sliding it.  Contact radius covers the cube's half-width
-    # plus the pad, and the cube's own top is 50 mm, so this only bites when
-    # the gripper is reaching over it.
+    # These two are a pair and only work together.  A horizontal push tips a
+    # box instead of sliding it above h = w/mu, which for w = 25 mm is 41.7 mm
+    # at the friction ceiling -- so contact above 40 mm is the *cause* of the
+    # tipping, and the tilt term below is only its symptom.
+    #
+    # Penalising the symptom alone is worse than nothing.  At identical weights
+    # tilt -25 measured 1.23% idle at 600 iterations and 27.76% at 2000: with
+    # no gradient toward what to do instead, the policy eventually settles on
+    # not touching the cube at all (tilt -15 for 2000 iterations reaches 0.1
+    # goals/s uniformly).  Adding the height term makes throughput flat across
+    # the whole randomised friction range -- 2.08/2.13/2.14/2.14/2.11 goals/s
+    # from mu 0.30 to 0.60, correlation +0.067, against +0.439 without it.
     "push_too_high": RewardTermCfg(
       func=push_mdp.push_too_high,
-      weight=-30.0,
+      weight=-12.0,
       params={
         "object_name": CUBE,
-        "contact_radius": 0.09,
+        # Just the cube's own footprint plus a pad width.  0.09 also covers the
+        # airspace the gripper crosses when it repositions around the cube,
+        # which charges for travel rather than for pushing.
+        "contact_radius": 0.055,
         "max_push_height": 0.040,
         "asset_cfg": ee(),
       },
     ),
     "cube_tipped": RewardTermCfg(
-      func=push_mdp.object_tilt, weight=-2.0, params={"object_name": CUBE}
+      func=push_mdp.object_tilt, weight=-25.0, params={"object_name": CUBE}
     ),
     "arm_below_table": RewardTermCfg(
       func=push_mdp.link_below_height,

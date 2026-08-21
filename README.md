@@ -18,7 +18,7 @@ policy takes minutes rather than days.
 
 | | |
 |---|---|
-| Observation (45-D) | 6 joint positions, 6 joint velocities, end-effector pose (position + 6-D rotation), cube pose (position + 6-D rotation), cube linear velocity, EE→cube, cube→goal, goal phase, last action |
+| Observation (47-D) | 6 joint positions, 6 joint velocities, end-effector pose (position + 6-D rotation), cube pose (position + 6-D rotation), cube linear velocity, EE→cube, cube→goal, goal phase, stall phase, last action |
 | Action (6-D) | joint position targets for `joint1`…`joint6`, offset from the home pose |
 | Gripper | permanently shut — its actuator is never written, so it holds `ctrl = 0` |
 | Goal | a point on the table 7–16 cm from the cube; resamples on a timer **and** the moment it is reached |
@@ -70,6 +70,35 @@ episode — the headline number), `Metrics/push_goal/planar_error`,
 
 Checkpoints land in
 `logs/rsl_rl/piperx_push_cube/<timestamp>_<run_name>/model_<iter>.pt`.
+
+## What the accepted policy does
+
+Measured on 256 environments for 90 s each, with the stall cutoff removed so a
+stuck policy stays stuck instead of being rescued by a reset:
+
+| | goals/s per env | idle > 8 s | envs that ever stall | corr(friction, idle) |
+|---|---:|---:|---:|---:|
+| no tipping penalties | 3.73 | 3.54% | 43/256 | +0.439 |
+| tilt penalty only | 2.38 | 27.76% | 199/256 | +0.587 |
+| **accepted** | 2.10 | **0.14%** | **9/256** | **+0.067** |
+
+The headline 3.73 belongs to a policy that only works at low friction. Cube
+friction is randomised per environment over [0.30, 0.60] at startup, and a
+horizontal push slides a box rather than tipping it only below h = w/mu — for
+a 25 mm half-width that boundary is 41.7 mm, inside the randomised range. Split
+by friction the difference is the whole story:
+
+```
+                mu:  [.30,.37) [.37,.43) [.43,.49) [.49,.55) [.55,.60)
+  no penalties      4.13      4.12      4.05      3.55      2.26   goals/s
+                    0.47%     0.11%     0.09%     7.39%    29.01%  idle > 8 s
+  accepted          2.08      2.13      2.14      2.14      2.11   goals/s
+                    0.01%     0.10%     0.04%     0.03%     0.57%  idle > 8 s
+```
+
+The accepted policy trades a third of its peak throughput for a flat response
+across the whole randomised range and a bounded worst case (19 s, against a
+stall that outlasts the 60 s measurement window for every other variant).
 
 ## Replay
 
