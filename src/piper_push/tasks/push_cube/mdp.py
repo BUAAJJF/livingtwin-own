@@ -36,21 +36,60 @@ _ROBOT = SceneEntityCfg("robot")
 ##
 
 
+def sector_sample(
+  count: int, radius_range: tuple[float, float], half_angle: float, device: str
+) -> torch.Tensor:
+  """Uniform over the *area* of an annular sector centred on the base."""
+  lo, hi = radius_range
+  u = sample_uniform(0.0, 1.0, (count,), device=device)
+  radius = torch.sqrt(lo * lo + u * (hi * hi - lo * lo))
+  angle = sample_uniform(-half_angle, half_angle, (count,), device=device)
+  return torch.stack([radius * torch.cos(angle), radius * torch.sin(angle)], dim=-1)
+
+
+def sector_clamp(
+  xy: torch.Tensor, radius_range: tuple[float, float], half_angle: float
+) -> torch.Tensor:
+  """Nearest point of the sector, in polar coordinates."""
+  radius = torch.norm(xy, dim=-1).clamp(*radius_range)
+  angle = torch.atan2(xy[:, 1], xy[:, 0]).clamp(-half_angle, half_angle)
+  return torch.stack([radius * torch.cos(angle), radius * torch.sin(angle)], dim=-1)
+
+
+def sector_violation(
+  xy: torch.Tensor, radius_range: tuple[float, float], half_angle: float
+) -> torch.Tensor:
+  """Distance by which a point lies outside the sector, in metres."""
+  radius = torch.norm(xy, dim=-1)
+  radial = (radius_range[0] - radius).clamp_min(0.0) + (
+    radius - radius_range[1]
+  ).clamp_min(0.0)
+  over = (torch.atan2(xy[:, 1], xy[:, 0]).abs() - half_angle).clamp_min(0.0)
+  return radial + radius * over  # arc length, so both terms are metres
+
+
 @dataclass(kw_only=True)
 class PushCommandCfg(LiftingCommandCfg):
   """A planar push goal that follows the cube instead of teleporting it."""
 
   goal_z: float = 0.025
   """Height of the goal marker: the cube's centre when it rests on the table."""
-  cube_spawn_x: tuple[float, float] = (0.34, 0.46)
-  cube_spawn_y: tuple[float, float] = (-0.12, 0.12)
+  workspace_radius: tuple[float, float] = (0.39, 0.58)
+  """Cube and goals live in an annular sector about the base, not a box.
+
+  A revolute base makes the reachable set annular, and the near-centre corner
+  of a box falls in the arm's inner blind spot: to push a cube outward the
+  gripper has to stand *behind* it, closer in still, and below roughly 0.33 m
+  it cannot.  Pushing inward stays easy from there, so successes ratchet the
+  cube toward the base until it parks somewhere it can never be pushed out of.
+  """
+  workspace_half_angle: float = 0.5585
+  """32 degrees either side of straight ahead."""
   cube_clearance_m: float = 0.12
   """Keep the cube this far from the gripper at reset, so a randomised arm
   posture does not start inside the cube and fling it."""
   goal_radius_range: tuple[float, float] = (0.06, 0.16)
   """How far ahead of the cube a new goal is placed."""
-  goal_bounds_x: tuple[float, float] = (0.28, 0.52)
-  goal_bounds_y: tuple[float, float] = (-0.20, 0.20)
   min_goal_separation: float = 0.05
   """Must exceed ``success_threshold``: a goal that spawns on top of the cube
   would complete instantly and hand the policy a free bonus forever."""
@@ -152,12 +191,7 @@ class PushCommand(LiftingCommand):
   def _place_cube(self, env_ids: torch.Tensor) -> torch.Tensor:
     """Drop the cube at a fresh pose and return its local xy."""
     count = len(env_ids)
-    lower = torch.tensor(
-      [self.cfg.cube_spawn_x[0], self.cfg.cube_spawn_y[0]], device=self.device
-    )
-    upper = torch.tensor(
-      [self.cfg.cube_spawn_x[1], self.cfg.cube_spawn_y[1]], device=self.device
-    )
+    sector = (self.cfg.workspace_radius, self.cfg.workspace_half_angle)
     # The arm was randomised by a reset event moments ago, but derived
     # quantities only refresh on the next forward(); ask for one so the
     # clearance test below sees where the gripper actually is.
@@ -167,12 +201,12 @@ class PushCommand(LiftingCommand):
       - self._env.scene.env_origins
     )[env_ids, :2]
 
-    xy = sample_uniform(lower, upper, (count, 2), device=self.device)
+    xy = sector_sample(count, *sector, self.device)
     for _ in range(4):
       too_close = torch.norm(xy - ee_xy, dim=-1) < self.cfg.cube_clearance_m
       if not bool(too_close.any()):
         break
-      retry = sample_uniform(lower, upper, (count, 2), device=self.device)
+      retry = sector_sample(count, *sector, self.device)
       xy = torch.where(too_close.unsqueeze(-1), retry, xy)
 
     # A hair above the half-extent so it settles instead of interpenetrating.
@@ -193,12 +227,7 @@ class PushCommand(LiftingCommand):
     cube_xy = (
       self._place_cube(env_ids) if self._resetting else self._cube_xy_local()[env_ids]
     )
-    lower = torch.tensor(
-      [self.cfg.goal_bounds_x[0], self.cfg.goal_bounds_y[0]], device=self.device
-    )
-    upper = torch.tensor(
-      [self.cfg.goal_bounds_x[1], self.cfg.goal_bounds_y[1]], device=self.device
-    )
+    sector = (self.cfg.workspace_radius, self.cfg.workspace_half_angle)
 
     goal_xy = torch.zeros(count, 2, device=self.device)
     pending = torch.ones(count, device=self.device, dtype=torch.bool)
@@ -208,17 +237,18 @@ class PushCommand(LiftingCommand):
       radius = sample_uniform(*self.cfg.goal_radius_range, (count,), device=self.device)
       angle = sample_uniform(-math.pi, math.pi, (count,), device=self.device)
       offset = torch.stack([radius * torch.cos(angle), radius * torch.sin(angle)], -1)
-      candidate = torch.clamp(cube_xy + offset, min=lower, max=upper)
+      candidate = sector_clamp(cube_xy + offset, *sector)
       goal_xy = torch.where(pending.unsqueeze(-1), candidate, goal_xy)
       # Clamping can drag a good candidate back onto the cube, so the
       # separation test has to run after it, not before.
       pending = torch.norm(goal_xy - cube_xy, dim=-1) < self.cfg.min_goal_separation
     if bool(pending.any()):
       # Fallback: push straight toward the middle of the workspace.
-      centre = 0.5 * (lower + upper)
+      mid = 0.5 * (sector[0][0] + sector[0][1])
+      centre = torch.tensor([mid, 0.0], device=self.device)
       away = centre - cube_xy
       away = away / away.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-      rescue = torch.clamp(cube_xy + away * self.cfg.goal_radius_range[0], lower, upper)
+      rescue = sector_clamp(cube_xy + away * self.cfg.goal_radius_range[0], *sector)
       goal_xy = torch.where(pending.unsqueeze(-1), rescue, goal_xy)
 
     goal_z = torch.full((count, 1), self.cfg.goal_z, device=self.device)
@@ -408,11 +438,11 @@ def object_airborne(
   return (z - height).clamp_min(0.0)
 
 
-def object_outside_box(
+def object_outside_workspace(
   env: "ManagerBasedRlEnv",
   object_name: str,
-  x_range: tuple[float, float],
-  y_range: tuple[float, float],
+  radius_range: tuple[float, float],
+  half_angle: float,
 ) -> torch.Tensor:
   """How far the cube has strayed past the region goals can be placed in.
 
@@ -423,9 +453,7 @@ def object_outside_box(
   """
   obj: Entity = env.scene[object_name]
   pos = obj.data.root_link_pos_w - env.scene.env_origins
-  over_x = (x_range[0] - pos[:, 0]).clamp_min(0.0) + (pos[:, 0] - x_range[1]).clamp_min(0.0)
-  over_y = (y_range[0] - pos[:, 1]).clamp_min(0.0) + (pos[:, 1] - y_range[1]).clamp_min(0.0)
-  return over_x + over_y
+  return sector_violation(pos[:, :2], radius_range, half_angle)
 
 
 def ee_above_height(
@@ -476,16 +504,11 @@ def stalled(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
 def object_out_of_bounds(
   env: "ManagerBasedRlEnv",
   object_name: str,
-  x_range: tuple[float, float],
-  y_range: tuple[float, float],
+  radius_range: tuple[float, float],
+  half_angle: float,
   z_max: float,
 ) -> torch.Tensor:
   obj: Entity = env.scene[object_name]
   pos = obj.data.root_link_pos_w - env.scene.env_origins
-  return (
-    (pos[:, 0] < x_range[0])
-    | (pos[:, 0] > x_range[1])
-    | (pos[:, 1] < y_range[0])
-    | (pos[:, 1] > y_range[1])
-    | (pos[:, 2] > z_max)
-  )
+  outside = sector_violation(pos[:, :2], radius_range, half_angle) > 0.0
+  return outside | (pos[:, 2] > z_max)

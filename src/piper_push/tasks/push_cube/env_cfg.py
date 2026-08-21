@@ -55,10 +55,18 @@ GOAL = "push_goal"
 
 # Where the cube may start and where goals may be placed.  Both sit well inside
 # the PiPER-X's ~0.62 m reach so that a goal is never unreachable.
-CUBE_SPAWN_X = (0.29, 0.51)
-CUBE_SPAWN_Y = (-0.19, 0.19)
-GOAL_BOUNDS_X = (0.28, 0.52)
-GOAL_BOUNDS_Y = (-0.20, 0.20)
+# An annular sector about the base, not a box.  The old box reached in to
+# x=0.28, and its near-centre corner is the arm's blind spot: pushing a cube
+# outward from there needs the gripper at a radius it cannot reach, while
+# pushing inward stays easy, so the cube ratcheted toward the base until it
+# parked for good.  Same area (0.103 vs 0.096 m^2), moved to where the arm
+# can actually work: the innermost stand-behind point is now 0.33 m, above
+# the 0.31 m the gripper reaches in 95% of play.
+WORKSPACE_RADIUS = (0.39, 0.58)
+WORKSPACE_HALF_ANGLE = 0.5585  # 32 degrees
+# One push length of slack beyond the goal region before the cube counts lost.
+CUBE_LOST_RADIUS = (0.32, 0.68)
+CUBE_LOST_HALF_ANGLE = 0.7854  # 45 degrees
 
 # Iterations are converted to env steps for the curricula: one iteration
 # advances `common_step_counter` by `num_steps_per_env`.
@@ -134,11 +142,9 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       stall_timeout_s=4.0,
       goal_z=CUBE_HALF_SIZE,
       cube_clearance_m=0.12,
-      cube_spawn_x=CUBE_SPAWN_X,
-      cube_spawn_y=CUBE_SPAWN_Y,
+      workspace_radius=WORKSPACE_RADIUS,
+      workspace_half_angle=WORKSPACE_HALF_ANGLE,
       goal_radius_range=(0.07, 0.16),
-      goal_bounds_x=GOAL_BOUNDS_X,
-      goal_bounds_y=GOAL_BOUNDS_Y,
     )
   }
 
@@ -269,9 +275,13 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       params={"min_height": 0.02, "asset_cfg": ghost_links()},
     ),
     "cube_past_goals": RewardTermCfg(
-      func=push_mdp.object_outside_box,
+      func=push_mdp.object_outside_workspace,
       weight=-15.0,
-      params={"object_name": CUBE, "x_range": GOAL_BOUNDS_X, "y_range": GOAL_BOUNDS_Y},
+      params={
+        "object_name": CUBE,
+        "radius_range": WORKSPACE_RADIUS,
+        "half_angle": WORKSPACE_HALF_ANGLE,
+      },
     ),
     # Losing the cube used to cost -2.0, exactly one goal, against the ~20 a
     # good episode banks -- so being reckless at the boundary was nearly free.
@@ -291,8 +301,8 @@ def make_push_cube_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       # come back before it gets this far.
       params={
         "object_name": CUBE,
-        "x_range": (0.22, 0.60),
-        "y_range": (-0.28, 0.28),
+        "radius_range": CUBE_LOST_RADIUS,
+        "half_angle": CUBE_LOST_HALF_ANGLE,
         "z_max": 0.20,
       },
     ),
