@@ -16,6 +16,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg, mdp
 from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -51,6 +52,9 @@ OBJECT_LOST_ANGLE = (-1.22, 1.22)
 # Release happens at 115 mm, so 0.30 is clear of every useful pose and well
 # under where the arm ends up if it flings itself.
 EE_CEILING = 0.30
+
+# One iteration advances common_step_counter by num_steps_per_env.
+STEPS_PER_ITERATION = 32
 
 
 def arm() -> SceneEntityCfg:
@@ -421,7 +425,35 @@ def make_pick_place_env_cfg(
     events=events,
     rewards=rewards,
     terminations=terminations,
-    curriculum={},
+    curriculum={
+      # Learn the task first, then tighten the style.  At full weight from step
+      # zero the smoothness penalties are three times the reach reward
+      # (measured on the first smoke: action_acc -0.49 and action_rate -0.32
+      # against reach +0.22), and the safest policy is to stop moving.  This is
+      # the same cliff the pushing task fell off.
+      "action_rate_weight": CurriculumTermCfg(
+        func=mdp.reward_curriculum,
+        params={
+          "reward_name": "action_rate",
+          "stages": [
+            {"step": 0, "weight": -0.02},
+            {"step": 200 * STEPS_PER_ITERATION, "weight": -0.06},
+            {"step": 500 * STEPS_PER_ITERATION, "weight": -0.15},
+          ],
+        },
+      ),
+      "action_acc_weight": CurriculumTermCfg(
+        func=mdp.reward_curriculum,
+        params={
+          "reward_name": "action_acc",
+          "stages": [
+            {"step": 0, "weight": -0.01},
+            {"step": 200 * STEPS_PER_ITERATION, "weight": -0.03},
+            {"step": 500 * STEPS_PER_ITERATION, "weight": -0.08},
+          ],
+        },
+      ),
+    },
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       entity_name="robot",
@@ -451,6 +483,7 @@ def make_pick_place_env_cfg(
 
   if play:
     cfg.episode_length_s = 40.0
+    cfg.curriculum = {}
     cfg.observations["proprio"].enable_corruption = False
     cfg.observations["object"].enable_corruption = False
 
