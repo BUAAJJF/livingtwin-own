@@ -67,8 +67,11 @@ say "carrying forward: ${EXTRA:-<defaults>}"
 echo "$EXTRA" > "$OUT/winner_flags.txt"
 echo "$BEST" > "$OUT/winner_name.txt"
 
+# 4000 iterations at 8192 envs is 2.1 s each measured solo and about 2.4 s with
+# five sharing the box: 2h40m, which is what the night has room for after
+# stage 1 and before stage 3.
 say "=== STAGE 2: the winner, longer and across the shape curriculum ==="
-run 2 s2_cube_long Mjlab-Pick-Place-PiperX-Cube 6000 8192 $EXTRA &
+run 2 s2_cube_long Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA &
 run 3 s2_mid       Mjlab-Pick-Place-PiperX-Mid  4000 8192 $EXTRA &
 run 4 s2_full      Mjlab-Pick-Place-PiperX      4000 8192 $EXTRA &
 run 5 s2_seed2     Mjlab-Pick-Place-PiperX-Cube 4000 8192 $EXTRA --agent.seed 17 &
@@ -85,12 +88,17 @@ for n in s2_cube_long s2_mid s2_full s2_seed2 s2_noramp; do
   say "  $n: objects_placed=$(placed "$n") grasp_rate=$(grasped "$n")"
 done
 
-say "=== STAGE 3: the full distribution, long ==="
-run 2 s3_full_long Mjlab-Pick-Place-PiperX 8000 8192 $EXTRA &
-run 3 s3_mid_long  Mjlab-Pick-Place-PiperX-Mid 8000 8192 $EXTRA &
+# Two shape levels, two seeds each: the final capability and how much of it is
+# luck.  A single long run cannot tell those apart, and by morning the
+# difference decides whether S2 starts on vision or on more shaping.
+say "=== STAGE 3: both shape levels, twice each, long ==="
+run 2 s3_full_a Mjlab-Pick-Place-PiperX     4500 8192 $EXTRA --agent.seed 1 &
+run 3 s3_full_b Mjlab-Pick-Place-PiperX     4500 8192 $EXTRA --agent.seed 23 &
+run 4 s3_mid_a  Mjlab-Pick-Place-PiperX-Mid 4500 8192 $EXTRA --agent.seed 1 &
+run 5 s3_mid_b  Mjlab-Pick-Place-PiperX-Mid 4500 8192 $EXTRA --agent.seed 23 &
 wait
 say "stage 3 finished"
-for n in s3_full_long s3_mid_long; do
+for n in s3_full_a s3_full_b s3_mid_a s3_mid_b; do
   say "  $n: objects_placed=$(placed "$n") grasp_rate=$(grasped "$n")"
 done
 say "=== CAMPAIGN COMPLETE ==="
