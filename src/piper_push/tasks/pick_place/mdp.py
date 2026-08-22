@@ -93,14 +93,23 @@ def sector_violation(
 # ---------------------------------------------------------------------------
 
 
-_UNSET = object()
-"""Sentinel: the shape event has not been looked up yet, which is not the same
-as having looked and found none."""
-
-
 @dataclass(kw_only=True)
 class PickCommandCfg(CommandTermCfg):
   object_name: str = "object"
+  """The object, when there is one.  Ignored if ``object_names`` is set."""
+  object_names: tuple[str, ...] = ()
+  """Several objects on the table at once, cleared one at a time.
+
+  The command owns which one is the target; every reward, metric and
+  termination reads the target through the same accessors they used when there
+  was only ever one, so clutter changes what the policy sees and not how the
+  task is scored.  Empty means the single-object task."""
+  pad_sensor_names: tuple[str, ...] = ()
+  """One pad sensor per object, in the same order as ``object_names``.
+
+  A single sensor filtered to all of them would report that a pad is touching
+  *an* object, and every judgement here -- is it grasped, was it carried,
+  did it settle in the bin -- is about a particular one."""
   robot_name: str = "robot"
   pad_sensor_name: str = "pad_contact"
   grasp_site: str = "grasp_site"
@@ -109,6 +118,19 @@ class PickCommandCfg(CommandTermCfg):
   spawn_angle: tuple[float, float] = (-0.14, 0.73)
   """Radians. Clear of the bin, which sits at -0.63 rad."""
   spawn_clearance_m: float = 0.09
+  spawn_object_gap: float = 0.012
+  """Clear space between two spawned objects, on top of their half-widths.
+
+  Only enough to keep them from spawning inside one another.  Objects landing
+  next to each other is the point of a cleanup task, not something to design
+  out."""
+  stray_radius: tuple[float, float] = (0.10, 0.62)
+  """An object outside this planar band has been batted out of the workspace.
+
+  It is put back rather than written off: with several objects the table can
+  only be cleared if every object is reachable, so one knocked into the corner
+  would stall the episode for as long as it lasted.  The cost shows up as
+  ``objects_strayed`` instead of as a deadlock."""
   reshape_on_place: bool = False
   """Draw a new shape for every object rather than one per episode.
 
@@ -169,21 +191,30 @@ class PickCommand(CommandTerm):
   def __init__(self, cfg: PickCommandCfg, env: "ManagerBasedRlEnv"):
     super().__init__(cfg, env)
     self._robot: Entity = env.scene[cfg.robot_name]
-    self._object: Entity = env.scene[cfg.object_name]
-    self._pads = env.scene[cfg.pad_sensor_name]
+    self._names = tuple(cfg.object_names) or (cfg.object_name,)
+    self._objects: list[Entity] = [env.scene[n] for n in self._names]
+    pad_names = tuple(cfg.pad_sensor_names) or (cfg.pad_sensor_name,)
+    assert len(pad_names) == len(self._names), (
+      f"{len(self._names)} objects but {len(pad_names)} pad sensors"
+    )
+    self._pads_all = [env.scene[n] for n in pad_names]
     self._site = self._robot.find_sites((cfg.grasp_site,))[0][0]
+    # All three parts of each object, for the segmentation mask: an object
+    # that is currently a cylinder has its core collapsed to a millimetre, so
+    # a mask built from the core alone would be empty exactly when the shape
+    # is not a box.
+    #
     # find_geoms returns indices into the ENTITY's geom list; the per-world
     # model arrays are global, and the entity-local index there lands on the
     # terrain plane instead.
-    local_geom = self._object.find_geoms((objects.CORE_GEOM,))[0][0]
-    self._object_geom = int(self._object.indexing.geom_ids[local_geom])
-    # All three parts, for the segmentation mask: an object that is
-    # currently a cylinder has its core collapsed to a millimetre, so a
-    # mask built from the core alone would be empty exactly when the
-    # shape is not a box.
-    self._object_geoms = tuple(
-      int(self._object.indexing.geom_ids[i])
-      for i in self._object.find_geoms(objects.OBJECT_GEOMS, preserve_order=True)[0]
+    self._geom_table = torch.tensor(
+      [
+        [int(o.indexing.geom_ids[i])
+         for i in o.find_geoms(objects.OBJECT_GEOMS, preserve_order=True)[0]]
+        for o in self._objects
+      ],
+      dtype=torch.long,
+      device=self.device,
     )
 
     zeros = torch.zeros(self.num_envs, device=self.device)
@@ -191,7 +222,7 @@ class PickCommand(CommandTerm):
     self.placed = zeros.clone().bool()
     self.just_grasped = zeros.clone()
     self.just_placed = zeros.clone()
-    self._shape_term = _UNSET
+    self._shape_terms: dict[int, object | None] = {}
     self.objects_placed = zeros.clone()
     self._grasp_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self._place_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -201,6 +232,21 @@ class PickCommand(CommandTerm):
     # grab-drop-grab loop worth more than finishing the task, and the policy
     # will find it long before it finds the bin.
     self._grasp_paid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    # Which object is being cleared, and which are already in the bin.  With
+    # one object the target is always zero and ``_cleared`` is the placed flag
+    # under another name, so the single-object path is unchanged.
+    self.target = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    self._cleared = torch.zeros(
+      self.num_envs, len(self._names), dtype=torch.bool, device=self.device
+    )
+    self._rows = torch.arange(self.num_envs, device=self.device)
+    # Whole tables emptied, and objects that had to be fetched back from
+    # outside the workspace.  Both only mean anything with clutter.
+    self.table_clears = torch.zeros(self.num_envs, device=self.device)
+    self.objects_strayed = torch.zeros(self.num_envs, device=self.device)
+    self._retarget_pending = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
     self.grasp_attempts = torch.zeros(self.num_envs, device=self.device)
     # Objects that reached the bin without ever having been picked up.  Logged
     # rather than silently discarded: a suppressed exploit is one you stop
@@ -222,23 +268,57 @@ class PickCommand(CommandTerm):
     # policy doing the task has one, a policy farming the bonus has many.
     self.metrics["grasp_attempts"] = self.grasp_attempts
     self.metrics["knocked_in"] = self.knocked_in
+    if self.num_objects > 1:
+      self.metrics["table_clears"] = self.table_clears
+      self.metrics["objects_strayed"] = self.objects_strayed
 
   # -- geometry ------------------------------------------------------------
 
   @property
-  def target_geom_ids(self) -> tuple[int, ...]:
-    """Global geom ids the target mask should light up."""
-    return self._object_geoms
+  def num_objects(self) -> int:
+    return len(self._names)
+
+  @property
+  def target_geom_ids(self) -> torch.Tensor:
+    """Global geom ids the target mask should light up, per environment.
+
+    Per environment rather than a constant, because with several objects on
+    the table the mask has to say *which one*, and that changes as each is
+    cleared.
+    """
+    return self._geom_table[self.target]
+
+  def _gather(self, per_object: torch.Tensor) -> torch.Tensor:
+    """Pick out the target's row from a (B, N, ...) stack."""
+    return per_object[self._rows, self.target]
+
+  def _stack(self, read) -> torch.Tensor:
+    """Read the same quantity off every object as (B, N, ...)."""
+    return torch.stack([read(o) for o in self._objects], dim=1)
+
+  @property
+  def all_half_sizes(self) -> torch.Tensor:
+    """(B, N, 3) bounding half-extents, one row per object."""
+    return torch.stack(
+      [shapes.object_half_size(self._env, n) for n in self._names], dim=1
+    )
 
   @property
   def object_half_size(self) -> torch.Tensor:
-    """Bounding half-extents of the composed object, per environment.
+    """Bounding half-extents of the target, per environment.
 
-    Not one geom's size any more: an object is up to three parts, and the
-    spawn height, the lift test and the bin-rim test all want the extent
-    of the whole body rather than of whichever part comes first.
+    Not one geom's size: an object is up to three parts, and the spawn height,
+    the lift test and the bin-rim test all want the extent of the whole body
+    rather than of whichever part comes first.
     """
-    return shapes.object_half_size(self._env)
+    return self._gather(self.all_half_sizes)
+
+  @property
+  def all_pos_local(self) -> torch.Tensor:
+    """(B, N, 3) object positions in the environment's own frame."""
+    return self._stack(lambda o: o.data.root_link_pos_w) - (
+      self._env.scene.env_origins.unsqueeze(1)
+    )
 
   @property
   def command(self) -> torch.Tensor:
@@ -249,27 +329,59 @@ class PickCommand(CommandTerm):
     return self._robot.data.site_pos_w[:, self._site]
 
   def _object_pos_local(self) -> torch.Tensor:
-    return self._object.data.root_link_pos_w - self._env.scene.env_origins
+    return self._gather(self.all_pos_local)
 
   # -- state ---------------------------------------------------------------
+
+  @property
+  def pad_found(self) -> torch.Tensor:
+    """(B, 2) contact flags for the pads, against the target only."""
+    return self._gather(torch.stack([p.data.found for p in self._pads_all], dim=1))
+
+  @property
+  def target_core_geom(self) -> torch.Tensor:
+    """(B,) global geom id of the target's core, for per-world model lookups."""
+    return self._geom_table[self.target, 0]
+
+  @property
+  def cleared(self) -> torch.Tensor:
+    """(B, N) which objects are already in the bin."""
+    return self._cleared
+
+  def target_pos_w(self) -> torch.Tensor:
+    return self._gather(self._stack(lambda o: o.data.root_link_pos_w))
+
+  def target_quat_w(self) -> torch.Tensor:
+    return self._gather(self._stack(lambda o: o.data.root_link_quat_w))
+
+  def target_lin_vel_w(self) -> torch.Tensor:
+    return self._target_lin_vel_w()
+
+  def _target_lin_vel_w(self) -> torch.Tensor:
+    return self._gather(self._stack(lambda o: o.data.root_link_lin_vel_w))
 
   def _gripper_opening(self) -> torch.Tensor:
     idx = self._robot.find_joints(("gripper_joint1",))[0][0]
     return 2.0 * self._robot.data.joint_pos[:, idx]
 
   def _update_metrics(self) -> None:
+    if bool(self._retarget_pending.any()):
+      self._retarget(self._retarget_pending.nonzero().flatten())
+      self._retarget_pending[:] = False
     obj = self._object_pos_local()
     site = self._site_pos_w() - self._env.scene.env_origins
     half = self.object_half_size
 
-    found = self._pads.data.found
-    force = self._pads.data.force
+    # The pad sensor belonging to the target, not any pad sensor: touching a
+    # different object is not a grasp of this one.
+    found = self._gather(torch.stack([p.data.found for p in self._pads_all], dim=1))
+    force = self._gather(torch.stack([p.data.force for p in self._pads_all], dim=1))
     assert found is not None and force is not None
     per_pad = torch.linalg.norm(force, dim=-1)
     both = (found > 0).all(dim=1) & (per_pad > self.cfg.grasp_force_n).all(dim=1)
 
     rel_v = torch.linalg.norm(
-      self._object.data.root_link_lin_vel_w - self._robot.data.site_lin_vel_w[:, self._site],
+      self._target_lin_vel_w() - self._robot.data.site_lin_vel_w[:, self._site],
       dim=-1,
     )
     near = torch.linalg.norm(obj - site, dim=-1) < self.cfg.grasp_reach_m
@@ -299,7 +411,7 @@ class PickCommand(CommandTerm):
     # plus ``settled`` close the rest of that door.
     below_rim = obj[:, 2] - half[:, 2] < self.cfg.bin_rim_z - 0.005
     released = ~(found > 0).any(dim=1)
-    settled = torch.linalg.norm(self._object.data.root_link_lin_vel_w, dim=-1) < (
+    settled = torch.linalg.norm(self._target_lin_vel_w(), dim=-1) < (
       self.cfg.place_settle_vel
     )
     # "It ended up in the bin" is not "it was put in the bin".  Every clause
@@ -338,18 +450,59 @@ class PickCommand(CommandTerm):
       # reach reward on an empty table.
       respawn = (self.just_placed + just_knocked).nonzero().flatten()
       if len(respawn) > 0:
-        self._place_object(respawn)
         self._place_count[respawn] = 0
         self._knock_count[respawn] = 0
         self.placed[respawn] = False
         self._knocked[respawn] = False
         self._grasp_paid[respawn] = False
+        if self.num_objects == 1:
+          self._place_object(respawn)
+        else:
+          # It stays in the bin.  The table refills only once it is empty,
+          # which is what makes this a cleanup task rather than the same
+          # pick-and-place with spectators.
+          self._cleared[respawn, self.target[respawn]] = True
+          empty = self._cleared[respawn].all(dim=-1)
+          if (~empty).any():
+            self._retarget(respawn[~empty])
+          if empty.any():
+            self.table_clears[respawn[empty]] += 1.0
+            self._place_all(respawn[empty])
+
+      self._recover_strays()
+
+  def _recover_strays(self) -> None:
+    """Put back any object batted out of reach.
+
+    Without this the table can stop being clearable: one object nudged into a
+    corner is never picked up, the set never empties, and the environment
+    spends the rest of the episode on a task it cannot finish.  Putting it back
+    keeps the episode productive and leaves the cost visible in the metric
+    rather than hidden in a stalled reward.
+    """
+    if self.num_objects == 1:
+      return
+    r = torch.linalg.norm(self.all_pos_local[:, :, :2], dim=-1)
+    lo, hi = self.cfg.stray_radius
+    astray = ((r < lo) | (r > hi)) & ~self._cleared
+    if not bool(astray.any()):
+      return
+    self.objects_strayed += astray.sum(dim=-1).float()
+    for idx in range(self.num_objects):
+      rows = astray[:, idx].nonzero().flatten()
+      if rows.numel():
+        self._place_one(idx, rows)
 
   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
     del env_ids
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
-    self._place_object(env_ids)
+    if self.num_objects == 1:
+      self._place_object(env_ids)
+    else:
+      self._place_all(env_ids)
+      self.table_clears[env_ids] = 0.0
+      self.objects_strayed[env_ids] = 0.0
     self._grasp_count[env_ids] = 0
     self._place_count[env_ids] = 0
     self._knock_count[env_ids] = 0
@@ -370,8 +523,8 @@ class PickCommand(CommandTerm):
 
   # -- placement -----------------------------------------------------------
 
-  def _reshape(self, env_ids: torch.Tensor) -> None:
-    """Redraw the object's geometry before it is put back on the table.
+  def _reshape(self, idx: int, env_ids: torch.Tensor) -> None:
+    """Redraw one object's geometry before it is put back on the table.
 
     Before, not after: the placement height is computed from the object's
     half-extent, so a taller object dropped into the pose chosen for a shorter
@@ -385,29 +538,76 @@ class PickCommand(CommandTerm):
     """
     from mjlab.managers.event_manager import RecomputeLevel
 
-    if self._shape_term is _UNSET:
+    if idx not in self._shape_terms:
+      name = "object_shape" if self.num_objects == 1 else f"object_shape_{idx}"
       try:
-        self._shape_term = self._env.event_manager.get_term_cfg("object_shape")
+        self._shape_terms[idx] = self._env.event_manager.get_term_cfg(name)
       except (KeyError, ValueError):
-        self._shape_term = None
-    if self._shape_term is None:
+        self._shape_terms[idx] = None
+    term = self._shape_terms[idx]
+    if term is None:
       return
-    self._shape_term.func(self._env, env_ids, **self._shape_term.params)
+    term.func(self._env, env_ids, **term.params)
     self._env.sim.recompute_constants(RecomputeLevel.set_const)
 
   def _place_object(self, env_ids: torch.Tensor) -> None:
-    """Drop the object somewhere reachable and clear of the hand.
+    """Put each environment's current target back on the table.
 
-    Clearance is beside-or-above, not planar: forbidding the whole column under
-    the gripper would make "hand already over the object" an unreachable start
-    state, and that is exactly the state a fresh grasp begins from.
+    Dispatched per object index rather than vectorised across them, because
+    which object is the target differs by environment and the write goes to a
+    different entity for each.  With three objects that is three small writes.
+    """
+    if self.num_objects == 1:
+      self._place_one(0, env_ids)
+      return
+    target = self.target[env_ids]
+    for idx in range(self.num_objects):
+      rows = env_ids[target == idx]
+      if rows.numel():
+        self._place_one(idx, rows)
+
+  def _place_all(self, env_ids: torch.Tensor) -> None:
+    """Refill the table.  Used on reset and once the last object is cleared."""
+    for idx in range(self.num_objects):
+      self._place_one(idx, env_ids)
+    self._cleared[env_ids] = False
+    # Choosing the nearest object needs the poses that were just written, and
+    # on the reset path they are not readable yet: _reset_idx runs the events
+    # and resamples the command before sim.forward(), so a read here returns
+    # the previous episode's positions.  Aim at the first object, which is
+    # always a valid uncleared one, and choose properly on the next step.
+    self.target[env_ids] = 0
+    self._retarget_pending[env_ids] = True
+
+  def _place_one(self, idx: int, env_ids: torch.Tensor) -> None:
+    """Drop one object somewhere reachable, clear of the hand and of the rest.
+
+    Clearance from the hand is beside-or-above, not planar: forbidding the
+    whole column under the gripper would make "hand already over the object"
+    an unreachable start state, and that is exactly the state a fresh grasp
+    begins from.
+
+    Clearance from the other objects is only enough to keep them from spawning
+    inside one another.  Objects landing next to each other is the point of
+    this task, not something to design out.
     """
     if self.cfg.reshape_on_place and not self._resetting:
-      self._reshape(env_ids)
+      self._reshape(idx, env_ids)
     count = len(env_ids)
-    half = self.object_half_size[env_ids]
+    half = self.all_half_sizes[env_ids, idx]
     site = (self._site_pos_w()[env_ids] - self._env.scene.env_origins[env_ids])
     tip_z = site[:, 2] - FINGERTIP_DROP_M
+
+    others = None
+    if self.num_objects > 1:
+      pos = self.all_pos_local[env_ids]                       # (count, N, 3)
+      keep = [j for j in range(self.num_objects) if j != idx]
+      others = pos[:, keep, :2]                               # (count, N-1, 2)
+      # Half-widths of this object and each other one, so the test scales with
+      # what was actually drawn rather than with the widest thing possible.
+      mine = half[:, :2].amax(dim=-1, keepdim=True)           # (count, 1)
+      theirs = self.all_half_sizes[env_ids][:, keep, :2].amax(dim=-1)
+      self._min_sep = mine + theirs + self.cfg.spawn_object_gap
 
     xy = sector_sample(count, self.cfg.spawn_radius, self.cfg.spawn_angle, self.device)
     for _ in range(self.cfg.spawn_attempts):
@@ -415,6 +615,9 @@ class PickCommand(CommandTerm):
       clear = (planar > self.cfg.spawn_clearance_m) | (
         tip_z > 2.0 * half[:, 2] + self.cfg.spawn_clearance_m
       )
+      if others is not None:
+        gap = torch.linalg.norm(xy.unsqueeze(1) - others, dim=-1)
+        clear = clear & (gap > self._min_sep).all(dim=-1)
       if bool(clear.all()):
         break
       fresh = sector_sample(
@@ -429,10 +632,27 @@ class PickCommand(CommandTerm):
     pose[:, 3] = torch.cos(yaw / 2)
     pose[:, 6] = torch.sin(yaw / 2)
     pose[:, :3] += self._env.scene.env_origins[env_ids]
-    self._object.write_root_link_pose_to_sim(pose, env_ids=env_ids)
-    self._object.write_root_link_velocity_to_sim(
+    obj = self._objects[idx]
+    obj.write_root_link_pose_to_sim(pose, env_ids=env_ids)
+    obj.write_root_link_velocity_to_sim(
       torch.zeros(count, 6, device=self.device), env_ids=env_ids
     )
+
+  def _retarget(self, env_ids: torch.Tensor) -> None:
+    """Aim at the nearest object still on the table.
+
+    Nearest to the hand, and only re-evaluated when an object is cleared: a
+    target that tracked the gripper continuously would let the policy change
+    its mind by moving, and the reward would follow it around instead of
+    driving it anywhere.
+    """
+    if self.num_objects == 1:
+      return
+    pos = self.all_pos_local[env_ids]
+    site = (self._site_pos_w()[env_ids] - self._env.scene.env_origins[env_ids])
+    dist = torch.linalg.norm(pos - site.unsqueeze(1), dim=-1)
+    dist = dist.masked_fill(self._cleared[env_ids], float("inf"))
+    self.target[env_ids] = dist.argmin(dim=-1)
 
   def _debug_vis_impl(self, visualizer: "DebugVisualizer") -> None:
     target = self._drop_local + self._env.scene.env_origins
@@ -467,32 +687,56 @@ def ee_pose_b(env: "ManagerBasedRlEnv", asset_cfg: SceneEntityCfg) -> torch.Tens
   return torch.cat([pos, rot], dim=-1)
 
 
-def object_pose_b(env: "ManagerBasedRlEnv", object_name: str) -> torch.Tensor:
+# These read the target through the command rather than an entity by name.
+# With one object the two are the same thing; with several, "the object" is a
+# question only the command can answer, and having two answers to it is how a
+# reward ends up shaping towards one object while the metric scores another.
+
+
+def object_pose_b(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   robot: Entity = env.scene["robot"]
-  obj: Entity = env.scene[object_name]
+  cmd: PickCommand = env.command_manager.get_term(command_name)
   inv = quat_conjugate(robot.data.root_link_quat_w)
   pos = quat_apply_inverse(
-    robot.data.root_link_quat_w, obj.data.root_link_pos_w - robot.data.root_link_pos_w
+    robot.data.root_link_quat_w, cmd.target_pos_w() - robot.data.root_link_pos_w
   )
-  rot = _rotation_6d(inv, obj.data.root_link_quat_w)
+  rot = _rotation_6d(inv, cmd.target_quat_w())
   return torch.cat([pos, rot], dim=-1)
 
 
-def object_lin_vel_b(env: "ManagerBasedRlEnv", object_name: str) -> torch.Tensor:
+def object_lin_vel_b(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   robot: Entity = env.scene["robot"]
-  obj: Entity = env.scene[object_name]
-  return quat_apply_inverse(robot.data.root_link_quat_w, obj.data.root_link_lin_vel_w)
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  return quat_apply_inverse(robot.data.root_link_quat_w, cmd.target_lin_vel_w())
 
 
 def ee_to_object(
-  env: "ManagerBasedRlEnv", object_name: str, asset_cfg: SceneEntityCfg
+  env: "ManagerBasedRlEnv", command_name: str, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
   robot: Entity = env.scene[asset_cfg.name]
-  obj: Entity = env.scene[object_name]
+  cmd: PickCommand = env.command_manager.get_term(command_name)
   site = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
-  return quat_apply_inverse(
-    robot.data.root_link_quat_w, obj.data.root_link_pos_w - site
+  return quat_apply_inverse(robot.data.root_link_quat_w, cmd.target_pos_w() - site)
+
+
+def clutter_state(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """Where the objects that are NOT the target are, and whether they are gone.
+
+  Privileged, and the whole reason the critic can still do its job in clutter:
+  the actor is told which object to fetch and can see the rest in the depth
+  image, but the value of a state depends on how much is left and where, and
+  that is exactly what a fixed-width state vector struggles to carry.  Four
+  numbers per object -- position relative to the hand, and cleared or not --
+  in a fixed order, so the width is constant.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  robot: Entity = env.scene["robot"]
+  site = robot.data.site_pos_w[:, cmd._site]
+  rel = cmd.all_pos_local + env.scene.env_origins.unsqueeze(1) - site.unsqueeze(1)
+  rel = quat_apply_inverse(
+    robot.data.root_link_quat_w.unsqueeze(1).expand(-1, cmd.num_objects, -1), rel
   )
+  return torch.cat([rel, cmd.cleared.float().unsqueeze(-1)], dim=-1).flatten(1)
 
 
 def object_to_drop(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
@@ -571,9 +815,11 @@ def camera_scene(
 
   ids = seg[..., 0]
   types = seg[..., 1]
-  target = torch.as_tensor(cmd.target_geom_ids, device=ids.device)
+  # (B, K), not (K,): with several objects on the table the mask has to say
+  # which one is the target, and that changes as each is cleared.
+  target = cmd.target_geom_ids.to(ids.device)
   is_geom = types == int(mujoco.mjtObj.mjOBJ_GEOM)
-  mask = (ids.unsqueeze(-1) == target.view(1, 1, 1, -1)).any(-1) & is_geom
+  mask = (ids.unsqueeze(-1) == target[:, None, None, :]).any(-1) & is_geom
   mask = mask.float().unsqueeze(1)
 
   return torch.cat([norm, mask, norm * mask], dim=1)
@@ -590,10 +836,15 @@ def grasp_state(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   return cmd.grasped.float().unsqueeze(-1)
 
 
-def pad_contact(env: "ManagerBasedRlEnv", sensor_name: str) -> torch.Tensor:
-  found = env.scene[sensor_name].data.found
-  assert found is not None
-  return (found > 0).float()
+def pad_contact(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """Are the pads touching the target.
+
+  The target, not any object: this is the one proprioceptive channel that
+  survives to hardware, and on hardware "the drive is loaded" means the thing
+  in the fingers, which is the thing being fetched.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  return (cmd.pad_found > 0).float()
 
 
 def object_shape(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
@@ -610,10 +861,14 @@ def object_shape(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
 def object_physics(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   """Mass, table friction and centre-of-mass offset. Critic only."""
   cmd: PickCommand = env.command_manager.get_term(command_name)
-  body = cmd._object.indexing.body_ids[0]
-  mass = torch.as_tensor(env.sim.model.body_mass[:])[:, body].unsqueeze(-1)
-  fric = torch.as_tensor(env.sim.model.geom_friction[:])[:, cmd._object_geom, 0:1]
-  ipos = torch.as_tensor(env.sim.model.body_ipos[:])[:, body]
+  bodies = torch.tensor(
+    [o.indexing.body_ids[0] for o in cmd._objects], device=cmd.device
+  )
+  body = bodies[cmd.target]
+  rows0 = torch.arange(cmd.num_envs, device=cmd.device)
+  mass = torch.as_tensor(env.sim.model.body_mass[:])[rows0, body].unsqueeze(-1)
+  fric = torch.as_tensor(env.sim.model.geom_friction[:])[rows0, cmd.target_core_geom, 0:1]
+  ipos = torch.as_tensor(env.sim.model.body_ipos[:])[rows0, body]
   return torch.cat([mass, fric, ipos], dim=-1)
 
 
@@ -623,28 +878,26 @@ def object_physics(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
 
 
 def reach_object(
-  env: "ManagerBasedRlEnv", command_name: str, object_name: str, std: float,
-  asset_cfg: SceneEntityCfg,
+  env: "ManagerBasedRlEnv", command_name: str, std: float, asset_cfg: SceneEntityCfg,
 ) -> torch.Tensor:
   """Dense until the object is held, then off: a policy still being paid to
   hover near the object has a reason not to commit to lifting it."""
   cmd: PickCommand = env.command_manager.get_term(command_name)
   robot: Entity = env.scene[asset_cfg.name]
-  obj: Entity = env.scene[object_name]
   site = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
-  d = torch.linalg.norm(obj.data.root_link_pos_w - site, dim=-1)
+  d = torch.linalg.norm(cmd.target_pos_w() - site, dim=-1)
   return (1.0 - torch.tanh(d / std)) * (~cmd.grasped).float()
 
 
 def pads_touching(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   """Both pads on the object. Both, not either: one pad is a shove."""
   cmd: PickCommand = env.command_manager.get_term(command_name)
-  found = cmd._pads.data.found
+  found = cmd.pad_found
   assert found is not None
   return ((found > 0).all(dim=1) & ~cmd.grasped).float()
 
 
-def palm_pushing(env: "ManagerBasedRlEnv", sensor_name: str) -> torch.Tensor:
+def palm_pushing(env: "ManagerBasedRlEnv", sensor_names: tuple[str, ...]) -> torch.Tensor:
   """The gripper's body touching the object.
 
   Nothing forbade this, so the policy used the palm as a bat: it drove the
@@ -652,11 +905,16 @@ def palm_pushing(env: "ManagerBasedRlEnv", sensor_name: str) -> torch.Tensor:
   contact the hardware would answer by knocking the object away rather than by
   moving it.  Shrinking the contact\'s softness does not remove the behaviour,
   only the depth it shows up at, so the behaviour is priced instead.
+
+  Charged against every object, not just the target: batting a bystander out of
+  the way with the palm is the same contact and the same problem.
   """
-  sensor = env.scene[sensor_name]
-  found = sensor.data.found
-  assert found is not None
-  return (found > 0).any(dim=1).float()
+  hit = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+  for name in sensor_names:
+    found = env.scene[name].data.found
+    assert found is not None
+    hit |= (found > 0).any(dim=1)
+  return hit.float()
 
 
 def holding(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:

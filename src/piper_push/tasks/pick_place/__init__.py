@@ -75,3 +75,33 @@ register_mjlab_task(
   rl_cfg=pick_place_distill_runner_cfg(),
   runner_cls=PickPlaceDistillationRunner,
 )
+
+
+# S3: several objects on the table, cleared one at a time.  The command picks
+# the target -- nearest to the hand, re-decided only when one is cleared, so
+# the policy cannot change its mind by moving and drag the reward with it --
+# and the table refills once it is empty.  Everything else about the task, the
+# rewards, the metrics and the gate, is what it was with one object.
+register_mjlab_task(
+  task_id="Mjlab-Cleanup-PiperX",
+  env_cfg=make_pick_place_env_cfg(num_objects=3),
+  play_env_cfg=make_pick_place_env_cfg(play=True, num_objects=3),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_cleanup"),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Cleanup-PiperX-Vision",
+  env_cfg=make_pick_place_env_cfg(vision=True, num_objects=3),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, num_objects=3),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(experiment_name="piperx_cleanup_vision"),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Cleanup-PiperX-Distill",
+  env_cfg=make_pick_place_env_cfg(vision=True, num_objects=3),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, num_objects=3),
+  rl_cfg=pick_place_distill_runner_cfg(experiment_name="piperx_cleanup_distill"),
+  runner_cls=PickPlaceDistillationRunner,
+)

@@ -106,6 +106,7 @@ def make_pick_place_env_cfg(
   profile: str = "bare_gripper",
   shape_variety: float = 1.0,
   vision: bool = False,
+  num_objects: int = 1,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
 
@@ -113,6 +114,14 @@ def make_pick_place_env_cfg(
   single fixed cube, 1 the full verified distribution.  The smoke test runs at
   0 on purpose -- a bug in the reward is far easier to see when every
   environment holds the same object, and a full distribution hides it.
+
+  ``num_objects`` puts several objects on the table at once, to be cleared one
+  at a time.  The command decides which is the target; every reward, metric and
+  termination reads that target through the same accessors they used when there
+  was only one, so clutter changes what the policy has to see and not how the
+  task is scored.  Each object needs its own contact sensors -- a single sensor
+  filtered to all of them would say that a pad is touching *an* object, and
+  every judgement here is about a particular one.
 
   ``vision`` adds the third-person camera and the observation group built
   from it.  It does not remove the object state -- the critic keeps it, and
@@ -125,6 +134,17 @@ def make_pick_place_env_cfg(
   to be handicapped by a constraint that exists because the actor has to run on
   a robot.
   """
+
+  multi = num_objects > 1
+  obj_names = (
+    tuple(f"{OBJECT}_{i}" for i in range(num_objects)) if multi else (OBJECT,)
+  )
+  pad_names = (
+    tuple(f"{PAD_SENSOR}_{i}" for i in range(num_objects)) if multi else (PAD_SENSOR,)
+  )
+  palm_names = (
+    tuple(f"{PALM_SENSOR}_{i}" for i in range(num_objects)) if multi else (PALM_SENSOR,)
+  )
 
   def blend(rng: tuple[float, float]) -> tuple[float, float]:
     mid = 0.5 * (rng[0] + rng[1])
@@ -149,7 +169,7 @@ def make_pick_place_env_cfg(
     # unchanged: the drive reports its own current, and "am I squeezing
     # something" is the cheapest reliable bit of it.
     "pad_contact": ObservationTermCfg(
-      func=pick_mdp.pad_contact, params={"sensor_name": PAD_SENSOR}
+      func=pick_mdp.pad_contact, params={"command_name": TASK}
     ),
     # The reward switches behaviour on this flag; hiding it would make the MDP
     # non-Markov in exactly the dimension the task turns on.
@@ -160,17 +180,17 @@ def make_pick_place_env_cfg(
   object_state = {
     "object_pose": ObservationTermCfg(
       func=pick_mdp.object_pose_b,
-      params={"object_name": OBJECT},
+      params={"command_name": TASK},
       noise=Unoise(n_min=-0.005, n_max=0.005),
     ),
     "object_vel": ObservationTermCfg(
       func=pick_mdp.object_lin_vel_b,
-      params={"object_name": OBJECT},
+      params={"command_name": TASK},
       noise=Unoise(n_min=-0.02, n_max=0.02),
     ),
     "ee_to_object": ObservationTermCfg(
       func=pick_mdp.ee_to_object,
-      params={"object_name": OBJECT, "asset_cfg": ee()},
+      params={"command_name": TASK, "asset_cfg": ee()},
       noise=Unoise(n_min=-0.005, n_max=0.005),
     ),
     "object_to_drop": ObservationTermCfg(
@@ -190,6 +210,16 @@ def make_pick_place_env_cfg(
       func=pick_mdp.object_physics, params={"command_name": TASK}
     ),
   }
+  if multi:
+    # The critic is told where the rest of the table is.  The actor is not: it
+    # is given one target and the depth image, which already contains the
+    # others.  That asymmetry is the point -- a value function has to know how
+    # much work is left, and a fixed-width state vector is a poor way to carry
+    # a variable number of objects, which is the argument for the camera in the
+    # first place.
+    privileged["clutter"] = ObservationTermCfg(
+      func=pick_mdp.clutter_state, params={"command_name": TASK}
+    )
 
   observations = {
     "proprio": ObservationGroupCfg(dict(proprio), enable_corruption=not play),
@@ -230,6 +260,8 @@ def make_pick_place_env_cfg(
       # recompute for a shape that cannot change.
       reshape_on_place=shape_variety > 0.0,
       object_name=OBJECT,
+      object_names=obj_names if multi else (),
+      pad_sensor_names=pad_names if multi else (),
       pad_sensor_name=PAD_SENSOR,
       spawn_radius=SPAWN_RADIUS,
       spawn_angle=SPAWN_ANGLE,
@@ -274,16 +306,22 @@ def make_pick_place_env_cfg(
     # push task spent six rounds discovering what that does to a training
     # curve.  Re-rolling every episode costs a broadphase bound recompute on
     # the reset envs only.
-    "object_shape": EventTermCfg(
-      func=shapes.randomize_object_shape,
-      mode="reset",
-      params={
-        "asset_cfg": SceneEntityCfg(OBJECT),
-        "mass_range": objects.OBJECT_MASS_RANGE,
-        "friction_range": objects.OBJECT_FRICTION_RANGE,
-        "variety": shape_variety,
-      },
-    ),
+    # One term per object.  The command looks them up by name when it redraws
+    # an object at placement time, so the names are part of the contract:
+    # "object_shape" with one object, "object_shape_<i>" with several.
+    **{
+      ("object_shape" if not multi else f"object_shape_{i}"): EventTermCfg(
+        func=shapes.randomize_object_shape,
+        mode="reset",
+        params={
+          "asset_cfg": SceneEntityCfg(name),
+          "mass_range": objects.OBJECT_MASS_RANGE,
+          "friction_range": objects.OBJECT_FRICTION_RANGE,
+          "variety": shape_variety,
+        },
+      )
+      for i, name in enumerate(obj_names)
+    },
     # The grasp knob.  S0 measured the failure boundary at mu ~ mass in kg
     # (0.30 holds 300 g, 0.40 holds 400 g), so this range clears the heaviest
     # object in the distribution by 38%.
@@ -322,7 +360,6 @@ def make_pick_place_env_cfg(
       weight=1.0,
       params={
         "command_name": TASK,
-        "object_name": OBJECT,
         "std": 0.12,
         "asset_cfg": ee(),
       },
@@ -421,7 +458,7 @@ def make_pick_place_env_cfg(
     "palm_push": RewardTermCfg(
       func=pick_mdp.palm_pushing,
       weight=-4.0,
-      params={"sensor_name": PALM_SENSOR},
+      params={"sensor_names": palm_names},
     ),
     # -- move smoothly and cheaply -------------------------------------------
     "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.15),
@@ -467,7 +504,7 @@ def make_pick_place_env_cfg(
       env_spacing=1.6,
       entities={
         "robot": piper.get_pick_robot_cfg(profile),
-        OBJECT: EntityCfg(spec_fn=objects.get_object_spec),
+        **{n: EntityCfg(spec_fn=objects.get_object_spec) for n in obj_names},
         BIN: EntityCfg(
           spec_fn=objects.get_bin_spec,
           init_state=EntityCfg.InitialStateCfg(
@@ -478,21 +515,31 @@ def make_pick_place_env_cfg(
       sensors=(
         # Both pads, filtered to the object: "is either pad touching anything"
         # would count the table and the bin wall as a grasp.
-        ContactSensorCfg(
-          name=PAD_SENSOR,
-          primary=ContactMatch(mode="geom", pattern=piper.FINGER_PADS, entity="robot"),
-          secondary=ContactMatch(mode="body", pattern="object", entity=OBJECT),
-          fields=("found", "force"),
-          reduce="netforce",
+        *(
+          ContactSensorCfg(
+            name=pad,
+            primary=ContactMatch(
+              mode="geom", pattern=piper.FINGER_PADS, entity="robot"
+            ),
+            secondary=ContactMatch(mode="body", pattern="object", entity=obj),
+            fields=("found", "force"),
+            reduce="netforce",
+          )
+          for pad, obj in zip(pad_names, obj_names, strict=True)
         ),
         # The gripper body against the object.  Its own sensor because the
         # palm is not a pad: touching the object with it is a shove, and
         # without a term that can see it the behaviour is free.
-        ContactSensorCfg(
-          name=PALM_SENSOR,
-          primary=ContactMatch(mode="geom", pattern=piper.PALM_GEOMS, entity="robot"),
-          secondary=ContactMatch(mode="body", pattern="object", entity=OBJECT),
-          fields=("found",),
+        *(
+          ContactSensorCfg(
+            name=palm,
+            primary=ContactMatch(
+              mode="geom", pattern=piper.PALM_GEOMS, entity="robot"
+            ),
+            secondary=ContactMatch(mode="body", pattern="object", entity=obj),
+            fields=("found",),
+          )
+          for palm, obj in zip(palm_names, obj_names, strict=True)
         ),
       ),
     ),
@@ -540,8 +587,12 @@ def make_pick_place_env_cfg(
       # same card.  Overflow surfaces as silent tunnelling rather than an
       # error, so this still leads the measured need by 30x, and the
       # multi-object stage should re-measure rather than inherit it.
-      nconmax=128,
-      njmax=800,
+      # Measured, not guessed: 4.4 contacts per environment with one object and
+      # 13 with three.  128 was set from the first of those with a wide margin;
+      # the margin is kept rather than the number, because 512 was part of what
+      # ran a 4096-environment run out of memory.
+      nconmax=128 * (2 if num_objects > 1 else 1),
+      njmax=800 * (2 if num_objects > 1 else 1),
       mujoco=MujocoCfg(
         # 2 ms, not 5.  A 1.4 m/s release covers 6.85 mm in a 5 ms step, which
         # is most of the way through a finger pad before the solver has seen
