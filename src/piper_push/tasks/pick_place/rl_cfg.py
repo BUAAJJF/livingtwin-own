@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
+from piper_push.distill import (
+  RslRlDistillationAlgorithmCfg,
+  RslRlDistillationRunnerCfg,
+)
+
 
 def pick_place_ppo_runner_cfg(
   experiment_name: str = "piperx_pick_place",
@@ -127,3 +132,50 @@ def pick_place_vision_ppo_runner_cfg(
   }
   cfg.wandb_tags = ("piperx", "pick-place", "vision")
   return cfg
+
+
+def pick_place_distill_runner_cfg(
+  experiment_name: str = "piperx_pick_place_distill",
+  max_iterations: int = 3000,
+) -> RslRlDistillationRunnerCfg:
+  """Bootstrap the vision policy off the state policy.
+
+  The student is the same network the vision PPO stage would train from
+  scratch -- same convolutions, same GRU, same head -- so the checkpoint this
+  produces drops straight into that stage as an initialisation.  That is the
+  whole point of doing it in this order: distillation answers "can a camera
+  reach this behaviour at all" in a supervised problem with a known target,
+  and only then does PPO get asked to improve on it.
+
+  The teacher is byte-identical to ``pick_place_ppo_runner_cfg``'s actor,
+  because it is loaded from that actor's weights with ``strict=True``.  Change
+  one and this has to change with it.
+  """
+  ppo = pick_place_ppo_runner_cfg()
+  vision = pick_place_vision_ppo_runner_cfg()
+  return RslRlDistillationRunnerCfg(
+    student=vision.actor,
+    teacher=ppo.actor,
+    algorithm=RslRlDistillationAlgorithmCfg(
+      num_learning_epochs=1,
+      # 32 steps of rollout, two optimizer steps of 16.  An uneven split would
+      # silently discard the remainder.
+      gradient_length=16,
+      learning_rate=5.0e-4,
+      max_grad_norm=1.0,
+      loss_type="mse",
+    ),
+    experiment_name=experiment_name,
+    logger="wandb",
+    wandb_project="piper-pick-place",
+    wandb_tags=("piperx", "pick-place", "vision", "distill"),
+    save_interval=100,
+    num_steps_per_env=32,
+    max_iterations=max_iterations,
+    obs_groups={
+      # Byte-identical to the vision PPO actor's tuple, so the student the
+      # distillation produces loads into that stage without a rename.
+      "student": ("proprio", "camera"),
+      "teacher": ("teacher_proprio", "object"),
+    },
+  )

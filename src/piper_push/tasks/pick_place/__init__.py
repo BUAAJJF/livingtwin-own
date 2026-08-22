@@ -2,7 +2,10 @@ from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
 from .env_cfg import make_pick_place_env_cfg
+from piper_push.distill import PickPlaceDistillationRunner
+
 from .rl_cfg import (
+  pick_place_distill_runner_cfg,
   pick_place_ppo_runner_cfg,
   pick_place_vision_ppo_runner_cfg,
 )
@@ -48,4 +51,19 @@ register_mjlab_task(
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_vision_ppo_runner_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
+)
+
+
+# The bootstrap.  Same environment as the vision task plus one extra
+# observation group: the proprioception the state teacher was trained on, which
+# the vision variant replaces and the teacher still needs.  The student acts,
+# the teacher labels -- so the states being labelled are the ones a camera
+# policy actually reaches, not the ones a policy that already knew the answer
+# would have visited.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill",
+  env_cfg=make_pick_place_env_cfg(vision=True, teacher_obs=True),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, teacher_obs=True),
+  rl_cfg=pick_place_distill_runner_cfg(),
+  runner_cls=PickPlaceDistillationRunner,
 )

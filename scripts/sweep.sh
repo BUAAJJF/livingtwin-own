@@ -36,7 +36,12 @@ export MUJOCO_GL=${MUJOCO_GL:-disable}
 
 OUT=${OUT:-/home/yunfan/work/piper-push/h}
 NUM_ENVS=${NUM_ENVS:-8192}
-ITERS=${ITERS:-3500}
+# 2000, not 3500.  On the rebuilt simulation every configuration in this
+# campaign was flat by iteration ~1700 -- h_full held 10.0 placements per
+# episode over the following 1600 iterations while grasp_rate oscillated
+# 0.124-0.184 with no trend -- and the S1 gate was already met at 3200.
+# Iterations past the plateau cost GPU hours and buy nothing.
+ITERS=${ITERS:-2000}
 mkdir -p "$OUT"
 LOG="$OUT/driver.log"
 say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
