@@ -13,6 +13,11 @@ set -Euo pipefail
 cd "$(dirname "$0")/.."
 export PATH=$HOME/.local/bin:$PATH
 export LD_LIBRARY_PATH=/home/yunfan/micromamba/envs/mjlab/lib:${LD_LIBRARY_PATH:-}
+# Headless training never renders, but importing mujoco initialises a GL
+# backend anyway, and on a box without glvnd's libEGL.so.1 that import
+# raises before the trainer starts.  Disabling GL outright is both the fix
+# and the honest description of what a training run needs.
+export MUJOCO_GL=${MUJOCO_GL:-disable}
 [ -f "$HOME/.wandb_env" ] && source "$HOME/.wandb_env"
 
 OUT=${OUT:-/home/yunfan/work/piper-push/sweep}

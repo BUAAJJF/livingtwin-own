@@ -21,6 +21,11 @@ GPUS=${GPUS:-"[0]"}
 RUN_NAME=${RUN_NAME:-ppo_baseline}
 
 cd "$(dirname "$0")/.."
+# Headless training never renders, but importing mujoco initialises a GL
+# backend anyway, and on a box without glvnd's libEGL.so.1 that import
+# raises before the trainer starts.  Disabling GL outright is both the fix
+# and the honest description of what a training run needs.
+export MUJOCO_GL=${MUJOCO_GL:-disable}
 [ -f "$HOME/.wandb_env" ] && source "$HOME/.wandb_env"
 
 exec micromamba run -n "$MJLAB_ENV" train "$TASK" \
