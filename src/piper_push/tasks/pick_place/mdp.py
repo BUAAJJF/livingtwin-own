@@ -373,7 +373,9 @@ class PickCommand(CommandTerm):
       visualizer.add_sphere(
         center=target[batch].cpu().numpy(),
         radius=0.02,
-        color=(0.2, 0.9, 0.4),
+        # RGBA, not RGB: the offscreen renderer hands this straight to
+        # mjv_initGeom, which rejects a three-element colour.
+        color=(0.2, 0.9, 0.4, 1.0),
         label=f"drop_target_{batch}",
       )
 
