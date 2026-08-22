@@ -101,6 +101,14 @@ def main() -> int:
                                      preserve_order=True)
     trip = torch.tensor([JOINT_TRIP_RAD_S[j] for j in jnames], device=dev)
 
+    # A recurrent policy carries its hidden state across whatever you feed it,
+    # and nothing in ``get_inference_policy`` knows about episode boundaries.
+    # Left alone, every environment starts each episode remembering the last
+    # one, which is a state it will never be in on the robot.
+    recurrent = bool(getattr(policy, "is_recurrent", False))
+    if recurrent:
+        policy.reset()
+
     obs = env.get_observations()
     if isinstance(obs, tuple):
         obs = obs[0]
@@ -136,6 +144,8 @@ def main() -> int:
         for _ in range(a.steps):
             out = env.step(policy(obs))
             obs, dones = out[0], out[2]
+            if recurrent:
+                policy.reset(dones)
             sim_seconds += dt * n
 
             half = pick.object_half_size.to(dev)
