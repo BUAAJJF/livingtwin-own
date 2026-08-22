@@ -72,8 +72,12 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._processed_actions = self._previous_target + delta.clamp(
             -self._max_step, self._max_step
         )
-        self._ramp_from = self._previous_target
-        self._previous_target = self._processed_actions.clone()
+        # Persistent buffers, copied into rather than rebound.  Rebinding makes
+        # the tensor whatever mode it was created under -- a rollout runs in
+        # inference mode, so the next reset outside one cannot write to it --
+        # and the two names would alias for a step before the rebind split them.
+        self._ramp_from.copy_(self._previous_target)
+        self._previous_target.copy_(self._processed_actions)
         self._substep = 0
 
     def apply_actions(self) -> None:
