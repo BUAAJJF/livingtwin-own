@@ -86,7 +86,7 @@ _CNN_CFG = {
   "spatial_softmax": True,
   "spatial_softmax_temperature": 1.0,
 }
-_CNN_MODEL = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
+_CNN_MODEL = "piper_push.models:SpatialSoftmaxRecurrentModel"
 
 
 def pick_place_vision_ppo_runner_cfg(
