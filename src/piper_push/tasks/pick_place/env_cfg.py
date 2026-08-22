@@ -29,7 +29,7 @@ from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
-from piper_push import objects, robot as piper, shapes
+from piper_push import camera, objects, robot as piper, shapes
 from piper_push.actions import RateLimitedJointPositionActionCfg
 from piper_push.tasks.pick_place import mdp as pick_mdp
 
@@ -103,6 +103,7 @@ def make_pick_place_env_cfg(
   play: bool = False,
   profile: str = "bare_gripper",
   shape_variety: float = 1.0,
+  vision: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
 
@@ -110,6 +111,10 @@ def make_pick_place_env_cfg(
   single fixed cube, 1 the full verified distribution.  The smoke test runs at
   0 on purpose -- a bug in the reward is far easier to see when every
   environment holds the same object, and a full distribution hides it.
+
+  ``vision`` adds the third-person camera and the observation group built
+  from it.  It does not remove the object state -- the critic keeps it, and
+  which groups reach the actor is decided in the runner config.
   """
 
   def blend(rng: tuple[float, float]) -> tuple[float, float]:
@@ -543,6 +548,45 @@ def make_pick_place_env_cfg(
     decimation=10,  # 500 Hz physics, 50 Hz control.
     episode_length_s=12.0,
   )
+
+  if vision:
+    cfg.scene.sensors = (cfg.scene.sensors or ()) + (camera.camera_cfg(),)
+    cfg.observations["camera"] = ObservationGroupCfg(
+      terms={
+        "scene": ObservationTermCfg(
+          func=pick_mdp.camera_scene,
+          params={
+            "sensor_name": camera.CAMERA_NAME,
+            "command_name": TASK,
+            "cutoff_distance": camera.CUTOFF_M,
+            "noise_m": 0.0 if play else camera.DEPTH_NOISE_M,
+            "dropout": 0.0 if play else camera.DEPTH_DROPOUT,
+          },
+        )
+      },
+      enable_corruption=False,
+      concatenate_terms=True,
+    )
+    # A camera that never moves is a camera the policy overfits to,
+    # and a real one moves the first time somebody leans on the frame.
+    cfg.events["camera_pose"] = EventTermCfg(
+      func=camera.randomize_camera_pose,
+      mode="startup" if play else "reset",
+      params={
+        "pos_jitter": 0.0 if play else camera.POS_JITTER_M,
+        "rot_jitter": 0.0 if play else camera.ROT_JITTER_RAD,
+      },
+    )
+    # The grasp flag is computed from the object's velocity and lift
+    # height, which nothing on the real robot can measure.  A policy
+    # that has to survive deployment gets the servo error instead --
+    # the same quantity the drive reports as current -- and an RNN to
+    # remember what it did with it.
+    del cfg.observations["proprio"].terms["grasped"]
+    cfg.observations["proprio"].terms["squeeze"] = ObservationTermCfg(
+      func=pick_mdp.gripper_squeeze,
+      noise=None if play else Unoise(n_min=-0.0005, n_max=0.0005),
+    )
 
   if play:
     cfg.episode_length_s = 40.0

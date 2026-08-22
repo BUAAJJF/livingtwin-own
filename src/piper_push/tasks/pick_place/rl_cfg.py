@@ -70,3 +70,60 @@ def pick_place_ppo_runner_cfg(
       "critic": ("proprio", "object", "privileged"),
     },
   )
+
+
+# Two convolutions and a spatial softmax: the softmax turns the last feature
+# maps into coordinates, which is the representation a reaching task actually
+# wants and a flattened feature vector makes the network rediscover.
+_CNN_CFG = {
+  "output_channels": [16, 32],
+  "kernel_size": [5, 3],
+  "stride": [2, 2],
+  "padding": "zeros",
+  "activation": "elu",
+  "max_pool": False,
+  "global_pool": "none",
+  "spatial_softmax": True,
+  "spatial_softmax_temperature": 1.0,
+}
+_CNN_MODEL = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
+
+
+def pick_place_vision_ppo_runner_cfg(
+  experiment_name: str = "piperx_pick_place_vision",
+  max_iterations: int = 6000,
+) -> RslRlOnPolicyRunnerCfg:
+  """The same task through the camera.
+
+  Three differences from the state configuration, and only three.  The actor
+  reads ``camera`` where it read ``object``; it carries a recurrent layer,
+  because the flag that told it whether it was holding something has been taken
+  away and the pad contacts alone do not say whether the last squeeze worked;
+  and it runs longer, because inferring the object's pose from pixels is a
+  harder problem than being handed it.
+
+  The critic is unchanged and still privileged. It never has to run on the
+  robot, so there is no reason to make it work through a camera.
+  """
+  cfg = pick_place_ppo_runner_cfg(experiment_name, max_iterations)
+  cfg.actor = RslRlModelCfg(
+    hidden_dims=(256, 256, 128),
+    activation="elu",
+    obs_normalization=True,
+    cnn_cfg=_CNN_CFG,
+    class_name=_CNN_MODEL,
+    rnn_type="gru",
+    rnn_hidden_dim=256,
+    rnn_num_layers=1,
+    distribution_cfg={
+      "class_name": "GaussianDistribution",
+      "init_std": 0.6,
+      "std_type": "scalar",
+    },
+  )
+  cfg.obs_groups = {
+    "actor": ("proprio", "camera"),
+    "critic": ("proprio", "object", "privileged"),
+  }
+  cfg.wandb_tags = ("piperx", "pick-place", "vision")
+  return cfg

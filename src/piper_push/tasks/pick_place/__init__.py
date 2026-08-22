@@ -2,7 +2,10 @@ from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
 from .env_cfg import make_pick_place_env_cfg
-from .rl_cfg import pick_place_ppo_runner_cfg
+from .rl_cfg import (
+  pick_place_ppo_runner_cfg,
+  pick_place_vision_ppo_runner_cfg,
+)
 
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX",
@@ -31,5 +34,18 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(shape_variety=0.5),
   play_env_cfg=make_pick_place_env_cfg(play=True, shape_variety=0.5),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_mid"),
+  runner_cls=ManipulationOnPolicyRunner,
+)
+
+
+# The vision stage.  The actor loses the object's state and gains the camera;
+# everything else about the task is identical, which is the point -- any
+# difference in the result is attributable to perception and not to a changed
+# problem.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision",
+  env_cfg=make_pick_place_env_cfg(vision=True),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
 )

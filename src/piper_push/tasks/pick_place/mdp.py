@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import mujoco
 import torch
 from mjlab.entity import Entity
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
@@ -157,6 +158,14 @@ class PickCommand(CommandTerm):
     # terrain plane instead.
     local_geom = self._object.find_geoms((objects.CORE_GEOM,))[0][0]
     self._object_geom = int(self._object.indexing.geom_ids[local_geom])
+    # All three parts, for the segmentation mask: an object that is
+    # currently a cylinder has its core collapsed to a millimetre, so a
+    # mask built from the core alone would be empty exactly when the
+    # shape is not a box.
+    self._object_geoms = tuple(
+      int(self._object.indexing.geom_ids[i])
+      for i in self._object.find_geoms(objects.OBJECT_GEOMS, preserve_order=True)[0]
+    )
 
     zeros = torch.zeros(self.num_envs, device=self.device)
     self.grasped = zeros.clone().bool()
@@ -195,6 +204,11 @@ class PickCommand(CommandTerm):
     self.metrics["knocked_in"] = self.knocked_in
 
   # -- geometry ------------------------------------------------------------
+
+  @property
+  def target_geom_ids(self) -> tuple[int, ...]:
+    """Global geom ids the target mask should light up."""
+    return self._object_geoms
 
   @property
   def object_half_size(self) -> torch.Tensor:
@@ -443,6 +457,79 @@ def gripper_opening(env: "ManagerBasedRlEnv") -> torch.Tensor:
   robot: Entity = env.scene["robot"]
   idx = robot.find_joints(("gripper_joint1",))[0][0]
   return 2.0 * robot.data.joint_pos[:, idx].unsqueeze(-1)
+
+
+def gripper_squeeze(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """How far the gripper is being asked to close past where it actually is.
+
+  This is the deployable half of ``grasp_state``.  A position servo produces
+  force proportional to exactly this error, so on hardware it is what the drive
+  reports as current -- whereas ``grasp_state`` is computed from the object\'s
+  velocity and lift height, which no sensor on this robot can see.  A vision
+  policy that has to work on the real arm gets this and the pad contacts; it
+  does not get to know it is holding something.
+  """
+  robot: Entity = env.scene["robot"]
+  idx = robot.find_joints(("gripper_joint1",))[0][0]
+  target = robot.data.joint_pos_target[:, idx]
+  actual = robot.data.joint_pos[:, idx]
+  return (actual - target).unsqueeze(-1)
+
+
+def camera_scene(
+  env: "ManagerBasedRlEnv",
+  sensor_name: str,
+  command_name: str,
+  cutoff_distance: float = 1.5,
+  min_depth: float = 0.05,
+  noise_m: float = 0.0,
+  dropout: float = 0.0,
+) -> torch.Tensor:
+  """Three channels: the whole scene in depth, the target, and the two crossed.
+
+  Kept as separate channels rather than handed over as ``depth * mask``.  The
+  masked depth alone says where the target is and nothing about what is around
+  it, so the policy could not see the bin it is carrying to, the arm that is
+  about to occlude the object, or the other objects it will have to come back
+  for.  The masked channel is still there because it is the cheapest possible
+  encoding of "this one", and the network should not have to learn a product it
+  can be given.
+
+  Depth is normalised against a fixed far plane, not per frame: per-frame
+  normalisation is immune to sensor bias and destroys absolute scale, which is
+  the cue that says how tall the object is.
+  """
+  sensor = env.scene[sensor_name]
+  depth = sensor.data.depth
+  seg = sensor.data.segmentation
+  assert depth is not None and seg is not None
+
+  depth = depth.permute(0, 3, 1, 2)          # (B, 1, H, W)
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+
+  if noise_m > 0.0 or dropout > 0.0:
+    # A real depth sensor is noisier further away and drops out entirely on
+    # dark, thin and specular surfaces.  Both are modelled crudely here and
+    # both should be replaced by a fit to the actual sensor before S5.
+    if noise_m > 0.0:
+      scale = (depth / cutoff_distance).clamp(0.1, 1.0)
+      depth = depth + torch.randn_like(depth) * noise_m * scale
+    if dropout > 0.0:
+      holes = torch.rand_like(depth) < dropout
+      depth = torch.where(holes, torch.full_like(depth, cutoff_distance), depth)
+
+  norm = torch.clamp(
+    torch.clamp(depth, min=min_depth, max=cutoff_distance) / cutoff_distance, 0.0, 1.0
+  )
+
+  ids = seg[..., 0]
+  types = seg[..., 1]
+  target = torch.as_tensor(cmd.target_geom_ids, device=ids.device)
+  is_geom = types == int(mujoco.mjtObj.mjOBJ_GEOM)
+  mask = (ids.unsqueeze(-1) == target.view(1, 1, 1, -1)).any(-1) & is_geom
+  mask = mask.float().unsqueeze(1)
+
+  return torch.cat([norm, mask, norm * mask], dim=1)
 
 
 def grasp_state(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
