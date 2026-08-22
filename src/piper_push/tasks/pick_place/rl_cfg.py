@@ -128,7 +128,12 @@ def pick_place_vision_ppo_runner_cfg(
   )
   cfg.obs_groups = {
     "actor": ("proprio", "camera"),
-    "critic": ("proprio", "object", "privileged"),
+    # ``full_proprio``, not ``proprio``: the critic never runs on the robot, so
+    # handing it the deployment-constrained proprioception costs information
+    # for nothing.  It also makes this critic dimensionally and semantically
+    # identical to the state task's, which is what lets the fine-tuning stage
+    # start from a trained value function instead of a random one.
+    "critic": ("full_proprio", "object", "privileged"),
   }
   cfg.wandb_tags = ("piperx", "pick-place", "vision")
   return cfg
@@ -176,6 +181,6 @@ def pick_place_distill_runner_cfg(
       # Byte-identical to the vision PPO actor's tuple, so the student the
       # distillation produces loads into that stage without a rename.
       "student": ("proprio", "camera"),
-      "teacher": ("teacher_proprio", "object"),
+      "teacher": ("full_proprio", "object"),
     },
   )

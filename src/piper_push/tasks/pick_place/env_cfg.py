@@ -106,7 +106,6 @@ def make_pick_place_env_cfg(
   profile: str = "bare_gripper",
   shape_variety: float = 1.0,
   vision: bool = False,
-  teacher_obs: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
 
@@ -119,12 +118,12 @@ def make_pick_place_env_cfg(
   from it.  It does not remove the object state -- the critic keeps it, and
   which groups reach the actor is decided in the runner config.
 
-  ``teacher_obs`` additionally keeps a copy of the proprioception the *state*
-  policy was trained on, under its own group.  It exists because the vision
-  variant takes ``grasped`` away and puts ``squeeze`` in its place, which
-  changes the width of the proprioception vector: a teacher loaded from a state
-  checkpoint would not fit its own first layer.  Distillation needs both
-  vectors in the same step, so both are built.
+  The vision variant also keeps the proprioception the *state* policy was
+  trained on, under ``full_proprio``.  Two things need it and both are
+  privileged: the distillation teacher, which is a state policy and would not
+  fit its own first layer otherwise, and the vision critic, which has no reason
+  to be handicapped by a constraint that exists because the actor has to run on
+  a robot.
   """
 
   def blend(rng: tuple[float, float]) -> tuple[float, float]:
@@ -592,18 +591,19 @@ def make_pick_place_env_cfg(
     # that has to survive deployment gets the servo error instead --
     # the same quantity the drive reports as current -- and an RNN to
     # remember what it did with it.
-    if teacher_obs:
-      # Copied before the surgery below, and deep-copied because the
-      # observation manager resolves scene entities into the term configs it is
-      # handed -- two groups sharing one term object resolve it twice.
-      cfg.observations["teacher_proprio"] = ObservationGroupCfg(
-        copy.deepcopy(proprio), enable_corruption=False
-      )
-      # The teacher's actions are the labels.  Noise it can see and the student
-      # cannot is irreducible label variance: it does not move where the
-      # regression converges, it only slows it down.  So the teacher gets the
-      # clean state even though it was trained on the noisy one.
-      cfg.observations["object"].enable_corruption = False
+    # Copied before the surgery below, and deep-copied because the observation
+    # manager resolves scene entities into the term configs it is handed -- two
+    # groups sharing one term object resolve it twice.
+    cfg.observations["full_proprio"] = ObservationGroupCfg(
+      copy.deepcopy(proprio), enable_corruption=False
+    )
+    # Uncorrupted, and so is the object state, because everything that reads
+    # these two groups is privileged.  For the teacher: its actions are the
+    # labels, and noise it can see and the student cannot is irreducible label
+    # variance, which does not move where the regression converges, only how
+    # fast it gets there.  For the critic: it is estimating a value, and noise
+    # in its input is variance in the advantage the actor is updated from.
+    cfg.observations["object"].enable_corruption = False
 
     del cfg.observations["proprio"].terms["grasped"]
     cfg.observations["proprio"].terms["squeeze"] = ObservationTermCfg(

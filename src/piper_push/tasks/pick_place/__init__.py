@@ -62,8 +62,8 @@ register_mjlab_task(
 # would have visited.
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Distill",
-  env_cfg=make_pick_place_env_cfg(vision=True, teacher_obs=True),
-  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, teacher_obs=True),
+  env_cfg=make_pick_place_env_cfg(vision=True),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_distill_runner_cfg(),
   runner_cls=PickPlaceDistillationRunner,
 )
