@@ -138,6 +138,12 @@ def main() -> int:
     # much of the time the arm is near it, so keep the whole distribution.  A
     # histogram answers that and any quantile for one scatter-add per step.
     speed_hist = torch.zeros(len(jids), SPEED_BINS, device=dev)
+    # The safety shell stops the run on hardware, so the rate it fires at is a
+    # deployment number, not a diagnostic.  The gate was absorbing it silently:
+    # a shell trip ends the episode, and an instance cut short by the end of an
+    # episode is censored rather than failed.
+    trips = torch.zeros((), device=dev)
+    episodes = torch.zeros((), device=dev)
     sim_seconds = 0.0
 
     with torch.inference_mode():
@@ -213,6 +219,8 @@ def main() -> int:
             # in flight.  An instance that had its whole budget and was still
             # on the table is a failure; one cut short by the horizon never had
             # the chance, so it is censored rather than counted.
+            trips += u.termination_manager.get_term("over_speed").sum()
+            episodes += dones.sum()
             e = dones.nonzero(as_tuple=False).flatten()
             if e.numel():
                 stale = e[age[e] > a.budget]
@@ -256,6 +264,10 @@ def main() -> int:
         print(f"  time to place          {q[0]:5.2f} s median, {q[1]:5.2f} s p95")
     stuck = (stuck_steps * dt / max(sim_seconds, 1e-6)).item()
     print(f"  time with a stuck object {100 * stuck:5.1f}%   (object unplaced past the budget)")
+    shell = (trips / episodes.clamp(min=1)).item()
+    per_hour = (trips / max(sim_seconds, 1e-6) * 3600.0).item()
+    print(f"  safety-shell trips     {100 * shell:5.1f}% of episodes"
+          f"  ({per_hour:.1f} per arm-hour)")
     print()
     # The distribution, not just its maximum.  ``over`` is the share of samples
     # above the point the speed penalty starts charging, which is the number
