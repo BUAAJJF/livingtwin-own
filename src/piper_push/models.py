@@ -14,6 +14,8 @@ produced rather than reimplementing either.
 
 from __future__ import annotations
 
+import copy
+
 import torch
 import torch.nn as nn
 from mjlab.rl.spatial_softmax import SpatialSoftmaxCNNModel
@@ -117,15 +119,120 @@ class SpatialSoftmaxRecurrentModel(SpatialSoftmaxCNNModel):
     return self.latent_dim
 
   def as_jit(self) -> nn.Module:
-    raise NotImplementedError(
-      "Export for the recurrent vision policy is not written yet; it needs the "
-      "hidden state threaded through, which the CNN and RNN exporters each do "
-      "on their own terms."
-    )
+    return _TorchSpatialSoftmaxRecurrentModel(self)
 
   def as_onnx(self, verbose: bool = False) -> nn.Module:
+    return _OnnxSpatialSoftmaxRecurrentModel(self, verbose)
+
+
+def _parts(model: SpatialSoftmaxRecurrentModel) -> tuple:
+  """The pieces both exporters need, detached from the training wrappers.
+
+  ``model.rnn`` is rsl_rl's wrapper, which owns a hidden state and masks it on
+  done; an exported policy has one environment and resets when it is told to,
+  so the exporters take the ``nn.GRU`` underneath instead.
+  """
+  if not isinstance(model.rnn.rnn, nn.GRU):
     raise NotImplementedError(
-      "Export for the recurrent vision policy is not written yet; it needs the "
-      "hidden state threaded through, which the CNN and RNN exporters each do "
-      "on their own terms."
+      f"Export is written for GRU, not {type(model.rnn.rnn).__name__}. An "
+      "LSTM needs the cell state carried alongside the hidden state, through "
+      "the signature, the dummy inputs and the names."
     )
+  distribution = (
+    model.distribution.as_deterministic_output_module()
+    if model.distribution is not None
+    else nn.Identity()
+  )
+  return (
+    copy.deepcopy(model.obs_normalizer),
+    nn.ModuleList([copy.deepcopy(model.cnns[g]) for g in model.obs_groups_2d]),
+    copy.deepcopy(model.rnn.rnn),
+    copy.deepcopy(model.mlp),
+    distribution,
+  )
+
+
+class _TorchSpatialSoftmaxRecurrentModel(nn.Module):
+  """The exported policy for TorchScript: one environment, its own memory."""
+
+  def __init__(self, model: SpatialSoftmaxRecurrentModel) -> None:
+    super().__init__()
+    (
+      self.obs_normalizer,
+      self.cnns,
+      self.rnn,
+      self.mlp,
+      self.deterministic_output,
+    ) = _parts(model)
+    self.rnn.cpu()
+    self.register_buffer(
+      "hidden_state", torch.zeros(self.rnn.num_layers, 1, self.rnn.hidden_size)
+    )
+
+  def forward(self, obs_1d: torch.Tensor, obs_2d: list[torch.Tensor]) -> torch.Tensor:
+    latent = self.obs_normalizer(obs_1d)
+    for i, cnn in enumerate(self.cnns):
+      latent = torch.cat([latent, cnn(obs_2d[i])], dim=-1)
+    x, h = self.rnn(latent.unsqueeze(0), self.hidden_state)
+    self.hidden_state[:] = h  # type: ignore[index]
+    return self.deterministic_output(self.mlp(x.squeeze(0)))
+
+  @torch.jit.export
+  def reset(self) -> None:
+    self.hidden_state[:] = 0.0  # type: ignore[index]
+
+
+class _OnnxSpatialSoftmaxRecurrentModel(nn.Module):
+  """The exported policy for ONNX: the memory is an input and an output.
+
+  ONNX graphs are pure, so the hidden state cannot live in a buffer the way the
+  TorchScript export keeps it.  Whatever runs this on the robot owns the state:
+  feed zeros on the first control step and each step's ``h_out`` back in as the
+  next step's ``h_in``, and zero it again whenever the task restarts.
+  """
+
+  is_recurrent: bool = True
+
+  def __init__(self, model: SpatialSoftmaxRecurrentModel, verbose: bool) -> None:
+    super().__init__()
+    self.verbose = verbose
+    (
+      self.obs_normalizer,
+      self.cnns,
+      self.rnn,
+      self.mlp,
+      self.deterministic_output,
+    ) = _parts(model)
+    self.obs_groups_2d = model.obs_groups_2d
+    self.obs_dims_2d = model.obs_dims_2d
+    self.obs_channels_2d = model.obs_channels_2d
+    self.obs_dim_1d = model.obs_dim
+    self.hidden_size = self.rnn.hidden_size
+    self.num_layers = self.rnn.num_layers
+
+  def forward(self, obs_1d: torch.Tensor, *args: torch.Tensor):
+    obs_2d, h_in = args[:-1], args[-1]
+    latent = self.obs_normalizer(obs_1d)
+    for i, cnn in enumerate(self.cnns):
+      latent = torch.cat([latent, cnn(obs_2d[i])], dim=-1)
+    x, h = self.rnn(latent.unsqueeze(0), h_in)
+    return self.deterministic_output(self.mlp(x.squeeze(0))), h
+
+  def get_dummy_inputs(self) -> tuple[torch.Tensor, ...]:
+    images = tuple(
+      torch.zeros(1, self.obs_channels_2d[i], *self.obs_dims_2d[i])
+      for i in range(len(self.obs_groups_2d))
+    )
+    return (
+      torch.zeros(1, self.obs_dim_1d),
+      *images,
+      torch.zeros(self.num_layers, 1, self.hidden_size),
+    )
+
+  @property
+  def input_names(self) -> list[str]:
+    return ["obs", *self.obs_groups_2d, "h_in"]
+
+  @property
+  def output_names(self) -> list[str]:
+    return ["actions", "h_out"]
