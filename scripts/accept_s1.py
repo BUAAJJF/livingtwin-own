@@ -48,6 +48,12 @@ PASS_OVERALL = 0.85
 PASS_PER_CLASS = 0.70
 PASS_DROP_RATE = 0.05
 
+# Joint-speed reporting.  SPEED_HEADROOM is the fraction of the safety shell at
+# which the ``over_trip`` reward term starts charging, so the share of time
+# above it is the share of time that term is doing any work.
+SPEED_BINS, SPEED_MAX = 256, 1.6
+SPEED_HEADROOM = 0.85
+
 
 def aspect_class(half: torch.Tensor) -> torch.Tensor:
     """Index into ASPECT_NAMES for each row of a (N, 3) half-extent tensor."""
@@ -118,6 +124,12 @@ def main() -> int:
     cycle_times: list[torch.Tensor] = []
     stuck_steps = torch.zeros((), device=dev)
     peak_ratio = torch.zeros(len(jids), device=dev)
+    # A peak over a third of a million samples is an extreme-value statistic:
+    # one environment touching the shell for one step reads exactly the same as
+    # a policy that lives there.  What the safety shell actually asks is how
+    # much of the time the arm is near it, so keep the whole distribution.  A
+    # histogram answers that and any quantile for one scatter-add per step.
+    speed_hist = torch.zeros(len(jids), SPEED_BINS, device=dev)
     sim_seconds = 0.0
 
     with torch.inference_mode():
@@ -132,10 +144,12 @@ def main() -> int:
             both = (sensor.data.found > 0).all(dim=1)
             just_placed = pick.just_placed.bool()
 
-            peak_ratio = torch.maximum(
-                peak_ratio,
-                (robot.data.joint_vel[:, jids].abs() / trip).max(dim=0).values,
-            )
+            ratio = robot.data.joint_vel[:, jids].abs() / trip
+            peak_ratio = torch.maximum(peak_ratio, ratio.max(dim=0).values)
+            bin_idx = (ratio * (SPEED_BINS / SPEED_MAX)).long().clamp(
+                0, SPEED_BINS - 1).t().contiguous()
+            speed_hist.scatter_add_(
+                1, bin_idx, torch.ones_like(bin_idx, dtype=speed_hist.dtype))
 
             # --- instance outcome -------------------------------------------
             # Exactly one verdict per spawned object.  Scoring every elapsed
@@ -233,9 +247,27 @@ def main() -> int:
     stuck = (stuck_steps * dt / max(sim_seconds, 1e-6)).item()
     print(f"  time with a stuck object {100 * stuck:5.1f}%   (object unplaced past the budget)")
     print()
-    print("  peak |qd| / safety-shell trip")
-    for name, v in zip(jnames, peak_ratio.tolist()):
-        print(f"    {name:8s} {v:5.3f}{'   <-- at the shell' if v >= 0.98 else ''}")
+    # The distribution, not just its maximum.  ``over`` is the share of samples
+    # above the point the speed penalty starts charging, which is the number
+    # that says whether the penalty is doing anything.
+    cum = speed_hist.cumsum(dim=1)
+    tot_samples = cum[:, -1:].clamp(min=1)
+    width = SPEED_MAX / SPEED_BINS
+    edges = (torch.arange(SPEED_BINS, device=dev) + 1) * width
+
+    def quantile(p: float) -> torch.Tensor:
+        return edges[(cum >= tot_samples * p).float().argmax(dim=1)]
+
+    p99, p999 = quantile(0.99), quantile(0.999)
+    first_over = int(SPEED_HEADROOM / width)
+    over = speed_hist[:, first_over:].sum(dim=1) / tot_samples.squeeze(1)
+    print("  |qd| / safety-shell trip")
+    print(f"    {'joint':8s} {'p99':>6s} {'p99.9':>7s} {'peak':>6s}"
+          f" {'time>' + f'{SPEED_HEADROOM:.2f}':>10s}")
+    for i, name in enumerate(jnames):
+        flag = "   <-- lives at the shell" if over[i] > 0.01 else ""
+        print(f"    {name:8s} {p99[i]:6.3f} {p999[i]:7.3f} {peak_ratio[i]:6.3f}"
+              f" {100 * over[i]:9.2f}%{flag}")
 
     verdict = (overall >= PASS_OVERALL and class_pass and drop_rate <= PASS_DROP_RATE)
     print()
