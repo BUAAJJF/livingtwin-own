@@ -310,14 +310,23 @@ def randomize_object_shape(
 
 
 def _state(env, asset_name: str = "object") -> dict:
-  """The per-environment shape record, seeded from the model if need be.
+  """The per-environment shape record for one asset, seeded from the model.
+
+  Keyed by asset name.  A single record shared across assets is fine while
+  there is one object and silently wrong the moment there are several: the
+  second object's draw overwrites the first's half-extents, and those decide
+  the spawn height, the lift threshold and the shape class every acceptance
+  number is split by.
 
   The observation manager probes every term's shape while it is being built,
   which is before any reset event has run, so the record cannot depend on the
   composer having gone first.  Seeding it from the compiled geometry gives the
   same answer the composer would for the placeholder shape.
   """
-  state = getattr(env, "_object_shape_state", None)
+  cache = getattr(env, "_object_shape_state", None)
+  if cache is None:
+    cache = env._object_shape_state = {}
+  state = cache.get(asset_name)
   if state is not None:
     return state
 
@@ -339,15 +348,15 @@ def _state(env, asset_name: str = "object") -> dict:
     "half": (pos.abs() + ext).max(dim=1).values,
     "cls": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
   }
-  env._object_shape_state = state
+  cache[asset_name] = state
   return state
 
 
-def object_half_size(env) -> torch.Tensor:
+def object_half_size(env, asset_name: str = "object") -> torch.Tensor:
   """Bounding half-extents of the composed object, per environment."""
-  return _state(env)["half"]
+  return _state(env, asset_name)["half"]
 
 
-def object_shape_class(env) -> torch.Tensor:
+def object_shape_class(env, asset_name: str = "object") -> torch.Tensor:
   """Which shape class each environment drew, as an index into SHAPE_CLASSES."""
-  return _state(env)["cls"]
+  return _state(env, asset_name)["cls"]
