@@ -515,11 +515,15 @@ def make_pick_place_env_cfg(
       # objects settling in a bin add object-object pairs this does not
       # contain, and contact overflow shows up as silent tunnelling rather
       # than an error, so the budget is generous from the start.
-      # An object is up to three geoms now, not one, and the stiffer contacts
-      # keep more of them alive at once.  Overflow surfaces as silent
-      # tunnelling rather than an error, so the budget leads the need.
-      nconmax=512,
-      njmax=2500,
+      # Measured on the rebuilt scene: 4.4 contacts per environment on average
+      # and 4.4 at the peak, with one object and three parts to it.  The budget
+      # is per world and it is captured into the CUDA graph, so an idle
+      # allowance is not free -- 512 would not fit alongside another job on the
+      # same card.  Overflow surfaces as silent tunnelling rather than an
+      # error, so this still leads the measured need by 30x, and the
+      # multi-object stage should re-measure rather than inherit it.
+      nconmax=128,
+      njmax=800,
       mujoco=MujocoCfg(
         # 2 ms, not 5.  A 1.4 m/s release covers 6.85 mm in a 5 ms step, which
         # is most of the way through a finger pad before the solver has seen
