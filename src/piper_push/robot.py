@@ -51,6 +51,10 @@ _PAD_SIZE = (0.0148, 0.0115, 0.003)
 ARM_JOINT_EXPR = ("joint[1-6]",)
 GRASP_SITE = ("grasp_site",)
 FINGER_PADS = ("[lr]f_pad",)
+PALM_GEOMS = ("gripper_base_collision",)
+"""The gripper's own body.  It is real geometry and has to collide, but it
+is not a tool: a policy that pushes the object with it is trading a grasp
+for a shove, and measured 7.9 mm of interpenetration doing so."""
 EE_BODY = "link6"
 VIEWER_BODY = "base_link"
 # Links whose collision geoms are disabled below; a reward term keeps them
@@ -260,12 +264,29 @@ JOINT_TRIP_RAD_S: dict[str, float] = {
 # The command path gets a derated fraction of the trip; the trip itself stays as
 # a termination for the dynamic overspeed a command limiter cannot prevent.
 #
-# The classical stack uses 0.9, but 0.9 measured a trip on an ordinary transport
-# move here: a position servo tracking a constant-velocity ramp lags, builds
-# error, and overshoots the commanded rate by about 11%, and this simulation has
-# none of the drive's inner velocity loop to absorb that.  0.75 puts the
-# overshoot back under the shell.
-COMMAND_DERATE = 0.75
+# The classical stack uses 0.9, and 0.9 measured a trip on an ordinary transport
+# move here.  0.75 replaced it and looked settled -- S0 measured a peak of 0.897
+# under it -- but that was read at a 5 ms physics step, which does not resolve
+# the peak.  At 2 ms the same 0.75 command puts joints 1-3 at 1.000 of their
+# trip and fires the shell 44 times in 256 environments over 400 steps, under a
+# policy that is doing nothing at all except returning to its home pose.
+#
+# The overshoot is not a staircase artefact -- the command is interpolated
+# across the substeps now and that only took it from 58 events to 44.  It is the
+# identified plant: kp 125 against kd 6.5 on joints 1-3 is a damping ratio near
+# 0.35, and a second-order system that underdamped answers a velocity ramp by
+# overshooting it about 32%.  Which is to say the real arm does this too.
+#
+#   derate   peak |qd|/trip   shell events
+#     0.75        0.999             44
+#     0.68        0.999             26
+#     0.62        0.995              5
+#     0.56        0.898              2
+#
+# 0.62 keeps the median well clear and leaves the rare outlier to the shell,
+# which is what a shell is for.  Below that the arm is paying speed for margin
+# the reward's headroom term already buys.
+COMMAND_DERATE = 0.62
 COMMAND_RATE_LIMIT_RAD_S: dict[str, float] = {
     j: COMMAND_DERATE * v for j, v in JOINT_TRIP_RAD_S.items()
 }
@@ -278,8 +299,8 @@ GRIPPER_RATE_LIMIT_M_S = 0.10
 
 GRIPPER_FORCE_N = 10.0
 """The drive's rated force, from the URDF effort limit."""
-GRIPPER_STIFFNESS = 800.0
-GRIPPER_DAMPING = 18.0
+GRIPPER_STIFFNESS = 1000.0
+GRIPPER_DAMPING = 20.0
 """Also not measured, and NOT what the URDF conversion handed down.
 
 The inherited kp of 40 makes the rated force unreachable: a position servo
@@ -288,10 +309,12 @@ so the gripper drops everything.  (S0 only ever measured 10 N because it drove
 ctrl to -0.25, a quarter-metre of virtual overshoot, which the action space
 cannot express.)  Real hardware takes a position and drives to it with up to
 its rated force, so kp is set to reach that force over the SMALLEST object's
-half width in the distribution: 800 x 0.0125 = 10 N, saturated.  (Sizing it on
-the cube variant's 17.5 mm instead leaves the 25 mm objects at 7.5 N, which the
-regression test catches.)  Replace with a measured force-vs-command curve
-before S5.
+half width in the distribution: 1000 x 0.01046 = 10.5 N, saturated, with the
+actuator's 10 N effort limit doing the capping so a wide object is not squeezed
+harder than the drive can squeeze.  (Sizing it on the cube variant's 17.5 mm
+instead leaves the 25 mm objects at 7.5 N, which the regression test catches;
+the same test caught 800 once anisotropy took the narrowest object from 12.5 mm
+down to 10.46 mm.)  Replace with a measured force-vs-command curve before S5.
 """
 
 # Position limits: the intersection of the URDF and the manual.  The manual is
@@ -402,7 +425,14 @@ PICK_COLLISION = CollisionCfg(
         ".*_collision": (0.6,),
     },
     solref={
-        "[lr]f_pad": (0.01, 1.0),
+        # The pads outrank the object, so this is the time constant that
+        # governs the grasp contact.  Measured against the 2 ms physics step:
+        # at 0.02 s the object sank 2.7 mm into a pad (p95) and 12.8 mm at
+        # worst, at 0.008 s it is 0.84 mm and 5.2 mm for the same policy.
+        "[lr]f_pad": (0.008, 1.0),
+    },
+    solimp={
+        "[lr]f_pad": (0.95, 0.99, 0.001),
     },
     priority={
         "[lr]f_pad": PAD_PRIORITY,

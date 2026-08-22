@@ -41,6 +41,8 @@ class RateLimitedJointPositionAction(JointPositionAction):
 
     def __init__(self, cfg: RateLimitedJointPositionActionCfg, env) -> None:
         super().__init__(cfg=cfg, env=env)
+        self._substeps = max(int(env.cfg.decimation), 1)
+        self._substep = 0
         limits = torch.full((self._num_targets,), float("inf"), device=self.device)
         if cfg.velocity_limit:
             index_list, name_list, value_list = resolve_matching_names_values(
@@ -57,6 +59,7 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._max_step = limits * float(env.step_dt)
         self._default = self._entity.data.default_joint_pos[:, self._target_ids].clone()
         self._previous_target = self._default.clone()
+        self._ramp_from = self._default.clone()
 
     @property
     def max_step(self) -> torch.Tensor:
@@ -69,7 +72,27 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._processed_actions = self._previous_target + delta.clamp(
             -self._max_step, self._max_step
         )
+        self._ramp_from = self._previous_target
         self._previous_target = self._processed_actions.clone()
+        self._substep = 0
+
+    def apply_actions(self) -> None:
+        # Hand the servo a ramp, not a stair.  Holding one target for the whole
+        # control step means the joint sees a 50 Hz staircase whose steps are a
+        # full control period of travel each, and it answers each step with a
+        # velocity spike well above the rate that was asked for: measured, a
+        # zero action returning the arm to its home pose from a reset posture
+        # peaked at 1.000 of joint2's safety-shell trip while the command path
+        # was limited to 0.75 of it.  Interpolating across the substeps sends
+        # the same average rate as a constant-velocity command, which is what
+        # the limit was chosen against.
+        self._substep = min(self._substep + 1, self._substeps)
+        alpha = self._substep / self._substeps
+        target = self._ramp_from + (self._processed_actions - self._ramp_from) * alpha
+        encoder_bias = self._entity.data.encoder_bias[:, self._target_ids]
+        self._entity.set_joint_position_target(
+            target - encoder_bias, joint_ids=self._target_ids
+        )
 
     def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
         super().reset(env_ids)
@@ -83,3 +106,4 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._previous_target[env_ids] = self._entity.data.joint_pos[env_ids][
             :, self._target_ids
         ]
+        self._ramp_from[env_ids] = self._previous_target[env_ids]

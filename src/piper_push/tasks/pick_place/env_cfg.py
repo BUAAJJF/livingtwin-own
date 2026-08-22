@@ -29,7 +29,7 @@ from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
-from piper_push import objects, robot as piper
+from piper_push import objects, robot as piper, shapes
 from piper_push.actions import RateLimitedJointPositionActionCfg
 from piper_push.tasks.pick_place import mdp as pick_mdp
 
@@ -37,6 +37,7 @@ OBJECT = "object"
 BIN = "bin"
 TASK = "pick"
 PAD_SENSOR = "pad_contact"
+PALM_SENSOR = "palm_contact"
 
 # S0: a straight-down grasp is usable at every azimuth within +-80 deg for
 # r in [0.16, 0.52] m.  Objects live well inside that; the end-effector gets a
@@ -255,41 +256,14 @@ def make_pick_place_env_cfg(
     # push task spent six rounds discovering what that does to a training
     # curve.  Re-rolling every episode costs a broadphase bound recompute on
     # the reset envs only.
-    "object_size": EventTermCfg(
-      func=dr.geom_size,
+    "object_shape": EventTermCfg(
+      func=shapes.randomize_object_shape,
       mode="reset",
       params={
-        "asset_cfg": SceneEntityCfg(OBJECT, geom_names=("object_geom",)),
-        "operation": "abs",
-        "distribution": "uniform",
-        # A dict, not a tuple of three: dr treats a bare tuple as one range
-        # shared by every axis, which then fails to unpack.
-        "ranges": {i: blend(r) for i, r in enumerate(objects.OBJECT_HALF_EXTENT_RANGE)},
-      },
-    ),
-    "object_mass": EventTermCfg(
-      func=dr.body_mass,
-      mode="reset",
-      params={
-        "asset_cfg": SceneEntityCfg(OBJECT, body_names=("object",)),
-        "operation": "abs",
-        "distribution": "uniform",
-        "ranges": blend(objects.OBJECT_MASS_RANGE),
-      },
-    ),
-    # How the object slides on the table and settles in the bin.  It does NOT
-    # set how the object is held: the pads outrank it (robot.PAD_PRIORITY), so
-    # the grasp reads pad friction instead.  Measured in S0 -- with equal
-    # priorities MuJoCo mixes by elementwise max and both knobs go dead.
-    "object_friction": EventTermCfg(
-      func=dr.geom_friction,
-      mode="reset",
-      params={
-        "asset_cfg": SceneEntityCfg(OBJECT, geom_names=("object_geom",)),
-        "operation": "abs",
-        "distribution": "uniform",
-        "axes": [0],
-        "ranges": blend(objects.OBJECT_FRICTION_RANGE),
+        "asset_cfg": SceneEntityCfg(OBJECT),
+        "mass_range": objects.OBJECT_MASS_RANGE,
+        "friction_range": objects.OBJECT_FRICTION_RANGE,
+        "variety": shape_variety,
       },
     ),
     # The grasp knob.  S0 measured the failure boundary at mu ~ mass in kg
@@ -414,8 +388,22 @@ def make_pick_place_env_cfg(
     ),
     "over_trip": RewardTermCfg(
       func=pick_mdp.joint_speed_over_trip,
-      weight=-5.0,
-      params={"limits": piper.JOINT_TRIP_RAD_S, "asset_cfg": arm()},
+      # Headroom, not the trip point.  The shell is a hardware fact and the
+      # 11% ramp overshoot the servo adds on top of a command has to fit
+      # underneath it, so the policy is charged from 85% and the remaining
+      # 15% is what the overshoot spends.
+      weight=-20.0,
+      params={
+        "limits": piper.JOINT_TRIP_RAD_S,
+        "asset_cfg": arm(),
+        "headroom": 0.85,
+      },
+    ),
+    # The palm is not a tool.
+    "palm_push": RewardTermCfg(
+      func=pick_mdp.palm_pushing,
+      weight=-4.0,
+      params={"sensor_name": PALM_SENSOR},
     ),
     # -- move smoothly and cheaply -------------------------------------------
     "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.15),
@@ -479,6 +467,15 @@ def make_pick_place_env_cfg(
           fields=("found", "force"),
           reduce="netforce",
         ),
+        # The gripper body against the object.  Its own sensor because the
+        # palm is not a pad: touching the object with it is a shove, and
+        # without a term that can see it the behaviour is free.
+        ContactSensorCfg(
+          name=PALM_SENSOR,
+          primary=ContactMatch(mode="geom", pattern=piper.PALM_GEOMS, entity="robot"),
+          secondary=ContactMatch(mode="body", pattern="object", entity=OBJECT),
+          fields=("found",),
+        ),
       ),
     ),
     observations=observations,
@@ -518,17 +515,28 @@ def make_pick_place_env_cfg(
       # objects settling in a bin add object-object pairs this does not
       # contain, and contact overflow shows up as silent tunnelling rather
       # than an error, so the budget is generous from the start.
-      nconmax=256,
-      njmax=1500,
+      # An object is up to three geoms now, not one, and the stiffer contacts
+      # keep more of them alive at once.  Overflow surfaces as silent
+      # tunnelling rather than an error, so the budget leads the need.
+      nconmax=512,
+      njmax=2500,
       mujoco=MujocoCfg(
-        timestep=0.005,
+        # 2 ms, not 5.  A 1.4 m/s release covers 6.85 mm in a 5 ms step, which
+        # is most of the way through a finger pad before the solver has seen
+        # anything: the grasp the policy learned was not the grasp the
+        # hardware will make, and the bounce that decides whether a thrown
+        # object stays in the bin was resolved from a state that never
+        # physically occurred.  Measured across the same policy, dropping to
+        # 2 ms takes pad interpenetration from 2.71 mm to 0.84 mm at p95 and
+        # from 12.8 mm to 5.2 mm at worst, for 20% of the throughput.
+        timestep=0.002,
         iterations=10,
         ls_iterations=20,
         impratio=10,
         cone="elliptic",
       ),
     ),
-    decimation=4,  # 200 Hz physics, 50 Hz control.
+    decimation=10,  # 500 Hz physics, 50 Hz control.
     episode_length_s=12.0,
   )
 

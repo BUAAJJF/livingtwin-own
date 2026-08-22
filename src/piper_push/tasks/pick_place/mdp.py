@@ -34,6 +34,8 @@ from mjlab.utils.lab_api.math import (
   sample_uniform,
 )
 
+from piper_push import objects, shapes
+
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.viewer.viewer import DebugVisualizer
@@ -153,7 +155,7 @@ class PickCommand(CommandTerm):
     # find_geoms returns indices into the ENTITY's geom list; the per-world
     # model arrays are global, and the entity-local index there lands on the
     # terrain plane instead.
-    local_geom = self._object.find_geoms(("object_geom",))[0][0]
+    local_geom = self._object.find_geoms((objects.CORE_GEOM,))[0][0]
     self._object_geom = int(self._object.indexing.geom_ids[local_geom])
 
     zeros = torch.zeros(self.num_envs, device=self.device)
@@ -196,9 +198,13 @@ class PickCommand(CommandTerm):
 
   @property
   def object_half_size(self) -> torch.Tensor:
-    """Per-env half-extents. Read live because startup randomisation writes
-    them into the per-world model after this term is built."""
-    return torch.as_tensor(self._env.sim.model.geom_size[:])[:, self._object_geom]
+    """Bounding half-extents of the composed object, per environment.
+
+    Not one geom's size any more: an object is up to three parts, and the
+    spawn height, the lift test and the bin-rim test all want the extent
+    of the whole body rather than of whichever part comes first.
+    """
+    return shapes.object_half_size(self._env)
 
   @property
   def command(self) -> torch.Tensor:
@@ -504,6 +510,21 @@ def pads_touching(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   return ((found > 0).all(dim=1) & ~cmd.grasped).float()
 
 
+def palm_pushing(env: "ManagerBasedRlEnv", sensor_name: str) -> torch.Tensor:
+  """The gripper's body touching the object.
+
+  Nothing forbade this, so the policy used the palm as a bat: it drove the
+  gripper body into the object 7.9 mm deep (p95) to shove it around, which is a
+  contact the hardware would answer by knocking the object away rather than by
+  moving it.  Shrinking the contact\'s softness does not remove the behaviour,
+  only the depth it shows up at, so the behaviour is priced instead.
+  """
+  sensor = env.scene[sensor_name]
+  found = sensor.data.found
+  assert found is not None
+  return (found > 0).any(dim=1).float()
+
+
 def holding(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   """Paid every step the object is held.
 
@@ -685,15 +706,28 @@ def link_below_height(
 
 
 def joint_speed_over_trip(
-  env: "ManagerBasedRlEnv", limits: dict[str, float], asset_cfg: SceneEntityCfg
+  env: "ManagerBasedRlEnv",
+  limits: dict[str, float],
+  asset_cfg: SceneEntityCfg,
+  headroom: float = 1.0,
 ) -> torch.Tensor:
-  """How far past the deployment safety shell's trip points the arm is going."""
+  """How far past ``headroom`` of the safety shell's trip points the arm goes.
+
+  Charging only above the trip point itself leaves everything below it free,
+  and free is where a throughput objective will sit: measured on the first
+  policy that solved the task, all six joints peaked between 0.984 and 1.000
+  of their trip speed, with the per-step worst joint at 0.750 in the median.
+  That is not a policy that occasionally brushes the limit, it is one that
+  rides it, and on hardware the servo overshoots a commanded ramp by about
+  11%, so there is nothing left to absorb it.  Pricing the approach gives the
+  margin somewhere to come from.
+  """
   robot: Entity = env.scene[asset_cfg.name]
   vel = robot.data.joint_vel[:, asset_cfg.joint_ids].abs()
   names = [robot.joint_names[i] for i in asset_cfg.joint_ids]
   cap = torch.tensor(
     [limits.get(n, float("inf")) for n in names], device=vel.device
-  )
+  ) * headroom
   return (vel - cap).clamp_min(0.0).sum(dim=-1)
 
 

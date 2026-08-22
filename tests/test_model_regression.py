@@ -15,7 +15,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from piper_push import objects
+from piper_push import objects, shapes
 from piper_push import robot as piper
 
 
@@ -114,13 +114,21 @@ def test_finger_mesh_does_not_reach_past_the_pad(pick_model):
 # ---------------------------------------------------------------------------
 
 
+def _sample(n: int = 8192, variety: float = 1.0):
+  """A batch of object draws, straight from the sampler the env uses."""
+  import torch
+
+  return shapes._compose(n, torch.device("cpu"), None, variety)
+
+
 def test_gripper_reaches_rated_force_on_the_smallest_object():
   """A position servo produces kp x (target - actual).  With the target at zero
   and the jaws held apart by the object, that error is the object's half width,
   so kp has to be big enough that the smallest object in the distribution still
   saturates the drive's rated force.  The URDF-inherited kp of 40 gives 0.5 N
   and drops everything."""
-  smallest_half_width = objects.OBJECT_HALF_EXTENT_RANGE[0][0]
+  _, _, half, _ = _sample()
+  smallest_half_width = float(half[:, :2].min())
   force = piper.GRIPPER_STIFFNESS * smallest_half_width
   assert force >= piper.GRIPPER_FORCE_N
 
@@ -168,17 +176,77 @@ def test_pad_condim_survives_the_priority_ordering():
 
 
 def test_object_distribution_is_inside_the_grasp_envelope():
-  """S0: width 20-50 mm across the jaws, height >= 24 mm, mass <= 600 g."""
-  (wx, wy, hz) = objects.OBJECT_HALF_EXTENT_RANGE
-  assert 2 * wx[0] >= 0.020 and 2 * wx[1] <= 0.050
-  assert 2 * wy[0] >= 0.020 and 2 * wy[1] <= 0.050
-  assert 2 * hz[0] >= 0.024
+  """S0: width 20-50 mm across the jaws, height >= 24 mm, mass <= 600 g.
+
+  Asserted against draws rather than against the range constants, because the
+  ranges are no longer the envelope: anisotropy multiplies the sampled width,
+  so a 45 mm draw at the top of the anisotropy range leaves the range inside
+  the envelope and the object outside it.
+  """
+  _, _, half, _ = _sample()
+  width = 2 * half[:, :2].max(dim=1).values
+  assert float(width.min()) >= 0.020
+  assert float(width.max()) <= 0.050 + 1e-6
+  assert float(2 * half[:, 2].min()) >= objects.OBJECT_HEIGHT_FLOOR - 1e-9
   assert objects.OBJECT_MASS_RANGE[1] <= 0.600
 
 
 def test_widest_object_still_fits_the_jaws():
-  widest = 2 * max(objects.OBJECT_HALF_EXTENT_RANGE[0][1], objects.OBJECT_HALF_EXTENT_RANGE[1][1])
+  _, _, half, _ = _sample()
+  widest = float(2 * half[:, :2].max())
   assert widest < 2 * piper.GRIPPER_OPEN_M
+
+
+def test_every_shape_class_is_drawn():
+  """A class that is declared and never sampled is a class the policy has
+  never seen, which is worse than not having it at all: the acceptance table
+  still prints a row for it."""
+  _, _, _, cls = _sample()
+  for i, name in enumerate(objects.SHAPE_CLASSES):
+    assert int((cls == i).sum()) > 0, f"{name} was never drawn"
+
+
+def test_flat_objects_are_actually_represented():
+  """The distribution this replaced produced flat objects in 0.4% of draws --
+  42 out of 10865 scored instances -- so the shape curriculum reported a pass
+  on a class it had barely tested."""
+  _, _, half, _ = _sample()
+  ratio = half[:, 2] / half[:, :2].mean(dim=1)
+  flat = float((ratio < 0.8).float().mean())
+  assert flat > 0.05, f"flat objects are {100 * flat:.1f}% of the distribution"
+
+
+def test_composed_parts_stay_inside_the_reported_bounds():
+  """Everything downstream -- spawn height, the lift test, the bin-rim test --
+  reads one bounding half-extent for an object made of up to three parts."""
+  import torch
+
+  size, pos, half, cls = _sample()
+  cyl = torch.zeros_like(size, dtype=torch.bool)
+  cyl[:, 1] = True
+  ext = torch.where(
+    cyl, torch.stack((size[..., 0], size[..., 0], size[..., 1]), dim=-1), size
+  )
+  bound = (pos.abs() + ext).max(dim=1).values
+  assert float((bound - half).abs().max()) < 1e-6
+
+
+def test_inertia_is_physically_realisable_and_tracks_the_shape():
+  import torch
+
+  size, pos, half, cls = _sample(1024)
+  mass = torch.full((size.shape[0],), 0.2)
+  com, inertia, quat = shapes._mass_properties(size, pos, mass, cls == 1)
+  assert bool((inertia > 0).all())
+  a, b, c = inertia[:, 0], inertia[:, 1], inertia[:, 2]
+  assert bool(((a + b >= c - 1e-9) & (b + c >= a - 1e-9) & (a + c >= b - 1e-9)).all())
+  assert torch.allclose(quat.norm(dim=-1), torch.ones(quat.shape[0]), atol=1e-5)
+  # An L is two blocks meeting at the origin, so its centre of mass cannot sit
+  # on it.  A plain box's has to.
+  is_l = cls == 3
+  is_box = cls == 0
+  assert float(com[is_box].abs().max()) < 1e-9
+  assert float(com[is_l].abs().max()) > 1e-3
 
 
 # ---------------------------------------------------------------------------
