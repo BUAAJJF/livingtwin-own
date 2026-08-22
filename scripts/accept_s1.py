@@ -73,6 +73,9 @@ def main() -> int:
                    help="seconds after a grasp ends before it counts as dropped")
     p.add_argument("--lift-clear", type=float, default=0.010,
                    help="metres of clearance that make a pad contact a grasp")
+    p.add_argument("--reshape-on-place", action="store_true",
+                   help="draw a new shape for every object rather than one per "
+                        "episode; see below")
     p.add_argument("--device", default="cuda:0")
     a = p.parse_args()
 
@@ -108,6 +111,27 @@ def main() -> int:
     recurrent = bool(getattr(policy, "is_recurrent", False))
     if recurrent:
         policy.reset()
+
+    # The shape event is a reset event, so within an episode every object the
+    # policy is handed is the same geometry re-posed.  A recurrent policy can
+    # therefore identify the shape once and coast on it for the rest of the
+    # episode -- legal here, and worth nothing on a real table where the next
+    # object is a different object.  This redraws the shape as each object is
+    # replaced, which is what deployment looks like.
+    if a.reshape_on_place:
+        from mjlab.managers.event_manager import RecomputeLevel
+
+        from piper_push import shapes as _shapes
+
+        term = u.event_manager.get_term_cfg("object_shape")
+
+        def _reshape(ids: torch.Tensor) -> None:
+            _shapes.randomize_object_shape(u, ids, **term.params)
+            u.sim.recompute_constants(RecomputeLevel.set_const)
+            # Re-place after re-shaping, not before: the placement height is
+            # computed from the object's half-extent, so a taller object
+            # dropped into the old pose starts inside the table.
+            pick._place_object(ids)
 
     obs = env.get_observations()
     if isinstance(obs, tuple):
@@ -219,6 +243,9 @@ def main() -> int:
             # on the table is a failure; one cut short by the horizon never had
             # the chance, so it is censored rather than counted.
             trips += u.termination_manager.get_term("over_speed").sum()
+            if a.reshape_on_place and just_placed.any():
+                _reshape(just_placed.nonzero(as_tuple=False).flatten())
+
             e = dones.nonzero(as_tuple=False).flatten()
             if e.numel():
                 stale = e[age[e] > a.budget]

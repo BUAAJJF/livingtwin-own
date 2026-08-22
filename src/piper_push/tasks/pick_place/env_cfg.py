@@ -225,6 +225,10 @@ def make_pick_place_env_cfg(
       # backstop; the episode timeout does the real work.
       resampling_time_range=(1.0e6, 1.0e6),
       debug_vis=True,
+      # Every object is a new object, which is what a table is.  Off when there
+      # is nothing to redraw: the fixed-cube variant would pay the constant
+      # recompute for a shape that cannot change.
+      reshape_on_place=shape_variety > 0.0,
       object_name=OBJECT,
       pad_sensor_name=PAD_SENSOR,
       spawn_radius=SPAWN_RADIUS,

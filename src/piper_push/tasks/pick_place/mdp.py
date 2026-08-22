@@ -93,6 +93,11 @@ def sector_violation(
 # ---------------------------------------------------------------------------
 
 
+_UNSET = object()
+"""Sentinel: the shape event has not been looked up yet, which is not the same
+as having looked and found none."""
+
+
 @dataclass(kw_only=True)
 class PickCommandCfg(CommandTermCfg):
   object_name: str = "object"
@@ -104,6 +109,20 @@ class PickCommandCfg(CommandTermCfg):
   spawn_angle: tuple[float, float] = (-0.14, 0.73)
   """Radians. Clear of the bin, which sits at -0.63 rad."""
   spawn_clearance_m: float = 0.09
+  reshape_on_place: bool = False
+  """Draw a new shape for every object rather than one per episode.
+
+  The shape randomiser is a reset event, so without this the whole episode is
+  one geometry re-posed, and a recurrent policy can identify it once and coast
+  on that for the remaining dozen placements.  Measured on the vision policy:
+  58.2 objects a minute with the shape held for the episode, 54.0 when every
+  object is a new one.  The state teacher, which is fed the shape and has no
+  memory to carry, loses 2.0% over the same change -- so most of the student's
+  7.2% was a trick that does not survive a real table.
+
+  It costs about 14% of training throughput at 1024 environments, because the
+  per-world model fields it writes are only visible after the derived constants
+  are recomputed, and at scale a placement happens on nearly every step."""
   """How far the object spawns from wherever the arm was just reset to."""
   spawn_attempts: int = 6
 
@@ -172,6 +191,7 @@ class PickCommand(CommandTerm):
     self.placed = zeros.clone().bool()
     self.just_grasped = zeros.clone()
     self.just_placed = zeros.clone()
+    self._shape_term = _UNSET
     self.objects_placed = zeros.clone()
     self._grasp_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self._place_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -350,6 +370,31 @@ class PickCommand(CommandTerm):
 
   # -- placement -----------------------------------------------------------
 
+  def _reshape(self, env_ids: torch.Tensor) -> None:
+    """Redraw the object's geometry before it is put back on the table.
+
+    Before, not after: the placement height is computed from the object's
+    half-extent, so a taller object dropped into the pose chosen for a shorter
+    one starts inside the table.
+
+    The randomiser and its parameters are read off the reset event rather than
+    duplicated here, so there is one description of what an object can be.  The
+    lookup is lazy because the command manager is built before the event
+    manager, and skipped entirely if the task has no shape event -- the fixed
+    cube variant does not.
+    """
+    from mjlab.managers.event_manager import RecomputeLevel
+
+    if self._shape_term is _UNSET:
+      try:
+        self._shape_term = self._env.event_manager.get_term_cfg("object_shape")
+      except (KeyError, ValueError):
+        self._shape_term = None
+    if self._shape_term is None:
+      return
+    self._shape_term.func(self._env, env_ids, **self._shape_term.params)
+    self._env.sim.recompute_constants(RecomputeLevel.set_const)
+
   def _place_object(self, env_ids: torch.Tensor) -> None:
     """Drop the object somewhere reachable and clear of the hand.
 
@@ -357,6 +402,8 @@ class PickCommand(CommandTerm):
     the gripper would make "hand already over the object" an unreachable start
     state, and that is exactly the state a fresh grasp begins from.
     """
+    if self.cfg.reshape_on_place and not self._resetting:
+      self._reshape(env_ids)
     count = len(env_ids)
     half = self.object_half_size[env_ids]
     site = (self._site_pos_w()[env_ids] - self._env.scene.env_origins[env_ids])
