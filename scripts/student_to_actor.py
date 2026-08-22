@@ -14,9 +14,8 @@ initialisation.  Only the key differs.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-import torch
+from piper_push.checkpoints import as_actor_checkpoint
 
 
 def main() -> int:
@@ -25,20 +24,11 @@ def main() -> int:
   p.add_argument("dest", help="where to write the policy checkpoint")
   a = p.parse_args()
 
-  loaded = torch.load(a.source, map_location="cpu", weights_only=False)
-  if "student_state_dict" not in loaded:
-    raise SystemExit(
-      f"{a.source} has no student_state_dict; keys are {sorted(loaded)}. "
-      "This converts distillation checkpoints, not policy checkpoints."
-    )
-  out = {
-    "actor_state_dict": loaded["student_state_dict"],
-    "iter": loaded.get("iter", 0),
-    "infos": loaded.get("infos"),
-  }
-  Path(a.dest).parent.mkdir(parents=True, exist_ok=True)
-  torch.save(out, a.dest)
-  print(f"wrote {a.dest} from iteration {out['iter']}")
+  written = as_actor_checkpoint(a.source, a.dest)
+  if written == a.source:
+    print(f"{a.source} is already a policy checkpoint; nothing to write")
+  else:
+    print(f"wrote {written}")
   return 0
 
 

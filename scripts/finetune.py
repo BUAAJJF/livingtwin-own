@@ -33,6 +33,8 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
+from piper_push.checkpoints import as_actor_checkpoint
+
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
 
 
@@ -89,8 +91,11 @@ def main() -> int:
     print(f"[INFO] resuming from {a.resume}")
     runner.load(a.resume, map_location=a.device)
   else:
+    # Accepts a distillation checkpoint directly; the conversion is one key
+    # rename and making the caller remember it is a way to lose an afternoon.
+    actor_path = as_actor_checkpoint(a.student, log_dir / "actor_from_student.pt")
     print(f"[INFO] actor from {a.student}")
-    runner.load(a.student, load_cfg={"actor": True, "iteration": False},
+    runner.load(actor_path, load_cfg={"actor": True, "iteration": False},
                 strict=True, map_location=a.device)
     if a.critic:
       print(f"[INFO] critic from {a.critic}")
