@@ -40,7 +40,9 @@ def main() -> int:
   p.add_argument("--teacher", help="state policy checkpoint to imitate")
   p.add_argument("--resume", help="distillation checkpoint to continue from")
   p.add_argument("--num-envs", type=int, default=512)
-  p.add_argument("--iterations", type=int, default=1500)
+  p.add_argument("--iterations", type=int, default=1500,
+                 help="target total iterations, not additional ones: resuming "
+                      "at 1600 with --iterations 3000 runs 1400 more")
   p.add_argument("--run-name", default="")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=42)
@@ -94,7 +96,16 @@ def main() -> int:
       strict=True, map_location=a.device,
     )
 
-  runner.learn(num_learning_iterations=a.iterations, init_at_random_ep_len=True)
+  # Counted as a target, not a budget.  rsl_rl's learn() runs N iterations
+  # *from where it is*, so a run resumed at 1600 and asked for 3000 stops at
+  # 4600 -- which is how the state campaign quietly turned 3500 into 5300.
+  remaining = a.iterations - runner.current_learning_iteration
+  if remaining <= 0:
+    print(f"[INFO] already at iteration {runner.current_learning_iteration}; "
+          f"nothing to do for a target of {a.iterations}")
+    env.close()
+    return 0
+  runner.learn(num_learning_iterations=remaining, init_at_random_ep_len=True)
   env.close()
   return 0
 
