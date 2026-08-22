@@ -48,8 +48,25 @@ def main() -> int:
   p.add_argument("--iterations", type=int, default=3000,
                  help="target total iterations, not additional ones: resuming "
                       "at 1600 with --iterations 3000 runs 1400 more")
-  p.add_argument("--init-std", type=float, default=0.3,
+  # Fine-tuning hyper-parameters, and every one of them is lower than the
+  # from-scratch value it replaces.  The first attempt used the training
+  # numbers and destroyed the distilled policy in a single iteration: the
+  # weights moved 4.4e-3 on tensors whose RMS is 5e-2, and a policy that placed
+  # 49 objects a minute placed none.  Adam's first step moves every parameter
+  # by roughly the learning rate no matter how small the gradient is, and there
+  # are twenty of them per iteration.
+  p.add_argument("--init-std", type=float, default=0.15,
                  help="action std to restart exploration at; see below")
+  p.add_argument("--learning-rate", type=float, default=1.0e-4)
+  p.add_argument("--desired-kl", type=float, default=0.005,
+                 help="per-update KL the adaptive schedule aims at")
+  p.add_argument("--entropy-coef", type=float, default=0.002,
+                 help="from-scratch training wants exploration; a fine-tune "
+                      "mostly wants the entropy bonus to stop pushing the "
+                      "policy back towards random")
+  p.add_argument("--critic-warmup", type=int, default=100,
+                 help="iterations to train the value function alone before "
+                      "the actor is allowed to move")
   p.add_argument("--run-name", default="")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=42)
@@ -70,6 +87,9 @@ def main() -> int:
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger
+  agent_cfg.algorithm.learning_rate = a.learning_rate
+  agent_cfg.algorithm.desired_kl = a.desired_kl
+  agent_cfg.algorithm.entropy_coef = a.entropy_coef
 
   stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
   if a.run_name:
@@ -128,6 +148,35 @@ def main() -> int:
   # Counted as a target, not a budget.  rsl_rl's learn() runs N iterations
   # *from where it is*, so a run resumed at 1600 and asked for 3000 stops at
   # 4600 -- which is how the state campaign quietly turned 3500 into 5300.
+  # The value function loaded from the state run estimates the value of the
+  # *state* policy's behaviour, which is better than the student's.  Letting
+  # the actor move before that gap closes updates it from advantages that
+  # measure the wrong thing.  So the actor is held still until the critic has
+  # caught up, and the learning-rate schedule is pinned while it is: with the
+  # policy frozen the measured KL is zero, and an adaptive schedule reads zero
+  # KL as permission to raise the rate.
+  if a.critic_warmup > 0 and not a.resume:
+    alg = runner.alg
+    actor_params = [q for q in alg.actor.parameters()]
+    inner_update = alg.update
+    warmup_until = runner.current_learning_iteration + a.critic_warmup
+
+    def update_with_warmup():
+      warming = runner.current_learning_iteration < warmup_until
+      for q in actor_params:
+        q.requires_grad_(not warming)
+      saved = alg.schedule
+      if warming:
+        alg.schedule = "fixed"
+      try:
+        losses = inner_update()
+      finally:
+        alg.schedule = saved
+      return losses
+
+    alg.update = update_with_warmup
+    print(f"[INFO] critic-only for the first {a.critic_warmup} iterations")
+
   remaining = a.iterations - runner.current_learning_iteration
   if remaining <= 0:
     print(f"[INFO] already at iteration {runner.current_learning_iteration}; "
