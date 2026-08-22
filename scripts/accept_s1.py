@@ -143,7 +143,6 @@ def main() -> int:
     # a shell trip ends the episode, and an instance cut short by the end of an
     # episode is censored rather than failed.
     trips = torch.zeros((), device=dev)
-    episodes = torch.zeros((), device=dev)
     sim_seconds = 0.0
 
     with torch.inference_mode():
@@ -220,7 +219,6 @@ def main() -> int:
             # on the table is a failure; one cut short by the horizon never had
             # the chance, so it is censored rather than counted.
             trips += u.termination_manager.get_term("over_speed").sum()
-            episodes += dones.sum()
             e = dones.nonzero(as_tuple=False).flatten()
             if e.numel():
                 stale = e[age[e] > a.budget]
@@ -264,10 +262,16 @@ def main() -> int:
         print(f"  time to place          {q[0]:5.2f} s median, {q[1]:5.2f} s p95")
     stuck = (stuck_steps * dt / max(sim_seconds, 1e-6)).item()
     print(f"  time with a stuck object {100 * stuck:5.1f}%   (object unplaced past the budget)")
-    shell = (trips / episodes.clamp(min=1)).item()
+    # Per arm-hour, and per hundred objects.  Not as a share of episodes: a
+    # trip *is* an episode ending, so unless the rollout is long enough to
+    # contain several full episodes the denominator is only the episodes that
+    # ended early, and the ratio says which early ending was most common rather
+    # than how often the arm stops.
     per_hour = (trips / max(sim_seconds, 1e-6) * 3600.0).item()
-    print(f"  safety-shell trips     {100 * shell:5.1f}% of episodes"
-          f"  ({per_hour:.1f} per arm-hour)")
+    per_100 = (100 * trips / placed_total.clamp(min=1)).item()
+    minutes = 60.0 / per_hour if per_hour > 0 else float("inf")
+    print(f"  safety-shell trips     {per_hour:5.1f} per arm-hour"
+          f"   (one every {minutes:.1f} min, {per_100:.1f} per 100 placed)")
     print()
     # The distribution, not just its maximum.  ``over`` is the share of samples
     # above the point the speed penalty starts charging, which is the number
