@@ -10,6 +10,19 @@
 # So this is not a hyper-parameter sweep.  It is three points on the shape
 # curriculum plus a second seed, asking whether the task still trains once the
 # simulation stops flattering it -- and what the honest throughput is.
+#
+# Launch it detached from any session, not just inside tmux:
+#
+#     setsid nohup bash scripts/sweep.sh > /dev/null 2>&1 < /dev/null &
+#
+# tmux keeps a run alive across a dropped connection, which is what it is for,
+# and it does not keep one alive across `tmux kill-server`.  This campaign has
+# now lost two runs that way -- once at iteration 46 and once at 1800 -- when
+# the machine was being cleared for someone else.  setsid puts the trainers in
+# their own session so clearing the terminal side does not reach them.
+#
+# RESUME=1 picks each run up from the newest checkpoint of the newest matching
+# run directory instead of starting over.
 set -Euo pipefail
 cd "$(dirname "$0")/.."
 export PATH=$HOME/.local/bin:$PATH
@@ -30,9 +43,24 @@ say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
 run() {
   local gpu=$1 name=$2 task=$3; shift 3
+  local resume=()
+  if [ "${RESUME:-0}" = "1" ]; then
+    local dir
+    dir=$(ls -td logs/rsl_rl/*/*_"$name" 2>/dev/null | head -1)
+    if [ -n "$dir" ] && ls "$dir"/model_*.pt >/dev/null 2>&1; then
+      # Newest by mtime, not by name: model_900 sorts after model_1800.
+      local ckpt
+      ckpt=$(ls -t "$dir"/model_*.pt | head -1)
+      resume=(--agent.resume True --agent.load-run "$(basename "$dir")"
+              --agent.load-checkpoint "$(basename "$ckpt")")
+      say "  $name resuming from $(basename "$dir")/$(basename "$ckpt")"
+    else
+      say "  $name has nothing to resume from; starting fresh"
+    fi
+  fi
   micromamba run -n mjlab train "$task" \
     --env.scene.num-envs "$NUM_ENVS" --agent.max-iterations "$ITERS" \
-    --agent.run-name "$name" --gpu-ids "[$gpu]" "$@" \
+    --agent.run-name "$name" --gpu-ids "[$gpu]" "${resume[@]}" "$@" \
     > "$OUT/$name.log" 2>&1
   echo "exit=$? $name" >> "$OUT/exit.log"
 }
