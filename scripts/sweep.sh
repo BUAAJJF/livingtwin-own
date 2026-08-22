@@ -42,17 +42,18 @@ for s in 0 1 2; do
 done
 
 say "=== the corrected configuration, across the shape curriculum ==="
-run 2 f_cube    Mjlab-Pick-Place-PiperX-Cube 3500 8192 &
-run 3 f_cube_s2 Mjlab-Pick-Place-PiperX-Cube 3500 8192 --agent.seed 17 &
-run 4 f_mid     Mjlab-Pick-Place-PiperX-Mid  3500 8192 &
-run 5 f_full    Mjlab-Pick-Place-PiperX      3500 8192 &
-run 6 f_hedge   Mjlab-Pick-Place-PiperX-Cube 3500 8192 $HEDGE &
+run 2 g_cube    Mjlab-Pick-Place-PiperX-Cube 3500 8192 &
+run 3 g_cube_s2 Mjlab-Pick-Place-PiperX-Cube 3500 8192 --agent.seed 17 &
+run 4 g_mid     Mjlab-Pick-Place-PiperX-Mid  3500 8192 &
+run 5 g_full    Mjlab-Pick-Place-PiperX      3500 8192 &
+run 6 g_hedge   Mjlab-Pick-Place-PiperX-Cube 3500 8192 $HEDGE &
 wait
 say "finished"
-for n in f_cube f_cube_s2 f_mid f_full f_hedge; do
+for n in g_cube g_cube_s2 g_mid g_full g_hedge; do
   say "  $n: placed=$(tailmean "$n" "Metrics/pick/objects_placed")" \
       "grasp=$(tailmean "$n" "Metrics/pick/grasp_rate")" \
       "attempts=$(tailmean "$n" "Metrics/pick/grasp_attempts")" \
+      "knocked_in=$(tailmean "$n" "Metrics/pick/knocked_in")" \
       "drop_err=$(tailmean "$n" "Metrics/pick/drop_error")" \
       "in_bin=$(tailmean "$n" "Episode_Reward/object_in_bin")"
 done
