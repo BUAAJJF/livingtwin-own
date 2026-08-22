@@ -93,9 +93,7 @@ def main() -> int:
 
     u = env.unwrapped
     pick = u.command_manager.get_term("pick")
-    obj = pick._object
     robot = u.scene["robot"]
-    sensor = u.scene.sensors["pad_contact"]
     dt = u.step_dt
     dev = torch.device(a.device)
     n = a.num_envs
@@ -178,9 +176,12 @@ def main() -> int:
             sim_seconds += dt * n
 
             half = pick.object_half_size.to(dev)
-            pos = obj.data.root_link_pos_w - u.scene.env_origins
+            # Through the command, not off an entity: which object is being
+            # scored is the command's answer, and with a table of them there
+            # is no single entity that means "the object".
+            pos = pick.target_pos_w() - u.scene.env_origins
             clear = pos[:, 2] - half[:, 2]
-            both = (sensor.data.found > 0).all(dim=1)
+            both = (pick.pad_found > 0).all(dim=1)
             just_placed = pick.just_placed.bool()
 
             ratio = robot.data.joint_vel[:, jids].abs() / trip
@@ -297,6 +298,18 @@ def main() -> int:
     per_hour = (trips / max(sim_seconds, 1e-6) * 3600.0).item()
     per_100 = (100 * trips / placed_total.clamp(min=1)).item()
     minutes = 60.0 / per_hour if per_hour > 0 else float("inf")
+    # Cleanup only.  An instance is still one object from the moment it becomes
+    # the target, so everything above measures the same thing it always did;
+    # these two are the questions that only exist once there is a table rather
+    # than an object.
+    if "table_clears" in pick.metrics:
+        clears = float(pick.table_clears.sum())
+        strayed = float(pick.objects_strayed.sum())
+        hours = sim_seconds / 3600.0
+        print(f"  tables cleared         {clears / max(hours, 1e-9):5.1f} per arm-hour"
+              f"   ({pick.num_objects} objects each)")
+        print(f"  objects batted astray  {strayed / max(hours, 1e-9):5.1f} per arm-hour"
+              f"   ({100 * strayed / max(placed_total.item(), 1):.1f} per 100 placed)")
     print(f"  safety-shell trips     {per_hour:5.1f} per arm-hour"
           f"   (one every {minutes:.1f} min, {per_100:.1f} per 100 placed)")
     print()
