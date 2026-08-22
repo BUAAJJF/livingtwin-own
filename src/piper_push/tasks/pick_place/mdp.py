@@ -164,11 +164,17 @@ class PickCommand(CommandTerm):
     self.objects_placed = zeros.clone()
     self._grasp_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self._place_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    self._knock_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    self._knocked = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
     # Paid once per object.  A rising-edge bonus that pays every time is a
     # grab-drop-grab loop worth more than finishing the task, and the policy
     # will find it long before it finds the bin.
     self._grasp_paid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
     self.grasp_attempts = torch.zeros(self.num_envs, device=self.device)
+    # Objects that reached the bin without ever having been picked up.  Logged
+    # rather than silently discarded: a suppressed exploit is one you stop
+    # being able to see.
+    self.knocked_in = torch.zeros(self.num_envs, device=self.device)
     self._resetting = False
 
     origin = env.scene.env_origins
@@ -184,6 +190,7 @@ class PickCommand(CommandTerm):
     # Attempts per placement is the number that exposes a grab-drop loop: a
     # policy doing the task has one, a policy farming the bonus has many.
     self.metrics["grasp_attempts"] = self.grasp_attempts
+    self.metrics["knocked_in"] = self.knocked_in
 
   # -- geometry ------------------------------------------------------------
 
@@ -255,25 +262,47 @@ class PickCommand(CommandTerm):
     settled = torch.linalg.norm(self._object.data.root_link_lin_vel_w, dim=-1) < (
       self.cfg.place_settle_vel
     )
-    placed_now = inside & below_rim & released & settled
+    # "It ended up in the bin" is not "it was put in the bin".  Every clause
+    # below was satisfied by a policy that batted the object in and never
+    # closed its fingers once: 14.37 placements an episode at a grasp rate of
+    # 0.0000.  The object has to have been carried there, so a placement only
+    # counts if a genuine grasp of THIS object happened first.
+    in_bin_now = inside & below_rim & released & settled
+    placed_now = in_bin_now & self._grasp_paid
     self._place_count = torch.where(
       placed_now, self._place_count + 1, torch.zeros_like(self._place_count)
     )
     done = self._place_count >= self.cfg.place_dwell
     self.just_placed = (done & ~self.placed).float()
     self.placed = done
+    # The same dwell test on the objects that arrived without a grasp, so the
+    # exploit stays measurable.
+    self._knock_count = torch.where(
+      in_bin_now & ~self._grasp_paid,
+      self._knock_count + 1,
+      torch.zeros_like(self._knock_count),
+    )
+    knocked_now = self._knock_count >= self.cfg.place_dwell
+    just_knocked = (knocked_now & ~self._knocked).float()
+    self._knocked = knocked_now
 
     if not self._resetting:
       self.objects_placed += self.just_placed
+      self.knocked_in += just_knocked
       self.metrics["grasp_rate"] = self.grasped.float()
       self.metrics["drop_error"] = torch.linalg.norm(
         obj - self._drop_local, dim=-1
       )
-      respawn = self.just_placed.nonzero().flatten()
+      # An object that arrived by being knocked in is respawned too -- leaving
+      # it there would let the policy bat one object in and then farm the
+      # reach reward on an empty table.
+      respawn = (self.just_placed + just_knocked).nonzero().flatten()
       if len(respawn) > 0:
         self._place_object(respawn)
         self._place_count[respawn] = 0
+        self._knock_count[respawn] = 0
         self.placed[respawn] = False
+        self._knocked[respawn] = False
         self._grasp_paid[respawn] = False
 
   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
@@ -283,10 +312,13 @@ class PickCommand(CommandTerm):
     self._place_object(env_ids)
     self._grasp_count[env_ids] = 0
     self._place_count[env_ids] = 0
+    self._knock_count[env_ids] = 0
     self._grasp_paid[env_ids] = False
     self.grasp_attempts[env_ids] = 0.0
+    self.knocked_in[env_ids] = 0.0
     self.grasped[env_ids] = False
     self.placed[env_ids] = False
+    self._knocked[env_ids] = False
 
   def reset(self, env_ids) -> dict[str, float]:
     self._resetting = True
@@ -571,7 +603,9 @@ def object_in_bin(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
     < torch.tensor(cmd.cfg.bin_inner, device=pos.device)
   ).all(dim=-1)
   below_rim = pos[:, 2] - cmd.object_half_size[:, 2] < cmd.cfg.bin_rim_z
-  return (inside & below_rim & ~cmd.grasped).float()
+  # And only for an object that was carried there; otherwise this is a reward
+  # for batting things into the bin.
+  return (inside & below_rim & ~cmd.grasped & cmd._grasp_paid).float()
 
 
 def object_thrown(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:

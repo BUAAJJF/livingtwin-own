@@ -230,6 +230,24 @@ def test_every_guard_region_contains_the_bin_and_the_way_to_it():
   assert pick_cfg.OBJECT_ALLOWED_RADIUS[0] < bin_r < pick_cfg.OBJECT_ALLOWED_RADIUS[1]
 
 
+def test_a_placement_requires_a_grasp_first():
+  """An object in the bin is not the same as an object put in the bin.
+
+  A policy scored 14.37 placements an episode at a grasp rate of 0.0000: it
+  batted objects in.  Every clause of the criterion was satisfied -- inside the
+  footprint, below the rim, no pad touching it, at rest for five steps -- and
+  none of them said it had to have been carried.
+  """
+  import inspect
+
+  from piper_push.tasks.pick_place import mdp as pick_mdp
+
+  src = inspect.getsource(pick_mdp.PickCommand._update_metrics)
+  assert "placed_now = in_bin_now & self._grasp_paid" in src
+  bin_src = inspect.getsource(pick_mdp.object_in_bin)
+  assert "cmd._grasp_paid" in bin_src
+
+
 def test_release_height_is_inside_the_straight_down_envelope():
   """S0: straight down runs out at 150 mm for r <= 0.35 and 130 mm at 0.42."""
   from piper_push.tasks.pick_place import mdp as pick_mdp
