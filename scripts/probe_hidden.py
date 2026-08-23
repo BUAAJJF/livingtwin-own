@@ -253,8 +253,18 @@ def main() -> int:
       obs, dones = out[0], out[2]
       policy.reset(dones)
       if h_alt is not None and bool(dones.any()):
-        # Keep the two branches comparable: an episode boundary clears both.
-        h_main = _clone(policy.get_hidden_state())
+        # An episode boundary clears BOTH branches, and clears them by writing
+        # into each buffer directly.
+        #
+        # Not by re-reading the policy's hidden state, which is what this did
+        # first: at this point the policy is holding the ALT branch's state
+        # (it was the last one evaluated), so `h_main = clone(policy.hidden)`
+        # silently replaced the main branch with the alt branch.  The two
+        # became identical and the measured divergence dropped to exactly
+        # zero on the first step any environment finished an episode -- which
+        # read as "the memory's influence decays to nothing in five steps"
+        # rather than as the bug it was.
+        _zero(h_main, dones.bool())
         _zero(h_alt, dones.bool())
 
       # -- track which object is which -------------------------------------
@@ -267,9 +277,9 @@ def main() -> int:
         if a.reset_hidden_on_respawn:
           policy.reset(placed)
           if h_alt is not None:
-            # Both branches, or the comparison stops being about the swap and
-            # starts being about which branch got cleared.
-            h_main = _clone(policy.get_hidden_state())
+            # Both branches, written directly -- see the note on the episode
+            # boundary below for why this must not re-read the policy.
+            _zero(h_main, placed)
             _zero(h_alt, placed)
       cur_cls, cur_mass = cur_labels()
       if bool(dones.any()):
