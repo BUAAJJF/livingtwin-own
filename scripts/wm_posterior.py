@@ -451,15 +451,33 @@ def main() -> int:
 
   # The posterior the adaptation stage will use, written on its own so that
   # nothing downstream has to parse the report to find it.
+  #
+  # It is ONE session's posterior, not the mean over the thirty-two.  A real
+  # deployment gets one afternoon with one arm, and averaging thirty-two
+  # independent sessions is a variance reduction nobody will have.  The mean
+  # and the spread are recorded beside it: if they agree the choice did not
+  # matter and the report says so, and if they do not, the single session is
+  # the honest one.
   chosen = {}
   for name in ("B1b_img_proprio", "B2_classifier", "B3_state", "B4_action",
-               "DA"):
+               "DA", "abl_latent_only", "abl_action_only"):
     e = report["budgets"]["60.0"]["methods"]["test"].get(name)
-    if e and e.get("target_only"):
-      probs = e["target_only"]["mean_posterior"]
-      total = sum(probs)
-      chosen[name] = latency.LatencyPrior(
-        tuple(x / total for x in probs)).to_json()
+    t = (e or {}).get("target_only")
+    if not t:
+      continue
+    def _norm(v):
+      total = sum(v)
+      return latency.LatencyPrior(tuple(x / total for x in v))
+
+    single = _norm(t["session0_posterior"])
+    pooled = _norm(t["mean_posterior"])
+    d = single.to_json()
+    d["source"] = "session 0 of the target split, 60 s"
+    d["pooled_over_32_sessions"] = pooled.to_json()
+    d["total_variation_single_vs_pooled"] = single.total_variation(pooled)
+    d["mass_on_truth_across_sessions"] = {
+      "mean": t["mass_on_truth"], "min": t["mass_min"], "max": t["mass_max"]}
+    chosen[name] = d
   (out / "posteriors_60s.json").write_text(json.dumps(chosen, indent=1))
   print(f"\n  wrote {out / 'posterior_report.json'} and posteriors_60s.json")
   return 0
