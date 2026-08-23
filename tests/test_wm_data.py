@@ -197,3 +197,16 @@ def test_describe_reports_arm_seconds_not_wall_clock():
   """The data budget in the report is arm-seconds: envs x steps / 50 Hz."""
   d = _session(steps=500, n=6).describe()
   assert d["arm_seconds"] == pytest.approx(60.0)
+
+
+def test_zero_hidden_follows_the_policys_weights(policy):
+  """Not the observation's device.
+
+  mjlab's TensorDict reports device=None with its entries on the GPU, so
+  deriving the hidden state's device from the observation silently puts it on
+  the CPU and the first forward pass dies on a device mismatch -- four minutes
+  into a rollout, not in any config check.
+  """
+  h = wm_data.zero_hidden(policy, N)
+  assert h.device == next(policy.rnn.rnn.parameters()).device
+  assert h.shape == (policy.rnn.rnn.num_layers, N, policy.rnn.rnn.hidden_size)

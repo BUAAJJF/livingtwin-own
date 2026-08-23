@@ -135,7 +135,7 @@ def collect(task: str, ckpt: str, lag: int, n_envs: int, steps: int,
     # *predicted* enc can be pushed through the same head from the same state.
     h_prev = policy.rnn.hidden_state
     if h_prev is None:
-      h_prev = wm_data.zero_hidden(policy, u.num_envs, obs.device)
+      h_prev = wm_data.zero_hidden(policy, u.num_envs)
     enc = policy._encode(obs)
     act, h_new = wm_data.actor_head(policy, enc, h_prev)
     policy.rnn.hidden_state = h_new

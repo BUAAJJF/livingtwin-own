@@ -110,8 +110,17 @@ def actor_head(policy, enc: torch.Tensor, hidden: torch.Tensor | None):
   return action, h_new
 
 
-def zero_hidden(policy, n: int, device) -> torch.Tensor:
+def zero_hidden(policy, n: int, device=None) -> torch.Tensor:
+  """The state a fresh episode starts from.
+
+  The device comes from the recurrent layer's own weights unless one is given.
+  A TensorDict built by mjlab reports ``device=None`` even when its entries are
+  on the GPU, so deriving it from the observation puts the hidden state on the
+  CPU and the first forward pass dies on a device mismatch.
+  """
   rnn = policy.rnn.rnn
+  if device is None:
+    device = next(rnn.parameters()).device
   return torch.zeros(rnn.num_layers, n, rnn.hidden_size, device=device)
 
 
