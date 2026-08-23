@@ -61,17 +61,25 @@ history refills, where the ring buffer held the frame from the reset. So the
 target domain was re-measured under the new implementation, same protocol, same
 three evaluation seeds.
 
-| | WM0 (ring buffer) | WM1 (mjlab DelayBuffer) |
-|---|---|---|
-| nominal, obj/min | 55.86 (55.90, 55.54, 56.15) | TODO |
-| zero-shot at lag 3, obj/min | 42.19 (41.85, 42.32, 42.40) | 42.22 (42.54, 42.14, 41.98) |
-| nominal, trips/arm-hour | 2.29 (47 events / 20.5 h) | TODO |
-| zero-shot, trips/arm-hour | 8.69 (178 events / 20.5 h) | 10.30 (211 events / 20.5 h) |
+| | WM0 (ring buffer), 3 repeats | WM1 (mjlab DelayBuffer), 6 repeats | rate ratio |
+|---|---|---|---|
+| nominal, obj/min | 55.86 | **55.94** [55.73, 56.15] | |
+| zero-shot at lag 3, obj/min | 42.19 | **42.12** [41.79, 42.45] | |
+| nominal, trips/arm-hour | 2.29 (47 events / 20.5 h) | 3.12 (128 / 41.0 h) | 1.36 [0.92, 2.01], p = 0.12 |
+| zero-shot, trips/arm-hour | 8.69 (178 / 20.5 h) | 9.64 (395 / 41.0 h) | 1.11 [0.90, 1.37], p = 0.34 |
 
-Throughput reproduces to within a tenth of an object per minute in the domain
-that matters, so the WM0 gate anchors carry forward. The trip rates do not
-reproduce as tightly, and section 8 works out what that is and is not evidence
-of.
+Throughput reproduces to within a tenth of an object per minute in both
+domains, so the WM0 gate anchors carry forward. The trip rates run higher in
+this phase in both conditions and neither difference is significant once the
+counts' overdispersion is accounted for; section 8.2 works out what that is and
+is not evidence of, and the gate reports its safety criterion against both the
+inherited threshold and one re-derived from this phase's own anchors.
+
+The nominal condition is the control on the whole comparison: its code path is
+byte-identical across the change — `apply_session_mismatch` returns before
+touching anything when no axis is active, and the evaluator never calls
+`apply_latency_prior` — so any difference in it is not the delay
+implementation.
 
 ## 2. The dataset
 
@@ -303,21 +311,36 @@ throughput reproduced to within a tenth of an object per minute. Its trip rate
 did not: WM0 measured 2.29/h and the re-measurement 3.15/h, which reads as a
 37% regression.
 
-Read as counts it is 47 events in 20.5 arm-hours against 43 in 13.7:
+Read as counts, over six repeats:
 
-| | events | exposure | rate |
-|---|---|---|---|
-| WM0 nominal | 47 | 20.5 h | 2.29/h |
-| WM1 nominal, same command | 43 | 13.7 h | 3.15/h |
-| rate ratio | | | **1.37, 95% CI [0.91, 2.08], p = 0.13** |
+| | events | exposure | rate | per-repeat rates |
+|---|---|---|---|---|
+| WM0 nominal, 3 repeats | 47 | 20.5 h | 2.29/h | 2.49, 2.05, 2.34 |
+| WM1 nominal, same command, 6 repeats | 128 | 41.0 h | 3.12/h | 2.93, 3.37, 2.20, 3.66, 4.25, 2.34 |
+| rate ratio | | | **1.36, 95% CI [0.92, 2.01], p = 0.12** | |
 
-Nothing happened. The lesson is not that the difference is small but that
-three repeats of a twenty-event count cannot resolve a 40% change, and Phase
-WM0's reported standard deviation on this metric (±0.22 on 2.29) understates
-its spread. The anchors in this phase therefore get six repeats rather than
-three, and the gate's trip criterion is evaluated on nine evaluations pooled
-across training seeds — about 61 arm-hours, several hundred events — rather
-than on three.
+Nothing that can be distinguished from noise happened. Two things are worth
+taking from it rather than one.
+
+First, three repeats of a twenty-event count cannot resolve a 40% change, and
+WM0's reported standard deviation on this metric (±0.22 on 2.29) understated
+its spread by a lot: repeating the same protocol six times gives per-repeat
+rates from 2.20 to 4.25 per arm-hour, a factor of 1.9.
+
+Second, that spread is **larger than Poisson**. The dispersion — Pearson's
+statistic over the repeats divided by its degrees of freedom — is 1.36 for
+nominal and 1.44 for zero-shot, so the repeats disagree by about 20% more in
+standard deviation than counting noise alone allows. Intervals on this metric
+are therefore quasi-Poisson throughout, and it is the dispersion correction
+that turns the nominal comparison from p = 0.036 into p = 0.12. Reporting the
+uncorrected number would have been reporting a regression that is not there.
+
+The consequences: the anchors in this phase get six repeats rather than three;
+the gate's trip criterion is evaluated on nine evaluations pooled across
+training seeds — about 61 arm-hours — rather than on three; and G3 is reported
+against both the inherited threshold and one re-derived from anchors measured
+in this phase, since a threshold built from WM0's trip rates and applied to
+this phase's is comparing across the thing that moved.
 
 ### 8.3 Comparisons
 
