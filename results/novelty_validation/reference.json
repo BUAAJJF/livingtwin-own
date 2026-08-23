@@ -1,0 +1,58 @@
+{
+ "_comment": [
+  "The published numbers this round is trying to reproduce, transcribed from",
+  "docs/results.md at commit a5feaf9.  They are the TARGET, not a result --",
+  "nothing computed by scripts/analyze_novelty.py may be written here.",
+  "",
+  "Their protocol as documented there: 512 environments x 2400 control steps,",
+  "deterministic policy, honest (per-object) randomisation.  Phase 0.2 tests",
+  "that claim as much as it tests the numbers."
+ ],
+ "protocol": {"num_envs": 512, "steps": 2400, "cadence": "object"},
+ "tolerance": {
+  "throughput_rel": 0.02,
+  "success_abs_pp": 0.5,
+  "p95_rel": 0.05
+ },
+ "runs": {
+  "s2_teacher": {
+   "checkpoint": "piperx_pick_place/2026-08-22_07-55-30_h_full/model_3400.pt",
+   "throughput_per_min": 58.4, "success": 0.998, "drop_rate": 0.004,
+   "p95_s": 1.36, "stuck_fraction": 0.022, "trips_per_arm_hour": 4.2
+  },
+  "s2_distilled": {
+   "checkpoint": "piperx_pick_place_distill/2026-08-22_14-12-56_d1r/model_2999.pt",
+   "throughput_per_min": 53.3, "success": 0.996, "drop_rate": 0.009,
+   "p95_s": 1.76, "stuck_fraction": 0.039, "trips_per_arm_hour": 16.4
+  },
+  "s2_finetuned": {
+   "checkpoint": "piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt",
+   "throughput_per_min": 55.8, "success": 0.999, "drop_rate": 0.005,
+   "p95_s": 1.46, "stuck_fraction": 0.013, "trips_per_arm_hour": 3.7
+  },
+  "s3_teacher": {
+   "checkpoint": "piperx_cleanup/2026-08-22_20-15-26_c1/model_2499.pt",
+   "throughput_per_min": 42.4, "success": 0.996, "drop_rate": 0.010,
+   "p95_s": 1.98, "stuck_fraction": 0.011, "trips_per_arm_hour": 15.7,
+   "tables_per_arm_hour": 800.5, "strays_per_100_placed": 0.1
+  },
+  "s3_distilled": {
+   "checkpoint": "piperx_cleanup_distill/2026-08-23_00-03-07_cd1/model_2499.pt",
+   "throughput_per_min": 38.7, "success": 0.989, "drop_rate": 0.012,
+   "p95_s": 2.38, "stuck_fraction": 0.042, "trips_per_arm_hour": 44.7,
+   "tables_per_arm_hour": 733.3, "strays_per_100_placed": 0.4
+  },
+  "s3_finetuned": {
+   "checkpoint": "piperx_cleanup_vision/2026-08-23_03-39-30_cf1/model_1499.pt",
+   "throughput_per_min": 39.8, "success": 0.990, "drop_rate": 0.014,
+   "p95_s": 2.16, "stuck_fraction": 0.039, "trips_per_arm_hour": 9.5,
+   "tables_per_arm_hour": 751.5, "strays_per_100_placed": 0.3
+  }
+ },
+ "training_cadence": {
+  "_comment": "Read from each run's wandb config.yaml.  A run with no reshape_on_place field predates it and therefore trained under EP-All.",
+  "h_full": "unknown_pre_field",
+  "d1": "EP-All", "d1r": "EP-All", "f1": "EP-All", "f1c": "EP-All", "f2": "EP-All",
+  "f3": "OBJ-All", "c1": "unknown_pre_field", "cd1": "OBJ-All", "cf1": "OBJ-All"
+ }
+}
