@@ -372,31 +372,38 @@ methods are at 1.000. Identification is not the expensive part of this loop.
 
 ### 5.2 Data budget
 
-Balanced accuracy over five domains, by seconds of one arm:
+Balanced accuracy over five domains, by seconds of one arm. The phase was
+asked for 10 s and up; those all saturate, so three smaller budgets are added.
+They cost nothing — the per-window scores are cached and a budget is a prefix
+of them — and they are the numbers that matter for a loop whose premise is an
+hour of robot time.
 
-| method | 10 s | 30 s | 60 s | 180 s | 300 s |
-|---|---|---|---|---|---|
-| B0 prior | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
-| B1a command→joint | 0.181 | 0.169 | 0.156 | 0.188 | 0.194 |
-| B1b image→proprio | 0.431 | 0.475 | 0.438 | 0.463 | 0.556 |
-| B2 classifier | 0.988 | 0.963 | 0.981 | 1.000 | 1.000 |
-| B3 state matching | 0.575 | 0.594 | 0.600 | 0.600 | 0.600 |
-| B4 latent+action | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-|   ablation: latent only | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-|   ablation: action only | 0.475 | 0.519 | 0.544 | 0.544 | 0.569 |
-| **DA** (fitted weights) | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-| *control*: shuffled labels | 0.175 | 0.206 | 0.194 | 0.200 | 0.200 |
-| *control*: shuffled θ | 0.050 | 0.031 | 0.050 | 0.013 | 0.000 |
-| *control*: episode boundaries only | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
+| method | 1 s | 2 s | 5 s | 10 s | 30 s | 60 s | 180 s | 300 s |
+|---|---|---|---|---|---|---|---|---|
+| B0 prior | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
+| B1a command→joint | 0.206 | 0.169 | 0.150 | 0.181 | 0.169 | 0.156 | 0.188 | 0.194 |
+| B1b image→proprio | 0.225 | 0.250 | 0.300 | 0.431 | 0.475 | 0.438 | 0.463 | 0.556 |
+| B2 classifier | 0.800 | 0.919 | 0.975 | 0.988 | 0.963 | 0.981 | 1.000 | 1.000 |
+| B3 state matching | 0.406 | 0.431 | 0.506 | 0.575 | 0.594 | 0.600 | 0.600 | 0.600 |
+| B4 latent+action | 0.975 | 0.994 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+|   ablation: latent only | 0.975 | 0.994 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+|   ablation: action only | 0.287 | 0.312 | 0.325 | 0.475 | 0.519 | 0.544 | 0.544 | 0.569 |
+| **DA** (fitted weights) | 0.975 | 0.994 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| *control*: shuffled labels | 0.200 | 0.181 | 0.138 | 0.175 | 0.206 | 0.194 | 0.200 | 0.200 |
+| *control*: shuffled θ | 0.119 | 0.106 | 0.094 | 0.050 | 0.031 | 0.050 | 0.013 | 0.000 |
+| *control*: episode boundaries only | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
 
-The model-based latent methods are saturated at the smallest budget tried. Ten
-seconds is 20 non-overlapping windows and is enough; the interesting question
-this table cannot answer is how far *below* 10 s it still holds, which the
-generated sessions do not resolve because they are cut into 0.5 s windows.
+**One second of arm time — two half-second windows — puts the decision-aware
+posterior at 0.975 balanced accuracy and 0.972 of its mass on the truth.** By
+five seconds it is exactly right on all 160 sessions. Identification is not
+what makes this loop expensive; section 6 is.
 
-B1b improves slowly with more data (0.431 → 0.556 from 10 s to 300 s), which
-is what a weak-but-real signal looks like. B1a does not improve, which is what
-no signal looks like.
+Two smaller readings from the same table. The action-consequence term does add
+something, but only where the latent has not yet settled: at 1 s, DA carries
+0.972 of its mass on the truth against latent-only's 0.968, and by 5 s the
+difference is gone because there is nothing left to improve. And B1a does not
+improve with any amount of data — 0.206 at 1 s, 0.194 at 300 s — which is what
+an absent signal looks like next to B1b's weak-but-real 0.225 → 0.556.
 
 ### 5.3 Controls
 

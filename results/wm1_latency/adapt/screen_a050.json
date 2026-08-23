@@ -1,0 +1,52 @@
+{
+ "stage": "screen",
+ "seeds": [
+  42
+ ],
+ "alphas": [
+  0.5,
+  0.75,
+  1.0
+ ],
+ "n_distinct": 4,
+ "n_runs": 1,
+ "jobs": [
+  {
+   "probs": [
+    0.5,
+    0.0,
+    0.0,
+    0.5,
+    0.0
+   ],
+   "alpha": 0.5,
+   "methods": [
+    "DA"
+   ],
+   "prior": {
+    "lags": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "probs": [
+     0.5,
+     0.0,
+     0.0,
+     0.5,
+     0.0
+    ],
+    "argmax": 0,
+    "mean_lag_steps": 1.5,
+    "mean_lag_ms": 30.0,
+    "entropy_bits": 1.0
+   },
+   "tag": "q2f23_a0.50_s42",
+   "seed": 42,
+   "probs_arg": "0.500000,0.000000,0.000000,0.500000,0.000000",
+   "iterations": 2100
+  }
+ ]
+}
