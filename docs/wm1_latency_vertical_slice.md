@@ -615,6 +615,45 @@ landed on each:
 
 ## 10. Limitations
 
+### 10.1 What I expected and did not find
+
+Five things this phase went in expecting, and what happened to them.
+
+**The action-consequence term was supposed to be the discriminative one.** It
+is the part that makes the score "decision-aware" in the sense the direction is
+named for: push the predicted latent through the frozen actor and ask what the
+policy would have done. It is not what identifies the domain here. Latent NLL
+alone is at ceiling; the action term alone reaches 0.544 balanced accuracy,
+barely above state matching's 0.600. The claim that survives is narrower than
+the one I set out to test, and section 5.1 states the narrow one.
+
+**The fitted weights looked like they said the opposite.** DA's calibration fit
+puts 0.83 on the action term and 0.17 on the latent, which reads as an
+importance ranking and is not one — the components are on wildly different
+scales, and 0.17 of a hundred-nat spread dominates 0.83 of a fractional one.
+The ablations are the decomposition; the weights are not. I nearly wrote the
+weights up as the finding.
+
+**B1a was specified as "the strong simple baseline for a latency problem",**
+and for an *action* latency it would be. For an observation latency it is at
+chance, because the actuator's response to a command does not know that the
+camera is late. Included and reported flat rather than quietly dropped.
+
+**The Phase WM0 trip anchors did not reproduce as tightly as the throughput
+anchors.** Nominal ran 36% high on a code path that did not change. Six repeats
+and a dispersion correction put that at p = 0.12 and it is not a regression —
+but WM0's reported ±0.22 on 2.29 trips/hour was an understatement of that
+metric's spread, and this phase reports the safety criterion against two
+threshold sets because of it.
+
+**I nearly published that regression.** Without the overdispersion correction
+the same comparison is p = 0.036. The repeats disagree by 20% more in standard
+deviation than Poisson allows, so the quasi-Poisson interval is the correct
+one; the uncorrected p-value would have been a false alarm about a code change
+that did not happen.
+
+### 10.2 Scope
+
 The honest boundaries of what this phase establishes.
 
 **One axis, one value, one direction.** `obs_latency_steps = 3` and nothing
