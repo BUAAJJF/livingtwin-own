@@ -231,7 +231,7 @@ def _target_only(qs, truths) -> dict:
 
 
 def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
-                   tag: str):
+                   tag: str, limit_envs: int | None = None):
   if cache.exists():
     d = torch.load(cache, map_location="cpu", weights_only=False)
     print(f"  {tag}: {len(d)} cached session score sets")
@@ -239,7 +239,7 @@ def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
   rows = []
   t0 = time.time()
   for s, name in sessions:
-    for env in range(s.n_envs):
+    for env in range(min(s.n_envs, limit_envs or s.n_envs)):
       v = wm_infer.SessionView.from_session(s, env, 1e9, device=device)
       comp = session_scores(v, ens, ens_ctrl, head, clfs)
       rows.append({"file": name, "env": env, "lag": s.lag,
@@ -253,11 +253,11 @@ def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
   return rows
 
 
-def analytic_rows(sessions, enc_split, device):
+def analytic_rows(sessions, enc_split, device, limit_envs=None):
   """B1a and B1b at every budget: cheap, so recomputed rather than cached."""
   out = []
   for s, name in sessions:
-    for env in range(s.n_envs):
+    for env in range(min(s.n_envs, limit_envs or s.n_envs)):
       per_budget = {}
       for bud in BUDGETS:
         v = wm_infer.SessionView.from_session(s, env, bud, device=device)
@@ -279,6 +279,9 @@ def main() -> int:
                          "2026-08-22_17-15-09_f3/model_1500.pt")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--recompute", action="store_true")
+  p.add_argument("--limit-envs", type=int, default=None,
+                 help="smoke testing only: sessions per file.  A run with this "
+                      "set is marked in its report and is not a formal result.")
   a = p.parse_args()
 
   data, mdir, out = Path(a.data), Path(a.model), Path(a.out)
@@ -316,9 +319,10 @@ def main() -> int:
     cache = out / f"scores_{s}.pt"
     if a.recompute and cache.exists():
       cache.unlink()
-    scores[s] = collect_scores(sess, ens, ens_ctrl, head, clfs, dev, cache, s)
+    scores[s] = collect_scores(sess, ens, ens_ctrl, head, clfs, dev, cache, s,
+                               a.limit_envs)
 
-  analytic = {s: analytic_rows(sess, head.obs_dim_1d, dev)
+  analytic = {s: analytic_rows(sess, head.obs_dim_1d, dev, a.limit_envs)
               for s, sess in splits.items()}
   torch.save(analytic, out / "analytic.pt")
 
@@ -352,7 +356,8 @@ def main() -> int:
   (out / "inference_timing.json").write_text(json.dumps(timing, indent=1))
 
   # -- per budget -----------------------------------------------------------
-  report = {"budgets": {}, "length": LENGTH, "burn_in": BURN_IN,
+  report = {"budgets": {}, "smoke": a.limit_envs is not None,
+            "length": LENGTH, "burn_in": BURN_IN,
             "horizon": HORIZON, "enc_split": head.obs_dim_1d,
             "n_members": len(ens.members),
             "methods": {k: v for k, v in METHODS.items()}}
