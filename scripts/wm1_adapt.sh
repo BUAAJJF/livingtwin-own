@@ -52,7 +52,20 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
     || { echo "!!! job $i did not parse: tag='$TAG' probs='$PROBS'" >&2; exit 4; }
   echo "=== [gpu $GPU] job $i: $TAG  probs=$PROBS  seed=$SEED  ($METHODS)"
 
+  # A configuration appears in more than one plan -- the oracle is in the
+  # anchor stage, in the alpha screening at alpha = 1 whenever the posterior is
+  # a point mass, and in the formal stage -- and the shards that run those
+  # plans overlap in time.  The finished-checkpoint test alone does not stop
+  # two of them training the same run at once, which is what happened the first
+  # time: two GPUs, fifty minutes each, one result.
+  LOCK="$OUT/$TAG.lock"
+  if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+    echo "=== $TAG is already being run by pid $(cat "$LOCK"); skipping"
+    continue
+  fi
+
   if [ ! -e "$OUT/$TAG.ckpt" ]; then
+    echo $$ > "$LOCK"
     micromamba run -n mjlab python scripts/finetune.py \
       --task "$TASK" --resume "$BASE" \
       --num-envs 512 --iterations "$ITERS" \
@@ -65,6 +78,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
     [ -n "$ADAPTED" ] || { echo "!!! $TAG produced no checkpoint" >&2; exit 6; }
     echo "$ADAPTED" > "$OUT/$TAG.ckpt"
   fi
+  echo $$ > "$LOCK"
   ADAPTED=$(cat "$OUT/$TAG.ckpt")
   echo "=== adapted: $ADAPTED"
 
@@ -92,5 +106,6 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
     echo "[$TAG repeat $r done]"
     r=$((r + 1))
   done
+  rm -f "$LOCK"
 done
 echo "=== ADAPT SHARD $SHARD DONE ==="
