@@ -338,17 +338,21 @@ repeats is the number to use, and it is small.
 | | 0.50 | 3 | 30.18 | **−46.0%** | yes | 6.40 | +179% | yes | 3.40 | 1.33% |
 | | 0.70 | 2 † | 44.52 | **−20.3%** | yes | 3.96 | +72% | no | 2.10 | 0.65% |
 | | 1.50 | 3 | 55.03 | −1.5% | **no** | 4.54 | +98% | no | 1.59 | 1.21% |
+| `action_latency_steps` | **1** | 3 | 40.78 | **−27.0%** | yes | **69.4** | **×30** | yes | 2.15 | 1.81% |
+| | 2 | 3 | 17.04 | **−69.5%** | yes | 378.6 | **×165** | yes | 3.39 | 4.75% |
+| | 3 | 3 | 6.54 | **−88.3%** | yes | 844.6 | **×369** | yes | 4.24 | 5.07% |
+| | 4 | 3 | 2.47 | **−95.6%** | yes | 1264.7 | **×552** | yes | 4.05 | 4.33% |
 
 † one repeat of this point did not complete; it is reported at n=2 rather than
 dropped or silently averaged as if it were three.
 
 ### 5.3 What S2 establishes
 
-**All four axes separate, and three of them by a very large margin.** The
+**All five axes separate, and four of them by a very large margin.** The
 screening result was not an artefact of one repeat: `cam_yaw_deg`,
-`obs_latency_steps`, `servo_damping_scale` and `gripper_rate_scale` all
-produce throughput effects that clear their own uncertainty, at levels a real
-deployment could plausibly land on.
+`obs_latency_steps`, `servo_damping_scale`, `gripper_rate_scale` and
+`action_latency_steps` all produce throughput effects that clear their own
+uncertainty, at levels a real deployment could plausibly land on.
 
 **The persistent-versus-jitter result survives the formal protocol.** A
 *fixed* camera yaw of ±1.5° — inside the ±2° of *per-episode random* jitter
@@ -368,6 +372,37 @@ On hardware it would stop the robot continuously.
 **Latency has the cleanest dose-response in the sweep** (−4.7 / −13.8 / −24.7
 / −33.0% at 1–4 steps, every level separated), and it is a quantity the
 simulator currently asserts is exactly zero.
+
+**A single control step of *action* latency — 20 ms — costs 27% of throughput
+and multiplies the safety-shell rate by thirty.** This is the largest and
+most alarming result in Phase WM0, and it deserves separating from the
+others:
+
+| action latency | obj/min | Δ | trips/arm-h | factor |
+|---|---:|---:|---:|---:|
+| 0 (as simulated) | 55.86 | — | 2.29 | — |
+| **1 step (20 ms)** | 40.78 | **−27.0%** | **69.4** | **×30** |
+| 2 (40 ms) | 17.04 | −69.5% | 378.6 | ×165 |
+| 3 (60 ms) | 6.54 | −88.3% | 844.6 | ×369 |
+| 4 (80 ms) | 2.47 | −95.6% | 1264.7 | ×552 |
+
+**Action latency is roughly six times more destructive than observation
+latency at the same delay** (−27.0% against −4.7% at one step). That
+asymmetry has a mechanism, and it is the same one Phase 0–2 identified for the
+safety shell: the policy rides its rate limiter — 89% of commands are clipped
+by the slew ceiling — and the identified plant is underdamped at ζ ≈ 0.35. A
+delayed command arrives when the arm is no longer where the command assumed,
+and an underdamped plant answers the resulting error by overshooting into the
+shell. Delaying what the policy *sees* costs it information; delaying what the
+arm *does* breaks the closed loop.
+
+The engineering consequence is blunt and does not depend on any of the
+calibration work: **the real command path's latency must be measured and
+modelled before this policy is deployed at all.** At 20 ms — a plausible
+USB-CAN round trip — the policy is already losing a quarter of its throughput
+and tripping the safety shell every 52 seconds. This is not a calibration
+problem to be solved by a posterior; it is a missing term in the simulator,
+and §11C says so.
 
 **Not everything matters, and that is useful.** `gripper_rate_scale = 1.5` —
 a *faster* gripper than assumed — does not separate (−1.5%). `servo_damping
