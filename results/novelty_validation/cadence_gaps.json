@@ -1,0 +1,50 @@
+[
+ {
+  "policy": "distilled_keep",
+  "hidden": "keep",
+  "ep_minus_obj_rel": 0.11882261812548411,
+  "ci_disjoint": true,
+  "throughput_obj": 47.27783203125,
+  "throughput_ep": 52.8955078125
+ },
+ {
+  "policy": "distilled_zero",
+  "hidden": "zero",
+  "ep_minus_obj_rel": 0.06835722160970231,
+  "ci_disjoint": true,
+  "throughput_obj": 35.4296875,
+  "throughput_ep": 37.8515625
+ },
+ {
+  "policy": "finetuned_keep",
+  "hidden": "keep",
+  "ep_minus_obj_rel": 0.03646471721239713,
+  "ci_disjoint": true,
+  "throughput_obj": 55.771484375,
+  "throughput_ep": 57.80517578125
+ },
+ {
+  "policy": "finetuned_zero",
+  "hidden": "zero",
+  "ep_minus_obj_rel": 0.03187891556245495,
+  "ci_disjoint": true,
+  "throughput_obj": 44.03564453125,
+  "throughput_ep": 45.439453125
+ },
+ {
+  "policy": "teacher_keep",
+  "hidden": "keep",
+  "ep_minus_obj_rel": 0.016272554997116256,
+  "ci_disjoint": false,
+  "throughput_obj": 59.2626953125,
+  "throughput_ep": 60.22705078125
+ },
+ {
+  "policy": "teacher_s2_keep",
+  "hidden": "keep",
+  "ep_minus_obj_rel": 0.011766648775855662,
+  "ci_disjoint": false,
+  "throughput_obj": 59.13330078125,
+  "throughput_ep": 59.8291015625
+ }
+]

@@ -32,16 +32,27 @@ BOOT_SEED = 12345
 # ---------------------------------------------------------------------------
 
 
-def load(section: str) -> dict[str, dict]:
+def load(section: str, require: str = "metrics") -> dict[str, dict]:
+  """Every evaluation JSON in a section directory.
+
+  Files that do not carry ``require`` are skipped rather than crashed on: the
+  same directories also hold diagnostics with their own schema, such as
+  check_cadence.py's plumbing_check.json, and a KeyError three sections into a
+  run is a poor way to discover that.
+  """
   out = {}
   d = RESULTS / section
   if not d.is_dir():
     return out
   for f in sorted(d.glob("*.json")):
     try:
-      out[f.stem] = json.loads(f.read_text())
+      data = json.loads(f.read_text())
     except json.JSONDecodeError:
-      print(f"  ! {f} is not valid JSON, skipped")
+      print(f"  ! {f.name} is not valid JSON, skipped")
+      continue
+    if require and require not in data:
+      continue
+    out[f.stem] = data
   return out
 
 
@@ -314,7 +325,8 @@ def section_cadence() -> None:
 
 
 def section_probe() -> None:
-  files = sorted((RESULTS / "probe").glob("*.json"))
+  files = [f for f in sorted((RESULTS / "probe").glob("*.json"))
+           if "probes" in json.loads(f.read_text())]
   if not files:
     print("  (no probe results yet)")
     return

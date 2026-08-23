@@ -611,22 +611,31 @@ Same checkpoint, same seed, same 512 × 2400 protocol; only the evaluation
 environment's cadence changes. **Positive Δ means the leaky environment reads
 better**, which is the effect under test.
 
-| policy | memory | OBJ-All | EP-All | Δ |
-|---|---|---:|---:|---:|
-| state teacher — *feedforward, no memory* | — | 59.3 | 60.2 | **+1.5%** |
-| vision student, distilled — *trained under EP-All* | kept | 47.3 | 52.9 | **+11.8%** |
-| vision student, distilled | zeroed each object | 35.4 | 37.9 | +7.1% |
-| vision student, fine-tuned — *trained under OBJ-All* | kept | 55.8 | 57.8 | **+3.6%** |
-| vision student, fine-tuned | zeroed each object | 44.0 | 45.4 | +3.2% |
+Intervals are 95% bootstrap over environments; the last column says whether
+the two intervals overlap, which is the test that matters.
+
+| policy | memory | OBJ-All | EP-All | Δ | intervals |
+|---|---|---:|---:|---:|---|
+| state teacher, seed 1 — *feedforward, no memory* | — | 59.3 [58.7, 59.8] | 60.2 [59.5, 60.9] | +1.6% | **overlap** |
+| state teacher, seed 17 | — | 59.1 [58.5, 59.7] | 59.8 [59.0, 60.6] | +1.2% | **overlap** |
+| vision student, distilled — *trained under EP-All* | kept | 47.3 [46.4, 48.2] | 52.9 [52.0, 53.8] | **+11.9%** | disjoint |
+| vision student, distilled | zeroed each object | 35.4 [34.6, 36.2] | 37.9 [36.9, 38.8] | +6.8% | disjoint |
+| vision student, fine-tuned — *trained under OBJ-All* | kept | 55.8 [55.3, 56.2] | 57.8 [57.3, 58.3] | **+3.7%** | disjoint |
+| vision student, fine-tuned | zeroed each object | 44.0 [43.4, 44.6] | 45.4 [44.7, 46.1] | +3.2% | disjoint |
+
+**Every recurrent policy separates; neither memoryless one does**, at either
+training seed. That is the cleanest form of the result, and it does not depend
+on the size of the teacher's +1.2–1.6%, which is inside both the confidence
+interval and the run-to-run noise floor (§7.6).
 
 Three readings, in decreasing order of confidence:
 
-**1. The leaky environment inflates a memory-carrying policy about eight times
-as much as a memoryless one.** +11.8% against +1.5%, same task, same
-evaluation, same everything but the hold time. The 1.5% is the honest
-difficulty difference — a feedforward policy that is *handed* the shape has no
-way to exploit its constancy — and everything above it is attributable to the
-recurrent state.
+**1. The leaky environment inflates a memory-carrying policy; it does not
+measurably move a memoryless one.** +11.9% with disjoint intervals against
++1.2–1.6% with overlapping ones, same task, same evaluation, same everything
+but the hold time. A feedforward policy that is *handed* the shape has no way
+to exploit its constancy, and duly does not; everything above that floor is
+attributable to the recurrent state.
 
 **2. Most of the exploit is learned, not architectural.** Both students are
 the same GRU network with the same weights shape. The one distilled under
@@ -683,17 +692,20 @@ and each single-quantity row says what is recovered by fixing that one
 parameter alone.
 
 | what is honest | distilled | fine-tuned |
-|---|---:|---:|
-| nothing (`episode`) | 52.9 | 57.8 |
-| friction only | 52.1 | 57.3 |
-| mass only | 51.1 | 57.3 |
-| **shape only** | **48.0** | **56.1** |
-| everything (`object`) | 47.3 | 55.8 |
+|---|---|---|
+| nothing (`episode`) | 52.9 [52.0, 53.8] | 57.8 [57.3, 58.3] |
+| friction only | 52.1 [51.2, 53.1] | 57.3 [56.7, 57.9] |
+| mass only | 51.1 [50.2, 52.1] | 57.3 [56.8, 57.9] |
+| **shape only** | **48.0 [47.0, 48.9]** | **56.1 [55.6, 56.6]** |
+| everything (`object`) | 47.3 [46.4, 48.2] | 55.8 [55.3, 56.2] |
 
-Reading down from the leaky end: making **shape** honest recovers 4.9 of the
-distilled policy's 5.6-point gap and 1.7 of the fine-tuned policy's 2.0 —
-about **87% and 85%** of the effect. Mass recovers 1.8 and 0.5; friction 0.8
-and 0.5. (The three are sub-additive, as overlapping causes are.)
+The intervals make the reading unambiguous. **Fixing the shape cadence alone
+lands within the interval of fixing everything** — 48.0 [47.0, 48.9] against
+47.3 [46.4, 48.2], and 56.1 [55.6, 56.6] against 55.8 [55.3, 56.2]. Fixing
+mass alone or friction alone leaves the policy essentially where the fully
+leaky environment had it. Shape recovers 4.9 of the distilled policy's
+5.6-point gap and 1.7 of the fine-tuned policy's 2.0 — about **87% and 85%**
+— and it is the only one of the three that separates from the leaky end.
 
 **The leak is in the shape, and it is consistent across two policies trained
 under different cadences.** That is the opposite of what §6.2's probe results
@@ -790,10 +802,11 @@ hidden states from 256 environments over 3000 steps; `n_eff` is the number of
 | policy (trained under) | eval cadence | memory | cur shape | **prev shape** | cur mass | **prev mass** | n_eff |
 |---|---|---|---:|---:|---:|---:|---:|
 | distilled (EP-All) | OBJ-All | kept | +7.1 | **+2.5** | +11.4 | **+2.1** | 319 |
+| fine-tuned (OBJ-All) | OBJ-All | kept | +7.6 | **+3.5** | +10.2 | **+1.2** | 320 |
 | distilled (EP-All) | OBJ-All | **zeroed each object** | +7.5 | **−0.5** | +9.7 | **−1.1** | 318 |
 | distilled (EP-All) | EP-All | kept | +9.9 | +9.9 † | +13.0 | +13.0 † | 125 |
 | distilled (EP-All) | EP-All | zeroed | +6.8 | +6.8 † | +10.1 | +10.1 † | 156 |
-| fine-tuned (OBJ-All) | EP-All | kept | +11.6 | +11.6 † | +13.6 | +13.6 † | 113 |
+| fine-tuned (OBJ-All) | EP-All | kept | +9.7 | +9.7 † | +14.0 | +14.0 † | 116 |
 
 † Under EP-All the previous object *is* the current object, so those columns
 are the same measurement written twice. They say nothing about carry-over.
@@ -805,15 +818,19 @@ interpretable. With the state cleared at every object boundary, previous-object
 information is absent *by construction*, and the probe duly reads **−0.5 and
 −1.1 pp** — so the pipeline's floor is calibrated and slightly below chance.
 
-Against that floor, the memory-kept policy reads **+2.5 and +2.1 pp** for the
-previous object. With ~319 independent labels the standard error on balanced
-accuracy is about 2.2 pp, so those are roughly **1σ — not significantly above
-the control**. Meanwhile the *current* object decodes at +7.1 and +11.4 pp, 3–5×
-larger, which is the memory doing precisely the job it exists for: mass is the
-one parameter a camera cannot see and must be inferred from contact.
+Against that floor, the two memory-kept policies read **+2.5 / +2.1 pp** and
+**+3.5 / +1.2 pp** for the previous object. With ~320 independent labels the
+standard error on balanced accuracy is about 2.2 pp, so those sit at roughly
+**1–2σ** — marginal, and only the shape column even approaches significance.
+Meanwhile the *current* object decodes at +7.1 to +11.4 pp, **3–5× larger**,
+which is the memory doing precisely the job it exists for: mass is the one
+parameter a camera cannot see and must be inferred from contact.
 
-**Under the honest cadence, previous-object information is at most marginal
-and is dominated 3–5× by current-object information.**
+**Under the honest cadence, previous-object information is at most marginally
+present and is dominated 3–5× by current-object information.** That is not
+"an implicit privileged observation of the current object"; it is a memory
+that mostly tracks what is in the hand, with a residue that does not reach
+significance.
 
 The same measurement on raw lift over the majority-class baseline, for
 completeness and because it is what a less careful version of this section

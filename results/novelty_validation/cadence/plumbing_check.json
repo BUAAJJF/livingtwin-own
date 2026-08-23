@@ -1,0 +1,77 @@
+{
+ "task": "Mjlab-Pick-Place-PiperX",
+ "num_envs": 256,
+ "verdict": "OK",
+ "cadences": {
+  "object": {
+   "redraw": [
+    "shape",
+    "mass",
+    "friction"
+   ],
+   "placements": 1280,
+   "shape_changed": 1280,
+   "mass_changed": 1280,
+   "fric_changed": 1280,
+   "fraction": {
+    "shape_changed": 1.0,
+    "mass_changed": 1.0,
+    "fric_changed": 1.0
+   }
+  },
+  "episode": {
+   "redraw": [],
+   "placements": 1280,
+   "shape_changed": 0,
+   "mass_changed": 0,
+   "fric_changed": 0,
+   "fraction": {
+    "shape_changed": 0.0,
+    "mass_changed": 0.0,
+    "fric_changed": 0.0
+   }
+  },
+  "shape": {
+   "redraw": [
+    "shape"
+   ],
+   "placements": 1280,
+   "shape_changed": 1280,
+   "mass_changed": 0,
+   "fric_changed": 0,
+   "fraction": {
+    "shape_changed": 1.0,
+    "mass_changed": 0.0,
+    "fric_changed": 0.0
+   }
+  },
+  "mass": {
+   "redraw": [
+    "mass"
+   ],
+   "placements": 1280,
+   "shape_changed": 0,
+   "mass_changed": 1280,
+   "fric_changed": 0,
+   "fraction": {
+    "shape_changed": 0.0,
+    "mass_changed": 1.0,
+    "fric_changed": 0.0
+   }
+  },
+  "friction": {
+   "redraw": [
+    "friction"
+   ],
+   "placements": 1280,
+   "shape_changed": 0,
+   "mass_changed": 0,
+   "fric_changed": 1280,
+   "fraction": {
+    "shape_changed": 0.0,
+    "mass_changed": 0.0,
+    "fric_changed": 1.0
+   }
+  }
+ }
+}
