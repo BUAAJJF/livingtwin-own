@@ -1216,7 +1216,7 @@ conditions hold.
 | 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
 | 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **FAIL** | §5.5: 1100 EP-All fine-tuning iterations take the student from 47.3 to **54.3** on the honest test and cut shell trips from 22.6 to 7.5. It transfers well. Switching to the honest cadence adds a further +2.9% and −72% trips, so the right cadence is *better* — but "does not transfer" is not what the data says |
 
-**One of five passes, one is untested, three fail** — and the three failures
+**One of five passes, one passes only on the control, three fail** — and the three failures
 are precisely the conditions that test the proposed *mechanism*. Condition 1
 establishes that the *effect* is real and larger than `docs/results.md`
 records. Conditions 3, 4 and 5 say the explanation offered for it is wrong in
