@@ -81,6 +81,32 @@ touching anything when no axis is active, and the evaluator never calls
 `apply_latency_prior` — so any difference in it is not the delay
 implementation.
 
+### 1.2 What counts as a result, and what does not
+
+Everything in `results/wm1_latency/` is a formal run at the protocol above,
+with one exception that is labelled as such in its own file. Nothing else in
+this report is a number from a shortened run.
+
+**Formal.** Every evaluation is 512 environments × 2400 control steps with
+three process repeats at the fixed seed bank `20260823, 31415926, 27182818`,
+and every adaptation configuration is measured at three training seeds
+(`42, 20260824, 31415927`) and reported both per-seed and pooled. The dataset
+is 35 full-length rollouts; the model fits are the full ones; the scoring pass
+covers all 320 sessions of the test and calibration splits.
+
+**Plumbing, not a result.** `results/wm1_latency/plumbing_check.json` is 24
+environments × 40 steps and answers one yes/no question about whether the
+delayed observation is the frame it should be (section 2.4). It is not a
+measurement of anything and no number in this report comes from it.
+
+**Smoke runs that produced no committed file.** A 8-environment × 120-step
+dataset generation, a one-member one-epoch dynamics fit, and a two-sessions-
+per-domain scoring pass, all written outside the repository and deleted. They
+exist in this account because they are how three crashes were found before
+they could cost a wave of GPU time — a keyword argument the observation
+manager passes that the camera term did not accept, a hidden state left on the
+CPU, and a score vector with seven entries reaching a five-way posterior.
+
 ## 2. The dataset
 
 One session is one environment's contiguous timeline: the unit a real
