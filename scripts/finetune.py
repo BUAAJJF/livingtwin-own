@@ -33,6 +33,7 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
+from piper_push import perturb
 from piper_push.checkpoints import as_actor_checkpoint
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
@@ -77,6 +78,7 @@ def main() -> int:
                       "shape,mass,friction.  Unset leaves the task alone.")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
+  perturb.add_mismatch_args(p)
   a = p.parse_args()
 
   if not a.resume and not a.student:
@@ -100,6 +102,14 @@ def main() -> int:
     env_cfg.commands["pick"].redraw_on_place = redraw
     env_cfg.commands["pick"].reshape_on_place = bool(redraw)
     print(f"[INFO] training cadence: redraw_on_place={redraw}")
+
+  # Session-persistent simulator mismatch to TRAIN in.  This is what makes the
+  # Phase WM0 oracle possible: fine-tune with the target parameters known, to
+  # measure the ceiling a learned calibration would be trying to reach.
+  mismatch = perturb.mismatch_from_args(a)
+  applied_mismatch = perturb.apply_session_mismatch(env_cfg, mismatch)
+  if applied_mismatch:
+    print(f"[INFO] training under session mismatch: {applied_mismatch}")
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger
