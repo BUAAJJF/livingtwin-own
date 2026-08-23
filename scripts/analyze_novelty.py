@@ -162,10 +162,39 @@ def section_baseline() -> None:
 
 
 def section_safety() -> None:
-  runs = load("safety")
-  if not runs:
+  all_runs = load("safety")
+  if not all_runs:
     print("  (no safety runs yet)")
     return
+  # Runs are named "<policy>__<filter>"; each policy gets its own baseline,
+  # because a filter's worth is how far it moves THAT policy.
+  policies: dict[str, dict[str, dict]] = {}
+  for name, r in all_runs.items():
+    pol, _, filt = name.rpartition("__")
+    policies.setdefault(pol or "default", {})[filt or name] = r
+
+  rows = []
+  for pol in sorted(policies):
+    print()
+    print(f"  -- {pol}")
+    rows += _safety_one(pol, policies[pol])
+
+  print()
+  print("  Safety Gate: a filter passes if it removes >=80% of the trips for")
+  print("  <=2% of the throughput.")
+  winners = [r for r in rows if r["filter"] != "none"
+             and r["delta_trips"] <= -0.80 and r["delta_throughput"] >= -0.02]
+  if winners:
+    for w in winners:
+      print(f"    PASS  {w['policy']}/{w['filter']}: "
+            f"trips {100 * w['delta_trips']:+.1f}%, "
+            f"throughput {100 * w['delta_throughput']:+.1f}%")
+  else:
+    print("    no filter met both conditions on any policy")
+  _write("safety_pareto", rows)
+
+
+def _safety_one(policy: str, runs: dict[str, dict]) -> list[dict]:
   base = runs.get("none")
   print(f"  {'filter':22s} {'obj/min':>8s} {'d thru':>7s} {'trips/h':>8s}"
         f" {'d trips':>8s} {'CVaR95':>7s} {'CVaR99':>7s} {'clipped':>8s}")
@@ -187,6 +216,7 @@ def section_safety() -> None:
     print(f"  {name:22s} {thr:8.1f} {100 * d_thr:+6.1f}% {trp:8.1f}"
           f" {100 * d_trp:+7.1f}% {c95:7.3f} {c99:7.3f} {100 * clip:7.2f}%")
     rows.append({
+      "policy": policy,
       "filter": name, "throughput": thr, "thr_lo": tlo, "thr_hi": thi,
       "trips_per_arm_hour": trp, "trips_lo": plo, "trips_hi": phi,
       "delta_throughput": d_thr, "delta_trips": d_trp,
@@ -200,18 +230,13 @@ def section_safety() -> None:
       "shaping": sh,
     })
 
-  print()
-  print("  Safety Gate: a filter passes if it removes >=80% of the trips for")
-  print("  <=2% of the throughput.")
-  winners = [r for r in rows if r["filter"] != "none"
-             and r["delta_trips"] <= -0.80 and r["delta_throughput"] >= -0.02]
-  if winners:
-    for w in winners:
-      print(f"    PASS  {w['filter']}: trips {100 * w['delta_trips']:+.1f}%, "
-            f"throughput {100 * w['delta_throughput']:+.1f}%")
-  else:
-    print("    no filter met both conditions")
-  _write("safety_pareto", rows)
+  if base is not None:
+    ph = base["phase"]
+    tot = max(sum(ph["trips"]), 1)
+    share = ", ".join(f"{n} {100 * t / tot:.0f}%"
+                      for n, t in zip(ph["names"], ph["trips"]) if t)
+    print(f"    unfiltered trips by phase: {share}")
+  return rows
 
 
 def section_cadence() -> None:
@@ -338,8 +363,7 @@ def section_pareto_plot() -> None:
   for r in rows:
     x, y = px(r["trips_per_arm_hour"]), py(r["throughput"])
     lo, hi = px(r["trips_lo"]), px(r["trips_hi"])
-    good = r["filter"] == "none"
-    col = "#b4453c" if good else "#2f6f8f"
+    col = "#b4453c" if r["filter"] == "none" else "#2f6f8f"
     parts.append(f'<line x1="{lo:.1f}" y1="{y:.1f}" x2="{hi:.1f}" y2="{y:.1f}" '
                  f'stroke="{col}" stroke-opacity="0.45" stroke-width="2"/>')
     parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{col}"/>')
