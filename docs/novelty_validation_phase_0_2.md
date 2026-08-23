@@ -12,8 +12,22 @@ The claim under test:
 This round runs phases 0–2 only and stops at Gate A. No two-timescale network,
 no world model, no BFM/TeCH, no hardware.
 
-Status: **Phase 0.1 complete** (this document, sections 1–2). Phases 0.2, 1 and
-2 in progress; their sections are filled in as they finish.
+**Headline.** The effect is real and larger than the project's own results
+file records; the mechanism proposed for it is not supported. A benchmark that
+holds object parameters constant within an episode inflates a recurrent
+policy's measured throughput by **11.8%** and a memoryless one's by **1.5%**,
+and two thirds of that inflation goes away by training in the correctly paced
+environment with no architectural change (§5.2). But the recurrent state does
+**not** carry previous-object information under the honest cadence — the probe
+reads at or below its own floor (§6.2). **Cadence Gate A: FAIL. Safety Gate:
+FAIL on the threshold, with the conclusion it was written to produce
+(§10).** Do not build the two-timescale network this round.
+
+Status: sections 1–3 and 5–11 complete. A tranche of confirmatory runs
+(the finer safety frontier, the three-object filter sweep, per-quantity
+cadence, a second training seed, and a run-to-run determinism check) was still
+executing when the VPN dropped for the second time; §4.4 lists exactly what is
+missing and what it would and would not change. Nothing in §10 depends on it.
 
 ---
 
@@ -731,9 +745,28 @@ one fine-tuning run.
 The same checkpoint, seed and protocol read 48.1 in the Phase 0.2 batch and
 46.7 as the unfiltered Phase 1 baseline — a 3% gap, larger than the seed-to-
 seed spread. The action-path edits between those commits are arithmetically
-identical at their defaults, so this is either a real regression or
-MuJoCo-Warp's documented non-determinism. §7.5 reports a three-way repeat of
-the identical command that settles it.
+identical at their defaults (the slew clamp is the same expression with
+`slew_scale = 1.0` folded in, and every added branch is skipped), so this is
+either a real regression or MuJoCo-Warp's documented non-determinism.
+
+### 7.5 The determinism check
+
+Three runs of the *identical* command — same checkpoint, same seed 20260823,
+same 512 × 2400, same code — were queued to settle it
+(`results/novelty_validation/determinism/`). They were still in flight when
+the connection dropped; see §4.4.
+
+This matters beyond one number. **If a repeat of the same command moves by 3%,
+then the ±0.8% bootstrap interval understates the real uncertainty by about
+four times**, and the 2% reproduction tolerance in §3 is tighter than the
+simulator can support. The two conclusions this document rests on survive
+either answer — the §3 distilled gap is 10% and the §5 cadence effect is
+11.8%, both several times a 3% run-to-run spread — but every *small*
+difference quoted anywhere here (the +1.5% memoryless baseline, the 0.3–0.8%
+seed spread, the −1.1% for `accel 180`) would have to be re-read as noise.
+
+That is the honest statement of what is and is not established, and it is why
+§11A puts a second training seed ahead of any new architecture.
 
 [mujoco_warp#562]: https://github.com/google-deepmind/mujoco_warp/issues/562
 
