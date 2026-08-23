@@ -1,0 +1,30 @@
+{
+  "dictionary": "DICT_5X5_100",
+  "squares_x": 5,
+  "squares_y": 5,
+  "square_m": 0.033,
+  "marker_m": 0.025,
+  "page": "A4",
+  "px_per_mm": 20,
+  "scale_bar_mm": 150.0,
+  "regions": {
+    "charuco": {
+      "x_min_m": 0.0165,
+      "x_max_m": 0.1485,
+      "y_min_m": 0.0165,
+      "y_max_m": 0.1485
+    },
+    "white": {
+      "x_min_m": 0.0205,
+      "x_max_m": 0.0645,
+      "y_min_m": 0.181,
+      "y_max_m": 0.225
+    },
+    "black": {
+      "x_min_m": 0.1005,
+      "x_max_m": 0.1445,
+      "y_min_m": 0.181,
+      "y_max_m": 0.225
+    }
+  }
+}
