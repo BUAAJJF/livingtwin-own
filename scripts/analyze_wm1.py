@@ -229,12 +229,23 @@ def t_interval(xs: list[float]) -> dict:
   return {"mean": m, "sd": sd, "ci": [m - h, m + h], "n": n}
 
 
-def paired_diff(a: list[float], b: list[float]) -> dict:
+def paired_diff(a, b) -> dict:
   """Paired on the evaluation seed, which is what makes three repeats usable:
-  the run-to-run term is shared and cancels."""
-  if len(a) != len(b) or len(a) < 2:
-    return {"diff": float("nan")}
-  d = [x - y for x, y in zip(a, b)]
+  the run-to-run term is shared and cancels.
+
+  ``a`` and ``b`` are ``{seed: [values]}``.  Pairing by seed rather than by
+  position matters here because the conditions do not all have the same
+  repeats: the anchors were re-measured at six evaluation seeds and the adapted
+  runs at three, and zipping those in order would pair a run against a
+  different rollout and call the difference an effect.  Where a condition has
+  several values for one seed -- three training seeds evaluated at the same
+  evaluation seed -- they are averaged first, so the pairing is one number per
+  seed on each side.
+  """
+  shared = sorted(set(a) & set(b))
+  if len(shared) < 2:
+    return {"diff": float("nan"), "n": len(shared)}
+  d = [sum(a[s]) / len(a[s]) - sum(b[s]) / len(b[s]) for s in shared]
   s = t_interval(d)
   n = len(d)
   se = s["sd"] / math.sqrt(n) if s.get("sd") else 0.0
@@ -242,7 +253,7 @@ def paired_diff(a: list[float], b: list[float]) -> dict:
   # Normal tail: with three pairs a t-distribution p-value is not meaningful
   # to two digits either way, and this is only used for ordering before the
   # Holm correction.
-  return {"diff": s["mean"], "ci": s["ci"], "n": n,
+  return {"diff": s["mean"], "ci": s["ci"], "n": n, "seeds": shared,
           "p_approx": 2 * normal_sf(abs(t)) if math.isfinite(t) else 0.0}
 
 
@@ -344,15 +355,20 @@ def main() -> int:
           f"{int(t.get('events', 0)):7d} {t.get('dispersion', 1.0):5.2f}")
 
   if a.baseline and a.baseline in out["groups"]:
-    base = groups[a.baseline]
-    base_thr = [r["metrics"]["throughput_per_min"] for r in base]
+    def by_seed(runs):
+      m: dict[int, list[float]] = defaultdict(list)
+      for r in runs:
+        m[int(r["config"]["seed_effective"])].append(
+          r["metrics"]["throughput_per_min"])
+      return dict(m)
+
+    base_thr = by_seed(groups[a.baseline])
     base_rate = out["groups"][a.baseline]["trips"]
     comps, pvals = {}, {}
     for name in sorted(groups):
       if name == a.baseline:
         continue
-      thr = [r["metrics"]["throughput_per_min"] for r in groups[name]]
-      d = paired_diff(thr, base_thr)
+      d = paired_diff(by_seed(groups[name]), base_thr)
       comps[name] = {"throughput_diff": d,
                      "trip_rate_ratio": rate_ratio(out["groups"][name]["trips"],
                                                    base_rate)}

@@ -135,11 +135,28 @@ def test_throughput_is_a_pooled_ratio_not_a_mean_of_ratios():
 
 
 def test_paired_difference_uses_the_pairing():
-  a = [50.0, 52.0, 48.0]
-  b = [45.0, 47.0, 43.0]
+  a = {1: [50.0], 2: [52.0], 3: [48.0]}
+  b = {1: [45.0], 2: [47.0], 3: [43.0]}
   d = paired_diff(a, b)
   assert d["diff"] == pytest.approx(5.0)
   assert d["ci"][0] > 0.0     # the shared run-to-run term cancelled
+  assert d["seeds"] == [1, 2, 3]
+
+
+def test_pairing_is_by_seed_not_by_position():
+  """The anchors were re-measured at six evaluation seeds and the adapted runs
+  at three.  Zipping those in order pairs a run against a different rollout."""
+  adapted = {1: [50.0], 2: [52.0], 3: [48.0]}
+  anchor = {1: [45.0], 2: [47.0], 3: [43.0], 9: [10.0], 8: [90.0], 7: [1.0]}
+  d = paired_diff(adapted, anchor)
+  assert d["seeds"] == [1, 2, 3]
+  assert d["diff"] == pytest.approx(5.0)
+
+
+def test_several_training_seeds_at_one_evaluation_seed_average_first():
+  a = {1: [50.0, 52.0, 54.0], 2: [40.0, 42.0, 44.0]}
+  b = {1: [50.0], 2: [40.0]}
+  assert paired_diff(a, b)["diff"] == pytest.approx(2.0)
 
 
 def test_holm_is_monotone_and_bounded():
