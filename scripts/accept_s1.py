@@ -89,8 +89,20 @@ def _provenance(checkpoint: str) -> dict:
         except Exception:
             return ""
 
-    import mjlab
+    import importlib.metadata as md
+
     import mujoco
+
+    def version(dist: str) -> str:
+        # The installed distribution's version, not a __version__ attribute:
+        # neither mjlab nor rsl_rl_lib defines one, and reading the attribute
+        # silently records "unknown" for the two libraries whose version
+        # matters most here.
+        try:
+            return md.version(dist)
+        except Exception:
+            return "unknown"
+
     prov = {
         "git_commit": git("rev-parse", "HEAD"),
         "git_branch": git("rev-parse", "--abbrev-ref", "HEAD"),
@@ -103,14 +115,12 @@ def _provenance(checkpoint: str) -> dict:
         "argv": sys.argv,
         "python": sys.version.split()[0],
         "torch": torch.__version__,
-        "mjlab": getattr(mjlab, "__version__", "unknown"),
+        "mjlab": version("mjlab"),
+        "rsl_rl": version("rsl-rl-lib"),
         "mujoco": mujoco.__version__,
+        "mujoco_warp": version("mujoco-warp"),
+        "warp": version("warp-lang"),
     }
-    try:
-        import rsl_rl
-        prov["rsl_rl"] = getattr(rsl_rl, "__version__", "unknown")
-    except Exception:
-        pass
     return prov
 
 
