@@ -784,7 +784,80 @@ network capacity, `COMMAND_DERATE`, or anything else in the training path.
 
 ## 10. Gate verdicts
 
-*(pending.)*
+### 10.1 Safety Gate — **FAIL on the threshold, PASS on the question**
+
+The threshold asked for a filter removing ≥ 80% of safety-shell events at
+≤ 2% throughput cost. The best result was `slew × 0.85`: **−81.5% events for
+−4.5% throughput**. No filter reached the pair, so the literal verdict is
+**FAIL**.
+
+The finding the gate was written to produce is nonetheless available, and it
+points the way the gate anticipated:
+
+> **Safety is largely solvable by a deterministic shell and should not be the
+> main algorithmic novelty.** One scalar, no retraining, removes four fifths
+> of the violations.
+
+The residual advantage of PPO fine-tuning over action filtering, which the
+gate asked to be recorded if no filter passed:
+
+| | throughput | trips/arm-h |
+|---|---:|---:|
+| distilled, unfiltered | 46.7 | 22.7 |
+| distilled + `slew × 0.85` | 44.6 (−4.5%) | 4.2 (−81.5%) |
+| **the same policy, PPO fine-tuned** | **55.8 (+19.5%)** | **2.3 (−89.9%)** |
+
+Every filter moves down and to the left; fine-tuning moved up and to the left.
+A filter can only remove authority, so it can only buy safety with throughput.
+That asymmetry — not the safety number itself — is the part worth writing
+about, and it is a claim about learning rather than about filtering.
+
+A second, unanticipated result is worth keeping (§4.2): **acceleration
+limiting and low-pass filtering make the shell fire more often**, up to +143%
+for an 8 Hz low-pass. The policy is in the loop; a filter that inserts lag is
+compensated for, and the compensation un-smooths the plant. Only the filter
+that bounds the quantity the shell actually measures helps.
+
+### 10.2 Cadence Gate A — **FAIL**
+
+The gate authorises a two-timescale memory only if a **majority** of five
+conditions hold.
+
+| # | condition | verdict | evidence |
+|---|---|---|---|
+| 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy against +1.5% for the memoryless control; §5.3: teacher shell rate 4.7 → 2.6 |
+| 2 | effect consistent in direction across ≥ 2 **training** seeds | **NOT TESTED** | §7.3: only the memoryless teacher has a second training seed; neither vision student does |
+| 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
+| 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
+| 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **PASS** | §5.2 and the transfer evaluations: the EP-All-trained student reads 47.3 honest, and the identical network fine-tuned under OBJ-All reads 55.8 |
+
+Two of five pass, one is untested, and **the two that fail are precisely the
+two that test the proposed mechanism**. Condition 1 establishes that the
+*effect* is real and larger than `docs/results.md` records. Conditions 3 and 4
+say the *explanation* offered for it is wrong.
+
+**Verdict: do not implement the two-timescale network, the world model, or
+posterior system identification this round.**
+
+### 10.3 Which hypothesis was refuted
+
+The claim was that a recurrent policy "treats history about previous objects
+as an implicit privileged observation of the current one". Under the honest
+cadence there is no recoverable previous-object information in the hidden
+state to be treated as anything — the probe reads at or below its own floor.
+A memory architecture designed to *forget the previous object faster* would be
+solving a problem this system does not have.
+
+What survives, and survives strongly, is the benchmark-hygiene half:
+
+> Holding a parameter constant for longer than deployment would inflates a
+> recurrent policy's measured throughput by 11.8% and depresses its measured
+> constraint-violation rate, while moving a memoryless policy on the same task
+> by 1.5%. Two thirds of that inflation is removed by training in the correctly
+> paced environment, with no architectural change.
+
+That is a real, measured, reproducible claim about how manipulation benchmarks
+are built. It is not, on this evidence, a claim that needs a new network.
 
 ## 11. Next minimal experiment
 
