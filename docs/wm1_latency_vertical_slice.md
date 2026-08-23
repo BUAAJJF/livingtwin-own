@@ -176,6 +176,26 @@ Windows are 25 control steps (0.5 s), never cross an episode boundary, and are
 non-overlapping at inference time — overlapping windows would count the same
 control step several times and sharpen a posterior without adding evidence.
 
+### 2.4 Is the camera actually late?
+
+Everything above assumes the observation a running environment hands the
+policy is the frame from `lag` control steps ago. Unit tests cannot check
+that: they see the buffer's arithmetic and the term's bookkeeping, not the
+observation the policy receives.
+
+`scripts/check_latency.py` installs a second, *undelayed* copy of the camera
+term beside the delayed one in the same environment, so the comparison is
+between two observations of one simulation rather than two runs of a simulator
+that is not bitwise reproducible. It then asks two questions per environment,
+and the second is the one that matters: does the delayed group match the
+reference at its own assigned lag, and does it match at **no other** shift? A
+term that delayed everything by a constant, ignoring its per-environment
+assignment, would pass the first and fail the second.
+
+With 24 environments drawn from a mixture over lags {0, 3, 4}
+(assignment [7, 0, 0, 8, 9]) over 36 comparable steps:
+**24/24** environments match at their own lag and at no other.
+
 ## 3. The estimators
 
 All of them read the same channels and get the same data budget. Their
