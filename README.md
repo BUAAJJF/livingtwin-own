@@ -129,10 +129,19 @@ None of these has been achieved. They are what the direction is aiming at.
 
 | phase | question | status |
 |---|---|---|
-| **WM0** | Is there a gap to recover, is it identifiable from reward-free data, and can simulation recover it given the answer? | see [`docs/sim2real_sweep_phase_wm0.md`](docs/sim2real_sweep_phase_wm0.md) |
-| WM1 | parameter-conditioned latent world model + decision-aware discrepancy | gated on WM0 |
-| WM2 | posterior-guided fine-tuning, held-out retention | gated on WM1 |
+| **WM0** | Is there a gap to recover, is it identifiable from reward-free data, and can simulation recover it given the answer? | **GREEN**, 6/6 — [`docs/sim2real_sweep_phase_wm0.md`](docs/sim2real_sweep_phase_wm0.md) |
+| **WM1-A** | One axis end to end: infer 60 ms of observation delay from reward-free history, adapt under the posterior, keep the source domain. | **YELLOW**, 5/6 — [`docs/wm1_latency_vertical_slice.md`](docs/wm1_latency_vertical_slice.md) |
+| WM1-B | the same loop on a plant-side axis (servo damping) and a perception-side one (camera pose) | gated on WM1-A |
+| WM2 | several axes at once, and a deployable risk head for tail-only mismatch | gated on WM1-B |
 | WM3 | hardware | not started |
+
+**WM1-A in one line.** Sixty seconds of reward-free arm time identifies the
+domain (1.000 balanced accuracy over five candidates, against three controls at
+chance); posterior-guided fine-tuning recovers 102% of the known-parameter
+oracle's throughput gain while keeping 97% of the source domain; the safety half
+does not reproduce across training seeds and the criterion fails on its
+interval; and a three-millisecond ridge baseline with a far worse posterior
+recovers just as much. Simulation only — no hardware result, and none claimed.
 
 Phase WM0 exists to decide whether WM1 is worth building. Simulator mismatch
 is applied through `piper_push.perturb`, which is inert unless asked for:
