@@ -438,4 +438,42 @@ python -m pytest tests -q
 
 ## 11. Next minimal experiment
 
-*(pending)*
+*(ordered; the verdict in section 9 decides which of these is actually next)*
+
+**A. If Green — the smallest useful world model, not the general one.**
+Do *not* start with a parameter-conditioned latent dynamics model over all
+seventeen axes. Start with the two or three that S2 showed matter, a
+discrepancy built from the actor latent and action only (§7 shows what a
+deployable `V_obs` would require and the current critic cannot be it), and
+ask one question: **does a posterior fitted on 5–10 minutes of reward-free
+data in the target domain put more mass near the true parameter than the
+broad prior does?** That is a two-day experiment and it fails fast.
+
+**B. Regardless of verdict — an observation-only value/risk head.**
+The discrepancy in the README has four terms and only two are currently
+computable on hardware. A `V_obs` and `C_obs` trained and frozen in simulation
+against the *deployable* observation would make the other two available, and
+it is useful on its own as a runtime risk monitor. It does not depend on any
+of the WM0 results.
+
+**C. Regardless of verdict — model the latencies.**
+S1 makes this unavoidable: `action_latency_steps` is the largest single effect
+in the sweep and the simulator currently asserts it is zero. Adding a latency
+*distribution* to training domain randomisation is a day's work and would move
+the policy's operating point before any calibration exists. It also changes
+what WM1 would be for — calibrating within a modelled range is a much easier
+problem than extrapolating outside an unmodelled one.
+
+**D. The measurement this round could not make.** Everything here is
+simulator-against-simulator. The first hardware step is not a policy
+deployment: it is **10 minutes of reward-free logging on the real arm** —
+joint states, issued commands, servo error, depth — with the frozen policy
+driving. That data alone would show whether the real signature resembles any
+of the simulated ones, and it costs an afternoon rather than a rig-safety
+review.
+
+**Not worth doing next:** a full world model over all seventeen axes; any
+attempt to identify the parameter *values* precisely rather than their
+decision consequences (§7 measures the latter deliberately); and anything that
+treats parameter-identification accuracy as if it were task recovery — §8 is
+in the report precisely because those two can come apart.
