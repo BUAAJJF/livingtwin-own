@@ -242,17 +242,35 @@ def criterion_5(analysis: dict | None, formal: dict | None,
       out["retention"] = {"da": dar["throughput"]["bootstrap"]["mean"],
                           "tm": tmr["throughput"]["bootstrap"]["mean"]}
 
-  wins = []
-  if out["identification"]["delta"] >= 0.10:
-    wins.append("identification")
+  # The recovery-retention Pareto: better in one domain and no worse in the
+  # other, with at least one of the two separated.
+  tr, rt = out.get("target_recovery"), out.get("retention")
+  if tr and rt:
+    out["pareto"] = {
+      "da": [tr["da"], rt["da"]], "tm": [tr["tm"], rt["tm"]],
+      "dominates": (tr["da"] >= tr["tm"] and rt["da"] >= rt["tm"]
+                    and tr.get("separated", False)),
+    }
+
+  # The phase specification named four places the decision-aware posterior
+  # could earn its keep, and G5 is decided on those four alone.  Balanced
+  # accuracy over the five domains is reported next to them because it is the
+  # largest difference between the two methods and would be strange to omit,
+  # but it is not one of the four and does not decide the criterion.
+  spec_wins = []
   if out["benign_false_positive"]["delta"] >= 0.10:
-    wins.append("benign_false_positive")
+    spec_wins.append("benign_false_positive")
   if out.get("target_recovery", {}).get("separated"):
-    wins.append("target_recovery")
+    spec_wins.append("target_recovery")
   if out.get("safety_recovery", {}).get("separated"):
-    wins.append("safety_recovery")
-  out["wins"] = wins
-  out["g5"] = bool(wins)
+    spec_wins.append("safety_recovery")
+  if out.get("pareto", {}).get("dominates"):
+    spec_wins.append("recovery_retention_pareto")
+  additional = (["identification"]
+                if out["identification"]["delta"] >= 0.10 else [])
+  out["wins"] = spec_wins
+  out["wins_outside_the_specified_four"] = additional
+  out["g5"] = bool(spec_wins)
   out["inconclusive_because_shared_run"] = (
     shared is not None and not wins)
   return out

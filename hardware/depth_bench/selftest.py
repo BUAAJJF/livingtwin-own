@@ -16,6 +16,7 @@ real data.  Here they produce a failed assertion.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -136,6 +137,9 @@ def main() -> None:
   cv2.imwrite(str(HERE / "results" / "selftest_view.png"),
               __import__("measure").annotate(cap, board, spec))
   print(f"\n-> {HERE / 'results' / 'selftest_view.png'}")
+  print("\n--- live session ---")
+  fails += check_live_session()
+
   if fails:
     raise SystemExit(f"\n{len(fails)} check(s) failed: {', '.join(fails)}")
   print("\nall checks passed")
@@ -143,3 +147,123 @@ def main() -> None:
 
 if __name__ == "__main__":
   main()
+
+
+# --------------------------------------------------------------------------
+# the live session
+
+
+def check_live_session() -> list[str]:
+  """Drive live.py's session logic with two synthetic cameras.
+
+  The second camera does not exist yet -- the ZED X is away with a fault and
+  the Odin 1 has no backend -- so the paired-comparison path, which is the
+  entire point of the live viewer, would otherwise ship untested and first run
+  on the day the hardware arrives.  Here it runs now, against two synthetic
+  sensors with deliberately different noise and dropout, and the report has to
+  rank them the right way round.
+  """
+  import argparse as _argparse
+  import threading
+
+  import live
+
+  board, spec = M.load_target(HERE / "targets" / "target_a4.json")
+  fails: list[str] = []
+
+  class FakeWorker:
+    """Only what Session actually touches, which is a short list."""
+
+    def __init__(self, name, a_per_m, drop):
+      self.name, self.a, self.drop = name, a_per_m, drop
+      self.lock = threading.Lock()
+      self.pose = None
+      self.still_frames = live.RING
+      self.motion = 0.0
+      self.error = None
+      self._cap = None
+
+    def place(self, distance, tilt, seed):
+      S.TRUE_SIGMA_M = self.a * distance**2
+      S.TRUE_BIAS_M = 0.0015
+      S.TRUE_DROP = dict(self.drop)
+      self._cap, _ = S.render(spec, distance=distance, tilt_deg=tilt, seed=seed)
+      self._cap.meta.update({"model": self.name, "fx_px": 430.0,
+                             "stereo_baseline_m": 0.018})
+      with self.lock:
+        self.pose = M.detect_pose(self._cap.gray, self._cap.K, self._cap.dist,
+                                  board)
+
+    def snapshot(self):
+      return self._cap
+
+    def state(self):
+      return {"error": None}
+
+    def preview(self, width=400):
+      ok, buf = cv2.imencode(".jpg", self._cap.gray)
+      return buf.tobytes()
+
+  good = FakeWorker("GOOD", 0.004, {"charuco": 0.02, "white": 0.10, "black": 0.08})
+  poor = FakeWorker("POOR", 0.012, {"charuco": 0.05, "white": 0.70, "black": 0.40})
+  workers = [good, poor]
+
+  args = _argparse.Namespace(d_dist=0.06, d_angle=12.0, still=3.0,
+                             min_interval=0.0, save_raw=False)
+  outdir = HERE / "results" / "selftest_live"
+  session = live.Session(workers, board, spec, args, outdir)
+  session.start()
+
+  plan = [(0.30, 5.0), (0.45, 12.0), (0.60, 8.0), (0.75, 15.0)]
+  for i, (dist, tilt) in enumerate(plan):
+    for w in workers:
+      w.place(dist, tilt, seed=i)
+    session.tick()
+    for _ in range(200):  # _fire runs on its own thread
+      if not session.busy:
+        break
+      time.sleep(0.05)
+  n = len(session.shots)
+  print(f"  live: {n} shot(s) from {len(plan)} viewpoints")
+  if n != len(plan):
+    fails.append(f"expected {len(plan)} shots, fired {n}")
+
+  # The same viewpoint again must not produce a second shot.
+  for w in workers:
+    w.place(*plan[-1], seed=len(plan) - 1)
+  session.tick()
+  for _ in range(200):
+    if not session.busy:
+      break
+    time.sleep(0.05)
+  if len(session.shots) != n:
+    fails.append("a repeated viewpoint fired a duplicate shot")
+  else:
+    print("  live: a repeated viewpoint correctly did not fire")
+
+  rep = session.stop()
+  print(f"  live: report over {rep['n_shots']} shots, cameras {rep['cameras']}")
+  for cam in ("GOOD", "POOR"):
+    m = rep["summary"][cam]["charuco"]
+    print(f"    {cam:5s} a={m['a_per_m']:.5f}  sigma@0.70m="
+          f"{m['sigma_at_0.70m'] * 1000:5.2f} mm  "
+          f"white fill={rep['summary'][cam]['white']['fill_mean'] * 100:.1f}%")
+
+  g, p = rep["summary"]["GOOD"], rep["summary"]["POOR"]
+  for name, got, want, tol in [
+    ("GOOD a", g["charuco"]["a_per_m"], 0.004, 0.0008),
+    ("POOR a", p["charuco"]["a_per_m"], 0.012, 0.0020),
+    ("GOOD white fill", g["white"]["fill_mean"], 0.90, 0.03),
+    ("POOR white fill", p["white"]["fill_mean"], 0.30, 0.03),
+  ]:
+    ok = abs(got - want) <= tol
+    print(f"  {'ok ' if ok else 'FAIL'} {name:20s} {got:8.5f} vs {want:8.5f}")
+    if not ok:
+      fails.append(name)
+  if not (g["charuco"]["a_per_m"] < p["charuco"]["a_per_m"]):
+    fails.append("the report ranks the noisier camera as quieter")
+  if not (outdir / "comparison.png").exists():
+    fails.append("no comparison figure was written")
+  else:
+    print(f"  live: figure -> {outdir / 'comparison.png'}")
+  return fails
