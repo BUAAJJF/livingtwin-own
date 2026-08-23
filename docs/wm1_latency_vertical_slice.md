@@ -551,7 +551,23 @@ domain, and the reported figure is **balanced accuracy** over the five domains
 rather than raw accuracy, so that a method which always answers with one
 domain cannot be read as being at chance when it is not.
 
-## 9. Limitations
+## 9. Failure diagnosis
+
+The phase specification listed the failure modes in the order they should be
+checked, because each one points at a different thing to fix and running the
+next stage before the previous one is sound wastes GPU-days. Where this phase
+landed on each:
+
+| symptom | what it would mean | this phase |
+|---|---|---|
+| reward-free history cannot separate the domains | the data is not exciting enough, or the model is wrong; do not run PPO | **not hit.** 1.000 balanced accuracy on 160 held-out-shape sessions from 5 s of arm time, against three controls at or below chance |
+| posterior wrong where cross-correlation is right | the learned inference is broken | **not hit**, and the reverse: B1a is at chance and B1b reaches 0.438 where the learned posterior reaches 1.000 |
+| posterior right, target does not recover | simulator adaptation is the failure, not inference | TODO |
+| target recovers, retention collapses | the posterior is too narrow; mix more source prior | TODO |
+| trajectory matching indistinguishable from decision-aware | the decision-aware novelty is not established | **not hit at the identification level** — 0.600 against 1.000 balanced accuracy, and a 25-point benign false-positive gap — but see section 5.1 on *which* part of the decision-aware score is doing it |
+| the oracle is unstable across training seeds | fix the oracle before evaluating anything against it | TODO |
+
+## 10. Limitations
 
 The honest boundaries of what this phase establishes.
 
@@ -594,7 +610,7 @@ classes. They do not vary the camera, the table, the bin geometry, or the
 task. A method that survives an unseen object is not thereby a method that
 survives an unseen scene.
 
-## 10. Exact commands
+## 11. Exact commands
 
 Every command below was run from the repository root on the training server,
 with `MUJOCO_GL=disable` and the mjlab environment's `lib` on
