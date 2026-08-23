@@ -1,0 +1,78 @@
+{
+  "pose": {
+    "distance_m": 0.748001093885996,
+    "n_corners": 16,
+    "reproj_rms_px": 0.38660892844200134,
+    "tilt_deg": 42.54848088497237,
+    "board_span_px": 62.59368896484375,
+    "plane_uncertainty_m": 0.004620016908463922,
+    "cross_frame": false
+  },
+  "reference": "target",
+  "regions": {
+    "charuco": {
+      "n_pixels": 3561,
+      "range_m": 0.8781062872747954,
+      "fill": 0.9746770570064589,
+      "gross_outlier_frac": 0.02502106149957877,
+      "stable_fill": 0.7222690255546195,
+      "bias_m": -0.018951042203332547,
+      "spatial_rms_m": 0.013109326102889257,
+      "temporal_std_m": 0.008083979599177837,
+      "temporal_n_pixels": 3561,
+      "p95_abs_m": 0.0383987039816982
+    },
+    "white": {
+      "n_pixels": 537,
+      "range_m": 0.7942259920130862,
+      "fill": 0.8976722532588455,
+      "gross_outlier_frac": 0.10130353817504656,
+      "stable_fill": 0.1713221601489758,
+      "bias_m": -0.01540298011390201,
+      "spatial_rms_m": 0.019959138064959893,
+      "temporal_std_m": 0.01948636956512928,
+      "temporal_n_pixels": 537,
+      "p95_abs_m": 0.04461343026307534
+    },
+    "black": {
+      "n_pixels": 505,
+      "range_m": 0.8112652462585092,
+      "fill": 0.9016336633663367,
+      "gross_outlier_frac": 0.0950990099009901,
+      "stable_fill": 0.013861386138613862,
+      "bias_m": -0.01016807892860272,
+      "spatial_rms_m": 0.02281866760012979,
+      "temporal_std_m": 0.021569741889834404,
+      "temporal_n_pixels": 505,
+      "p95_abs_m": 0.04393237839381012
+    }
+  },
+  "capture": {
+    "backend": "d405",
+    "model": "RealSense D405",
+    "serial": "262622270868",
+    "firmware": "5.15.1.55",
+    "usb": "3.2",
+    "librealsense": "2.58.3",
+    "resolution": [
+      848,
+      480
+    ],
+    "fps": 30,
+    "preset": "default",
+    "depth_units_m": 9.999999747378752e-05,
+    "filters": false,
+    "emitter": "none (D405 is passive stereo)",
+    "stereo_baseline_m": 0.017945981979370116,
+    "fx_px": 430.751953125,
+    "n_frames": 40
+  },
+  "target": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/targets/target_a4.json",
+  "label": "desk_v2",
+  "provenance": {
+    "commit": "c0859f1c0b76f5e4d6762592ac0ab10647c16d05",
+    "dirty": true,
+    "opencv": "4.12.0",
+    "numpy": "2.2.6"
+  }
+}

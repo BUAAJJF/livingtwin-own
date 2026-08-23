@@ -146,6 +146,23 @@ def adaptation() -> str:
   out = ["| configuration | α | p_adapt | methods sharing it | target obj/min | "
          "retention obj/min | target trips/h (events) |",
          "|---|---|---|---|---|---|---|"]
+  # The two reference points first: what the deployed policy does in the
+  # target domain without any adaptation, and what it does at home.  Every
+  # row below is measured against these.
+  for label, name in (("*no adaptation* (zero-shot)", "zeroshot"),
+                      ("*no mismatch* (nominal)", "nominal")):
+    g = None
+    for k, v in an["groups"].items():
+      if k.split("/")[-1] == name:
+        g = v
+    if not g:
+      continue
+    b, t = g["throughput"]["bootstrap"], g["trips"]
+    cell = f"{b['mean']:.2f} [{b['ci'][0]:.2f}, {b['ci'][1]:.2f}]"
+    out.append(f"| {label} | — | — | — | "
+               + (cell if name == "zeroshot" else "—") + " | "
+               + ("—" if name == "zeroshot" else cell) + " | "
+               + f"{t['rate']:.2f} ({int(t['events'])}) |")
   for cfg, e in sorted(by_cfg.items()):
     def g(kind):
       for name, gr in an["groups"].items():

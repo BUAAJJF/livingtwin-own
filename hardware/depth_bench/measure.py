@@ -121,7 +121,7 @@ def main() -> None:
     if not r.get("n_pixels"):
       print(f"{name:9s}   (no pixels in frame)")
       continue
-    print(f"{name:9s} {r['range_m'] * 1000:6.0f}m {r['fill'] * 100:6.1f}% "
+    print(f"{name:9s} {r['range_m'] * 1000:5.0f}mm {r['fill'] * 100:6.1f}% "
           f"{r['stable_fill'] * 100:6.1f}% {r['bias_m'] * 1000:+8.2f}mm "
           f"{r['spatial_rms_m'] * 1000:7.2f}mm {r['temporal_std_m'] * 1000:7.2f}mm "
           f"{r['p95_abs_m'] * 1000:7.2f}mm")

@@ -1,0 +1,85 @@
+{
+  "pose": {
+    "distance_m": 0.7280597454230947,
+    "n_corners": 16,
+    "reproj_rms_px": 0.5299438238143921,
+    "tilt_deg": 41.14026822896236,
+    "board_span_px": 89.0672607421875,
+    "plane_uncertainty_m": 0.0042916339753292015,
+    "cross_frame": true
+  },
+  "reference": "self",
+  "regions": {
+    "charuco": {
+      "n_pixels": 228,
+      "range_m": 0.852374171712778,
+      "fill": 0.9537280701754386,
+      "gross_outlier_frac": 0.0462719298245614,
+      "stable_fill": 0.9342105263157895,
+      "bias_m": NaN,
+      "spatial_rms_m": 0.014159566479277783,
+      "temporal_std_m": 0.004880541004240513,
+      "temporal_n_pixels": 218,
+      "p95_abs_m": 0.029992211319980977
+    },
+    "white": {
+      "n_pixels": 32,
+      "range_m": 0.7732524091038112,
+      "fill": 1.0,
+      "gross_outlier_frac": 0.0,
+      "stable_fill": 1.0,
+      "bias_m": NaN,
+      "spatial_rms_m": 0.0044445269768891345,
+      "temporal_std_m": 0.002786326454952359,
+      "temporal_n_pixels": 32,
+      "p95_abs_m": 0.008719248073582363
+    },
+    "black": {
+      "n_pixels": 30,
+      "range_m": 0.7896607440131921,
+      "fill": 1.0,
+      "gross_outlier_frac": 0.0,
+      "stable_fill": 1.0,
+      "bias_m": NaN,
+      "spatial_rms_m": 0.006709514323668145,
+      "temporal_std_m": 0.005493296775966883,
+      "temporal_n_pixels": 30,
+      "p95_abs_m": 0.013274793705362347
+    }
+  },
+  "capture": {
+    "backend": "odin1",
+    "model": "Manifold Tech Odin 1",
+    "serial": "884531645a142e70",
+    "sdk": "odin_ros_driver v0.14.0 (liblydHostApi_amd.a)",
+    "resolution": [
+      256,
+      192
+    ],
+    "fps": 29,
+    "depth_units_m": 0.001,
+    "conf_min": 30,
+    "emitter": "SPAD dTOF, active illumination",
+    "colour_model": "FishPoly rectified to a pinhole",
+    "colour_resolution": [
+      1280,
+      1024
+    ],
+    "colour_fx_px": 620.0,
+    "geometry": "measured ray table (the depth grid is not a pinhole)",
+    "cross_frame_pose": true,
+    "extrinsic": "uncalibrated",
+    "bias_trustworthy": false,
+    "rays_measured_frac": 0.9739583333333334,
+    "rays_cache": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/capture/odin1_raytable.npz",
+    "n_frames": 40
+  },
+  "target": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/targets/target_a4.json",
+  "label": "desk_v2",
+  "provenance": {
+    "commit": "c0859f1c0b76f5e4d6762592ac0ab10647c16d05",
+    "dirty": true,
+    "opencv": "4.12.0",
+    "numpy": "2.2.6"
+  }
+}

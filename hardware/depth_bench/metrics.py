@@ -176,6 +176,33 @@ def region_mask(p_board: np.ndarray, region: dict) -> np.ndarray:
             np.isfinite(x) & np.isfinite(y))
 
 
+def fit_plane(rays: np.ndarray, depth: np.ndarray, mask: np.ndarray) -> dict | None:
+  """A plane through the sensor's *own* points inside a region.
+
+  Only ever used as a fallback, and it costs exactly one number: a self-fitted
+  plane absorbs any constant depth error, so ``bias`` against it is identically
+  zero and meaningless.  Flatness, fill and temporal noise survive, because
+  none of them is a statement about where the plane is.
+
+  It exists for the Odin 1, whose colour-to-lidar extrinsic is not usable as
+  the vendor ships it.  Rather than quote a bias measured across a transform
+  known to be eight degrees out, the bench withholds that one number and keeps
+  the rest.
+  """
+  P = (rays * depth[..., None])[mask & (depth > 0)]
+  if len(P) < 12:
+    return None
+  w = np.ones(len(P))
+  for _ in range(4):  # IRLS: a few outlying pixels must not tilt the reference
+    c = np.average(P, axis=0, weights=w)
+    _, _, Vt = np.linalg.svd((P - c) * w[:, None])
+    n = Vt[2] / np.linalg.norm(Vt[2])
+    r = (P - c) @ n
+    sigma = 1.4826 * np.median(np.abs(r)) + 1e-9
+    w = 1.0 / (1.0 + (r / (3 * sigma)) ** 2)
+  return {"normal": n, "tvec": np.asarray(c).reshape(3, 1)}
+
+
 def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
                    outlier_m: float = 0.05) -> dict:
   """Reduce a frame stack over one region to the numbers described above.
@@ -235,10 +262,24 @@ def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
   }
 
 
-def evaluate(cap, board, spec, outlier_m: float = 0.05) -> dict:
+def evaluate(cap, board, spec, outlier_m: float = 0.05,
+             reference: str | None = None) -> dict:
+  """Reduce a capture to the bench's numbers.
+
+  ``reference`` picks what depth is compared against.  ``"target"`` is the
+  ChArUco plane and is the only one that makes ``bias`` mean anything.
+  ``"self"`` fits a plane to the sensor's own points and reports no bias; it is
+  chosen automatically for a sensor whose capture declares that its pose has to
+  cross an uncalibrated extrinsic to reach the depth frame.
+  """
+  if reference is None:
+    reference = "target" if cap.meta.get("bias_trustworthy", True) else "self"
+  if reference not in ("target", "self"):
+    raise ValueError(f"reference must be 'target' or 'self', got {reference!r}")
+
   pose_img = detect_pose(cap.gray, cap.K, cap.dist, board)
   pose = transform_pose(pose_img, cap.T_dg)
-  gt, p_board = board_coords(cap.rays, pose)
+  gt_target, p_board = board_coords(cap.rays, pose)
   out = {
     "pose": {
       "distance_m": pose["plane_distance_m"],
@@ -249,9 +290,18 @@ def evaluate(cap, board, spec, outlier_m: float = 0.05) -> dict:
       "plane_uncertainty_m": pose["plane_uncertainty_m"],
       "cross_frame": bool(not np.allclose(cap.T_dg, np.eye(4))),
     },
+    "reference": reference,
     "regions": {},
   }
+  median = np.median(cap.depth, axis=0)
   for name, region in spec["regions"].items():
     mask = region_mask(p_board, region)
-    out["regions"][name] = region_metrics(cap.depth, gt, mask, outlier_m)
+    gt = gt_target
+    if reference == "self":
+      plane = fit_plane(cap.rays, median, mask)
+      gt = plane_depth(cap.rays, plane) if plane is not None else gt_target
+    m = region_metrics(cap.depth, gt, mask, outlier_m)
+    if reference == "self":
+      m["bias_m"] = float("nan")  # a self-fitted plane cannot see a bias
+    out["regions"][name] = m
   return out

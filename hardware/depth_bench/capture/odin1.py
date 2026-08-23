@@ -4,12 +4,16 @@ This device does not work the way the other two do, and three of its
 properties were established by measurement here rather than taken from the
 vendor's documentation -- one of them contradicts it.
 
-**Depth arrives in millimetres, not metres.**  The SDK notes say metres.  They
-are wrong, and they are wrong in a way that only a real device reveals: the
-claim had been checked against synthetic buffers.  Pointed at a desk 39 cm
-away this sensor returns 390.  Guarding against a future firmware that changes
-its mind, ``Stream`` sanity-checks the median depth on the first frame and
-refuses to run if it is not in a plausible tabletop range.
+**Depth arrives in millimetres on this path, not metres.**  The vendor's data
+sheet says ``float32 x // X axis, in meters``, but that documents the SLAM
+cloud message, and the raw DTOF stream this backend reads is a different path.
+Pointed at a desk 39 cm away it returns 390.  The cross-check that settles it
+is independent of any of that: the ChArUco distance is true metric, fixed by
+33 mm printed squares, and it puts the sheet at 721 mm where the lidar's own
+plane fit lands at 698 -- agreement only possible if the raw depth is
+millimetres.  ``Stream`` sanity-checks the median depth on the first frame, so
+a firmware that changes its mind fails loudly instead of silently reporting
+metre-scale noise.
 
 **Its depth grid is not a pinhole projection.**  Fitting (fx, fy, cx, cy) to
 the measured ray directions leaves a 17-pixel residual on a 256x192 grid, and
@@ -26,18 +30,37 @@ fisheye, not a pinhole, so it is undistorted to a pinhole first (verified by
 straight edges coming out straight), the board is found there, and the pose is
 carried into the lidar frame by the factory extrinsic.
 
-That extrinsic needed one derivation.  ``calib.yaml`` gives ``Tcl``, camera
-from *lidar* frame, but the XYZ stream is in a camera-convention frame with +Z
-forward, and ``Tcl`` expects +X forward.  Composing ``Tcl`` with the fixed
-permutation (x, y, z) -> (z, -x, -y) makes the rotation come out within a
-degree of identity, which is what two sensors bolted side by side looking the
-same way must give; projecting the lidar cloud through it reproduces the
-colour scene, and dropping the permutation produces garbage.
+**The factory extrinsic cannot be used as written.**  The vendor documents
+that ``Tcl`` maps lidar to camera (``P_A = T^A_B . P_B``) and that the camera
+frame is OpenCV's -- x right, y down, z forward -- so the structure is
+``T_dtof<-colour = Q . inv(Tcl)``.  What it does *not* document, anywhere, is
+the lidar frame's own axis convention, nor whether the dTOF grid is rotated
+relative to the colour sensor.  Both had to be measured.
 
-**What this costs the bias number.**  ``bias`` on this camera is measured
-across that extrinsic, so its error adds to ``plane_uncertainty_m``, which only
-knows about the fit in the image it saw.  ``fill``, ``spatial_rms`` and
-``temporal_std`` do not cross the extrinsic and are unaffected.
+``Q`` is found by searching the 24 signed axis permutations against the device
+and scoring each by the angle between the ChArUco plane's normal and a plane
+fitted to the lidar's own points -- a criterion that tests the rotation alone,
+since a translation cannot tilt a normal.  One wins by 28 degrees over the
+runner-up, and the composite it produces is approximately diag(-1, -1, +1):
+the dTOF grid is rotated 180 degrees about the optical axis relative to the
+colour sensor, which is undocumented and is what an upside-down die gives.
+Deriving this instead of measuring it produced a different answer that the
+device disagreed with by 86 degrees.
+
+A single board pose cannot pin the continuous part -- one plane leaves the
+rotation about its own normal free -- so the bench
+calibrates this extrinsic itself, once, with ``calibrate_odin1.py``, and stores
+it beside the ray table.  Until that has been run this backend reports
+``extrinsic: "uncalibrated"`` and ``evaluate`` refuses to quote a bias -- a
+wrong bias is worse than no bias, because it is the number that decides whether
+a sensor is trusted.
+
+**What needs the extrinsic and what does not.**  ``bias`` crosses it and is
+withheld until calibration.  ``fill``, ``spatial_rms`` and ``temporal_std``
+are computed against a plane fitted to the sensor's own points inside the
+region, so they never cross it; the extrinsic only has to be good enough to
+say which pixels are looking at the sheet, and eight degrees is good enough
+for that.
 """
 
 from __future__ import annotations
@@ -57,17 +80,25 @@ DTOF_W, DTOF_H = 256, 192
 
 RAYS_CACHE = Path(__file__).resolve().parent / "odin1_raytable.npz"
 
-_PERM = np.eye(4)
-_PERM[:3, :3] = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], float)
-"""dTOF output frame -> the 'lidar' frame Tcl is written against."""
+EXTRINSIC_CACHE = Path(__file__).resolve().parent / "odin1_extrinsic.npz"
+
+_Q = np.eye(4)
+_Q[:3, :3] = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], float)
+"""dTOF frame from the lidar frame ``Tcl`` is written against.
+
+Undocumented, and measured: of the 24 signed axis permutations this one wins by
+28 degrees on a criterion that only the rotation can affect."""
 
 
 def add_args(ap) -> None:
   ap.add_argument("--odin-rate", type=int, default=2, choices=(0, 1, 2),
                   help="0=10Hz 1=14.5Hz 2=29Hz")
   ap.add_argument("--conf-min", type=int, default=30,
-                  help="vendor-recommended confidence gate (30-35); "
-                       "this is a pipeline choice and it moves `fill`")
+                  help="confidence gate. The vendor recommends 30-35, but "
+                       "against a 0-1300 uint16 scale on the SLAM cloud path; "
+                       "the raw DTOF channel here is uint8 and tops out near "
+                       "235, so this is very nearly a no-op. It moves `fill`, "
+                       "so it is recorded either way.")
   ap.add_argument("--undistort-f", type=float, default=620.0,
                   help="focal length of the pinhole the colour is rectified to")
   ap.add_argument("--undistort-size", default="1280x1024")
@@ -189,6 +220,14 @@ def _ray_table(read_frames, args, serial: str) -> tuple[np.ndarray, dict]:
   return _fill_holes(np.nan_to_num(rays, nan=0.0), have), info
 
 
+def _extrinsic(Tcl: np.ndarray) -> tuple[np.ndarray, str]:
+  """The transform taking a pose from the colour frame into the depth frame."""
+  if EXTRINSIC_CACHE.exists():
+    z = np.load(EXTRINSIC_CACHE)
+    return z["T_dg"], "calibrated"
+  return _Q @ np.linalg.inv(Tcl), "uncalibrated"
+
+
 class Stream:
   def __init__(self, args, serial: str | None = None):
     import odin1 as sdk
@@ -210,8 +249,7 @@ class Stream:
     with tempfile.TemporaryDirectory() as td:
       self.dev.save_calibration(td)
       Tcl, self.cam = _parse_calib(Path(td) / "calib.yaml")
-    T_cam_dtof = Tcl @ _PERM
-    self.T_dg = np.linalg.inv(T_cam_dtof)
+    self.T_dg, self.extrinsic_source = _extrinsic(Tcl)
 
     w, h = (int(x) for x in args.undistort_size.split("x"))
     f = args.undistort_f
@@ -252,6 +290,8 @@ class Stream:
       "colour_fx_px": f,
       "geometry": "measured ray table (the depth grid is not a pinhole)",
       "cross_frame_pose": True,
+      "extrinsic": self.extrinsic_source,
+      "bias_trustworthy": self.extrinsic_source == "calibrated",
       **ray_info,
     }
 

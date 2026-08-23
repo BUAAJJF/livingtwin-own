@@ -109,18 +109,40 @@ class CameraWorker(threading.Thread):
       self.error = f"{type(e).__name__}: {e}"
       return
     self.K, self.dist, self.meta = stream.K, stream.dist, stream.meta
+    # Taken from the stream when it has one -- a lidar's geometry is measured,
+    # not derived -- and otherwise built from K once the first frame has said
+    # what the depth grid actually is, rather than trusting a requested size.
     self.rays = getattr(stream, "rays", None)
-    if self.rays is None:
-      self.rays = rays_from_K(self.K, (args.height, args.width))
     self.T_dg = getattr(stream, "T_dg", np.eye(4))
 
-    n, t0, pose_every, i = 0, time.time(), 2, 0
+    n, t0, pose_every, i, fails = 0, time.time(), 2, 0, 0
     try:
       while not self._stop.is_set():
         try:
           depth, gray = stream.read()
+          fails = 0
         except Exception as e:
           self.error = f"{type(e).__name__}: {e}"
+          fails += 1
+          # A camera that has stopped delivering frames usually will not start
+          # again by itself -- the D405 wedges when the Odin 1 streams on the
+          # same USB controller -- so recover it rather than showing a dead
+          # panel for the rest of the session.
+          if fails >= 25:
+            self.error = "recovering the camera..."
+            try:
+              stream.close()
+            except Exception:
+              pass
+            if hasattr(self.backend, "reset"):
+              self.backend.reset(self.serial)
+            try:
+              stream = self.backend.Stream(self.args, self.serial)
+              self.K, self.dist = stream.K, stream.dist
+              fails = 0
+            except Exception as e2:
+              self.error = f"reopen failed: {type(e2).__name__}: {e2}"
+              time.sleep(3.0)
           time.sleep(0.2)
           continue
         i += 1
@@ -139,6 +161,9 @@ class CameraWorker(threading.Thread):
             pose = M.detect_pose(gray, self.K, self.dist, self.board)
           except RuntimeError:
             pose = None
+
+        if self.rays is None:
+          self.rays = rays_from_K(self.K, depth.shape)
 
         with self.lock:
           self.depth, self.gray = depth, gray
@@ -631,6 +656,13 @@ def main() -> None:
   ap.add_argument("--depth-units", dest="depth_units", type=float, default=1e-4)
   ap.add_argument("--filters", action="store_true")
   ap.add_argument("--serial", default=None)
+  # Odin 1 knobs.  Not pulled in via its add_args because that would collide
+  # with --width/--height/--fps, which mean the D405's stream here.
+  ap.add_argument("--odin-rate", type=int, default=2, choices=(0, 1, 2))
+  ap.add_argument("--conf-min", type=int, default=30)
+  ap.add_argument("--undistort-f", type=float, default=620.0)
+  ap.add_argument("--undistort-size", default="1280x1024")
+  ap.add_argument("--rebuild-rays", action="store_true")
   args = ap.parse_args()
 
   board, spec = M.load_target(args.target)

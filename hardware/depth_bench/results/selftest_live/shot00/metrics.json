@@ -1,6 +1,6 @@
 {
   "index": 0,
-  "t": 0.6094822883605957,
+  "t": 0.6243889331817627,
   "manual": false,
   "cameras": {
     "GOOD": {
@@ -13,6 +13,7 @@
         "plane_uncertainty_m": 0.0003561148614264961,
         "cross_frame": false
       },
+      "reference": "target",
       "regions": {
         "charuco": {
           "n_pixels": 37515,
@@ -69,6 +70,7 @@
         "plane_uncertainty_m": 0.0003561148614264961,
         "cross_frame": false
       },
+      "reference": "target",
       "regions": {
         "charuco": {
           "n_pixels": 37515,

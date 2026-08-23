@@ -21,6 +21,8 @@ and we would end up measuring the integer grid instead of the camera.
 
 from __future__ import annotations
 
+import time
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -63,6 +65,31 @@ def available() -> list[dict]:
     except Exception:
       continue
   return out
+
+
+def reset(serial: str | None = None) -> bool:
+  """Power-cycle the camera over USB.
+
+  Needed because this D405 shares its xHCI controller with the Odin 1, and once
+  the lidar starts streaming the RealSense stops delivering frames and does not
+  come back on its own -- ``wait_for_frames`` times out for ever, including
+  after the offending process exits.  A hardware reset recovers it, so the
+  bench does that rather than asking someone to find the cable.  The real fix
+  is a different USB controller; this is what makes the session survive until
+  someone moves it.
+  """
+  done = False
+  for dev in rs.context().query_devices():
+    if serial and dev.get_info(rs.camera_info.serial_number) != serial:
+      continue
+    try:
+      dev.hardware_reset()
+      done = True
+    except Exception:
+      pass
+  if done:
+    time.sleep(6.0)  # it disappears from the bus and re-enumerates
+  return done
 
 
 def _post(args):
