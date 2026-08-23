@@ -118,7 +118,16 @@ instead, by a classifier that sees episode boundaries and nothing else
 
 ### 2.2 Splits
 
-TODO — generated from the manifest.
+| split | files | sessions | length | arm-hours | GB | shapes | episodes |
+|---|---|---|---|---|---|---|---|
+| `cal` | 5 | 80 | 15000 steps (300 s) | 6.7 | 0.96 | train | 689 |
+| `calh` | 5 | 80 | 15000 steps (300 s) | 6.7 | 0.96 | holdout | 635 |
+| `test` | 5 | 160 | 15000 steps (300 s) | 13.3 | 1.92 | holdout | 1287 |
+| `train` | 10 | 1280 | 1500 steps (30 s) | 10.7 | 1.53 | train | 294 |
+| `val` | 5 | 320 | 1500 steps (30 s) | 2.7 | 0.38 | train | 77 |
+| `valh` | 5 | 320 | 1500 steps (30 s) | 2.7 | 0.38 | holdout | 69 |
+
+All 6 leakage checks pass (no failures).
 
 ### 2.3 Leakage controls
 
@@ -262,7 +271,187 @@ candidate grid is flat to four significant figures:
 
 ## 5. Reward-free identification
 
-TODO.
+160 test sessions — 32 per domain, five domains, every one of them an object
+shape class the models never saw. The estimator is handed the deployable
+channels and nothing else; the label is read afterwards, by the scoring code,
+to grade an answer that has already been produced.
+
+### 5.1 At the budget the adaptation stage uses
+
+Budget 60 s of one arm (120 windows), 160 sessions across five domains.
+
+| method | top-1 | balanced | mass on truth | entropy (bits) | ECE | target top-1 | target mass |
+|---|---|---|---|---|---|---|---|
+| B0 prior | 0.200 | 0.200 | 0.200 | 0.00 | 0.800 | 0.000 | 0.000 |
+| B1a command→joint | 0.156 | 0.156 | 0.200 | 2.32 | 0.044 | 0.000 | 0.200 |
+| B1b image→proprio | 0.438 | 0.438 | 0.301 | 2.01 | 0.122 | 0.219 | 0.281 |
+| B2 classifier | 0.981 | 0.981 | 0.959 | 0.15 | 0.018 | 0.969 | 0.915 |
+| B3 state matching | 0.600 | 0.600 | 0.421 | 1.47 | 0.213 | 0.969 | 0.505 |
+| B4 latent+action | 1.000 | 1.000 | 1.000 | 0.00 | 0.000 | 1.000 | 1.000 |
+|   ablation: latent only | 1.000 | 1.000 | 1.000 | 0.00 | 0.000 | 1.000 | 1.000 |
+|   ablation: action only | 0.544 | 0.544 | 0.495 | 1.11 | 0.148 | 0.844 | 0.651 |
+| **DA** (fitted weights) | 1.000 | 1.000 | 1.000 | 0.00 | 0.000 | 1.000 | 1.000 |
+| *control*: shuffled labels | 0.194 | 0.194 | 0.200 | 2.32 | 0.006 | 0.000 | 0.200 |
+| *control*: shuffled θ | 0.050 | 0.050 | 0.200 | 2.32 | 0.150 | 0.094 | 0.200 |
+| *control*: episode boundaries only | 0.200 | 0.200 | 0.200 | 2.32 | 0.000 | 1.000 | 0.200 |
+
+DA weights at this budget: state 0.00, latent 0.17, action 0.83.
+
+Read the **balanced** column, not the two on the right. A method that answers
+"3" for every session scores 1.000 on target top-1 and 0.200 balanced, and the
+episode-boundary control does exactly that — which is the reason the control is
+there.
+
+Five things in that table.
+
+**B1a is at chance, as it should be.** The classical latency estimator —
+cross-correlate the command against the joint response — scores 0.156, below
+1/5. An observation delay does not move the actuator's response to a command,
+so the quantity it measures is the same in all five domains. This is a result
+about the coverage of a standard tool, not a failure of the implementation:
+the same estimator would be the right one for `action_latency_steps`, which
+Phase WM0 measured as the single most damaging axis on this task.
+
+**The applicable analytic baseline works, and is not enough.** B1b — ridge
+from the image half of the encoder latent to joint positions `θ` steps earlier
+— reaches 0.438 balanced with no simulator, no training and 3 ms of compute.
+That is well clear of every control and it is a long way from solved: its
+confusion matrix is diffuse and biased towards long lags, and it puts only
+0.281 of its mass on the truth in the target domain.
+
+**Trajectory matching resolves the middle of the range and collapses the
+ends.** B3 — proprioception and servo-error NLL under the same dynamics model
+the other methods use — scores 0.600, which is exactly 3 of 5:
+
+| B3, true \ said | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| **0** | 1 | **31** | 0 | 0 | 0 |
+| **1** | 0 | **32** | 0 | 0 | 0 |
+| **2** | 0 | 0 | **32** | 0 | 0 |
+| **3** | 0 | 0 | 0 | **31** | 1 |
+| **4** | 0 | 0 | 0 | **32** | 0 |
+
+It reads lag 0 as lag 1 and lag 4 as lag 3. The second of those is the one
+that matters: on 32 of 32 sessions from a domain with *80 ms* of delay, a
+state-matching posterior reports the 60 ms target. Its benign-domain false
+positive rate for the target class is 25%, against 0% for the latent-based
+methods. This is section 4.2 showing up at session level — the plant's state
+trajectory barely knows about an observation-side mismatch.
+
+**The latent settles it, and the action-consequence term does not.** The
+decomposition is the point:
+
+| | balanced accuracy at 60 s |
+|---|---|
+| `S_state` alone (B3) | 0.600 |
+| `S_action` alone | 0.544 |
+| `S_latent` alone | **1.000** |
+| `S_latent + S_action` (B4) | 1.000 |
+| fitted combination (DA) | 1.000 |
+
+DA's fitted weights are state 0.00, latent 0.17, action 0.83 — and those
+numbers are *not* importance scores. The three components are not on a common
+scale: the latent NLL spans a hundred nats between candidates where the action
+score spans a fraction of one, so a weight of 0.17 on the latent still
+dominates the sum. The ablations are the honest decomposition, and they say
+the identification comes from predicting the policy's **perceptual latent**,
+not from the action the policy would have taken given that latent.
+
+That is a partial result for the decision-aware framing, and it should be
+stated as one. Scoring a candidate domain *in the policy's own representation*
+rather than in the plant's state is what beats trajectory matching here, by
+0.400 balanced accuracy and by 25 points of benign false-positive rate. The
+specific `S_action` term — push the predicted latent through the frozen actor
+and compare the action — adds nothing on this axis, because there is nothing
+left to add once the latent is exact.
+
+**A single half-second window is already most of the way there.** The B2
+classifier reads one 25-step window and gets 69% of them right (section 5.3);
+by 10 seconds of pooled evidence it is at 0.988 balanced, and the model-based
+methods are at 1.000. Identification is not the expensive part of this loop.
+
+### 5.2 Data budget
+
+Balanced accuracy over five domains, by seconds of one arm:
+
+| method | 10 s | 30 s | 60 s | 180 s | 300 s |
+|---|---|---|---|---|---|
+| B0 prior | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
+| B1a command→joint | 0.181 | 0.169 | 0.156 | 0.188 | 0.194 |
+| B1b image→proprio | 0.431 | 0.475 | 0.438 | 0.463 | 0.556 |
+| B2 classifier | 0.988 | 0.963 | 0.981 | 1.000 | 1.000 |
+| B3 state matching | 0.575 | 0.594 | 0.600 | 0.600 | 0.600 |
+| B4 latent+action | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+|   ablation: latent only | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+|   ablation: action only | 0.475 | 0.519 | 0.544 | 0.544 | 0.569 |
+| **DA** (fitted weights) | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| *control*: shuffled labels | 0.175 | 0.206 | 0.194 | 0.200 | 0.200 |
+| *control*: shuffled θ | 0.050 | 0.031 | 0.050 | 0.013 | 0.000 |
+| *control*: episode boundaries only | 0.200 | 0.200 | 0.200 | 0.200 | 0.200 |
+
+The model-based latent methods are saturated at the smallest budget tried. Ten
+seconds is 20 non-overlapping windows and is enough; the interesting question
+this table cannot answer is how far *below* 10 s it still holds, which the
+generated sessions do not resolve because they are cut into 0.5 s windows.
+
+B1b improves slowly with more data (0.431 → 0.556 from 10 s to 300 s), which
+is what a weak-but-real signal looks like. B1a does not improve, which is what
+no signal looks like.
+
+### 5.3 Controls
+
+Three, each measuring a different way the result could be an artefact.
+
+| control | what it removes | balanced accuracy at 60 s |
+|---|---|---|
+| shuffled training labels (B2) | any information linking history to domain, keeping the architecture and the update count | 0.194 |
+| shuffled `θ` (dynamics ensemble) | the conditioning, keeping the model's ability to predict | 0.050 |
+| episode boundaries only | everything except reset cadence | 0.200 |
+
+The first two are at or below chance at every budget. The shuffled-`θ` ensemble
+is *below* chance and falls further with more data (0.050 at 10 s, 0.000 at
+300 s), which is what a consistently-wrong-and-increasingly-confident ranking
+looks like when a flat score vector is amplified by hundreds of windows; its
+candidate grid is flat to four significant figures (section 4.3).
+
+The third control answers a question the others cannot. Reset cadence *is* a
+consequence of the domain — a policy that fails more often restarts more often
+— and a robot can see it, so it would have been an easy accidental win. A
+classifier that sees the episode-boundary channel and nothing else scores
+0.200: it learns to answer "3" for everything. None of the identification in
+this section is reset cadence.
+
+### 5.4 Calibration, and whether it transfers to unseen objects
+
+Temperature and weights are fitted on `cal` — 80 sessions of *training* shape
+classes. Applied unchanged to `calh`, which is the same simulation domains on
+*held-out* shape classes:
+
+| method | balanced (test, held-out shapes) | balanced (calh) | ECE (calh) |
+|---|---|---|---|
+| DA / B4 / latent-only | 1.000 | 1.000 | 0.000 |
+| B2 classifier | 0.981 | 1.000 | 0.019 |
+| B3 state matching | 0.600 | 0.600 | 0.185 |
+| B1b image→proprio | 0.438 | 0.400 | 0.157 |
+
+Nothing degrades across the shape populations. The methods that are
+well-calibrated on the calibration split stay well-calibrated on objects it
+never contained.
+
+### 5.5 What one session costs
+
+Measured on a single 60 s session, three timed repetitions after a warm-up,
+one RTX 6000D:
+
+| | seconds |
+|---|---|
+| world-model scores, 5 candidates × 4 ensemble members × 120 windows | 0.152 |
+| B2 classifier | 0.0024 |
+| B1b ridge | 0.0030 |
+| B1a cross-correlation | 0.0005 |
+
+Inference is not a cost. The online budget is dominated by the 60 s of arm
+time and by the PPO adaptation that follows.
 
 ## 6. Posterior-guided adaptation
 

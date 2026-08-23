@@ -1,0 +1,331 @@
+{
+ "B1b_img_proprio": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.03778786690067221,
+   0.10060250930505275,
+   0.20668135430752232,
+   0.3133239064296516,
+   0.3416043630571011
+  ],
+  "argmax": 4,
+  "mean_lag_steps": 2.8203543894374565,
+  "mean_lag_ms": 56.40708778874913,
+  "entropy_bits": 2.0359467590532687,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    0.08400912499070945,
+    0.11152119247258169,
+    0.1912170078888276,
+    0.281236991588099,
+    0.3320156830597823
+   ],
+   "argmax": 4,
+   "mean_lag_steps": 2.6657289152536627,
+   "mean_lag_ms": 53.314578305073255,
+   "entropy_bits": 2.152325858952495
+  },
+  "total_variation_single_vs_pooled": 0.057139941257566156,
+  "mass_on_truth_across_sessions": {
+   "mean": 0.281236991588099,
+   "min": 0.006133201039488974,
+   "max": 0.3226964916295249
+  }
+ },
+ "B2_classifier": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   1.5423508601580697e-09,
+   3.11726488720362e-07,
+   0.0013187682631249503,
+   0.9166473893736046,
+   0.08203352909443086
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 3.0807141327512757,
+  "mean_lag_ms": 61.61428265502551,
+  "entropy_bits": 0.4236659139619601,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    3.276026952580288e-08,
+    1.4223060728990504e-06,
+    0.001934939688516879,
+    0.914777485447044,
+    0.08328611979809676
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 3.0813482372166257,
+   "mean_lag_ms": 61.62696474433251,
+   "entropy_bits": 0.43367024930537845
+  },
+  "total_variation_single_vs_pooled": 0.0018699039265606431,
+  "mass_on_truth_across_sessions": {
+   "mean": 0.914777485447044,
+   "min": 0.00901000130245012,
+   "max": 0.9875640796343289
+  }
+ },
+ "B3_state": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.0006421767069577338,
+   0.05156458684328207,
+   0.30012171626834155,
+   0.5401716548676483,
+   0.10749986531377037
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 2.702322445237992,
+  "mean_lag_ms": 54.04644890475984,
+  "entropy_bits": 1.574340682232024,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    0.0008589384732191017,
+    0.06469697236554765,
+    0.32284880423391005,
+    0.5053628208900762,
+    0.10623246403724694
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 2.651412899652584,
+   "mean_lag_ms": 53.02825799305168,
+   "entropy_bits": 1.632115567410577
+  },
+  "total_variation_single_vs_pooled": 0.03607623525409547,
+  "mass_on_truth_across_sessions": {
+   "mean": 0.5053628208900761,
+   "min": 0.3629286360516587,
+   "max": 0.5843059970060912
+  }
+ },
+ "B4_action": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   0.0
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 3.0,
+  "mean_lag_ms": 60.0,
+  "entropy_bits": -0.0,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 3.0,
+   "mean_lag_ms": 60.0,
+   "entropy_bits": -0.0
+  },
+  "total_variation_single_vs_pooled": 0.0,
+  "mass_on_truth_across_sessions": {
+   "mean": 1.0,
+   "min": 1.0,
+   "max": 1.0
+  }
+ },
+ "DA": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   0.0
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 3.0,
+  "mean_lag_ms": 60.0,
+  "entropy_bits": -0.0,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 3.0,
+   "mean_lag_ms": 60.0,
+   "entropy_bits": -0.0
+  },
+  "total_variation_single_vs_pooled": 0.0,
+  "mass_on_truth_across_sessions": {
+   "mean": 1.0,
+   "min": 1.0,
+   "max": 1.0
+  }
+ },
+ "abl_latent_only": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   0.0
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 3.0,
+  "mean_lag_ms": 60.0,
+  "entropy_bits": -0.0,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 3.0,
+   "mean_lag_ms": 60.0,
+   "entropy_bits": -0.0
+  },
+  "total_variation_single_vs_pooled": 0.0,
+  "mass_on_truth_across_sessions": {
+   "mean": 1.0,
+   "min": 1.0,
+   "max": 1.0
+  }
+ },
+ "abl_action_only": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   1.2646721560191537e-08,
+   0.0008112050930469652,
+   0.12290394858001265,
+   0.815746251059917,
+   0.060538582620301665
+  ],
+  "argmax": 3,
+  "mean_lag_steps": 2.93601218591403,
+  "mean_lag_ms": 58.7202437182806,
+  "entropy_bits": 0.8646514771683347,
+  "source": "session 0 of the target split, 60 s",
+  "pooled_over_32_sessions": {
+   "lags": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "probs": [
+    1.6432110673627043e-05,
+    0.016879211314174195,
+    0.21690721039211705,
+    0.6514416387269788,
+    0.1147555074560564
+   ],
+   "argmax": 3,
+   "mean_lag_steps": 2.8640405781035705,
+   "mean_lag_ms": 57.280811562071406,
+   "entropy_bits": 1.339108666915612
+  },
+  "total_variation_single_vs_pooled": 0.16430461233293833,
+  "mass_on_truth_across_sessions": {
+   "mean": 0.6514416387269787,
+   "min": 0.31425390794626396,
+   "max": 0.8173110364617105
+  }
+ }
+}
