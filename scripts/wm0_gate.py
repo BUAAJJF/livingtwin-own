@@ -29,7 +29,17 @@ PERCEPTION_ONLY = {"depth_dropout", "depth_dropout_blob"}
 THROUGHPUT_GAP = 0.10   # criterion 2a
 TAIL_FACTOR = 2.0       # criterion 2b, as a multiplier on the nominal rate
 IDENT_MARGIN = 0.10     # criterion 4: accuracy over the shuffled control
-RECOVERY_MIN = 0.25     # criterion 5: oracle must close this much of the gap
+RECOVERY_MIN = 0.30
+"""Criterion 5: the fraction of the ZERO-SHOT-TO-NOMINAL GAP the oracle closes.
+
+    recovery = (J_oracle - J_zero_shot) / (J_nominal - J_zero_shot)
+
+Not the relative gain over zero-shot, which is what this first computed.  The
+two differ a lot and the difference decides the verdict: on the latency domain
+the oracle takes 41.85 to 49.79 objects/min, which is a 19% gain over
+zero-shot but closes 57% of the 14.0-object gap to the unperturbed 55.86.  The
+gap fraction is the quantity the README defines `recovery` as and the one a
+learned method will later be scored on, so it is the one the gate must use."""
 
 
 def _load(p: Path):
@@ -99,9 +109,9 @@ def criterion_4(ident_dir: Path) -> dict:
   return out
 
 
-def criterion_5(oracle_dir: Path) -> dict:
+def criterion_5(oracle_dir: Path, j_nominal: float | None) -> dict:
   """Does knowing the parameter let simulation recover the loss?"""
-  out = {"checked": oracle_dir.is_dir(), "domains": []}
+  out = {"checked": oracle_dir.is_dir(), "j_nominal": j_nominal, "domains": []}
   if not oracle_dir.is_dir():
     return out
   tags = sorted({f.stem.split("_")[0] for f in oracle_dir.glob("*.json")})
@@ -119,12 +129,22 @@ def criterion_5(oracle_dir: Path) -> dict:
       continue
     mz, mo = sum(zs) / len(zs), sum(orc) / len(orc)
     mr = sum(ret) / len(ret) if ret else float("nan")
+    gap = (j_nominal - mz) if j_nominal is not None else float("nan")
+    # The fraction of the gap to the unperturbed policy that the oracle
+    # closes.  This is what the README defines `recovery` as, and what a
+    # learned method will later be scored against.
+    frac = (mo - mz) / gap if gap and not math.isnan(gap) and gap > 0 else float("nan")
     out["domains"].append({
       "tag": tag, "n": [len(zs), len(orc), len(ret)],
       "zero_shot": mz, "oracle": mo, "retention": mr,
+      "gap_to_nominal": gap,
       "absolute_gain": mo - mz,
-      "relative_gain": (mo - mz) / mz if mz else float("nan"),
-      "recovers": (mo - mz) / max(mz, 1e-9) >= RECOVERY_MIN,
+      "relative_gain_over_zero_shot": (mo - mz) / mz if mz else float("nan"),
+      "recovery_fraction_of_gap": frac,
+      # What adapting cost back in the unperturbed domain.
+      "retention_rel": ((mr - j_nominal) / j_nominal
+                        if j_nominal and not math.isnan(mr) else float("nan")),
+      "recovers": (not math.isnan(frac)) and frac >= RECOVERY_MIN,
     })
   out["c5_recoverable"] = any(d["recovers"] for d in out["domains"])
   return out
@@ -138,7 +158,11 @@ def main() -> int:
   s2 = _load(RESULTS / "s2_summary.json")
   c12 = criterion_1_and_2(s2)
   c4 = criterion_4(RESULTS / "ident")
-  c5 = criterion_5(RESULTS / "oracle")
+  # The unperturbed reference the recovery fraction is measured against.
+  j_nominal = None
+  if s2 and s2.get("nominal"):
+    j_nominal = s2["nominal"]["throughput_per_min"]["mean"]
+  c5 = criterion_5(RESULTS / "oracle", j_nominal)
 
   checks = [
     ("1  >=2 factors separated from repeat uncertainty",
@@ -151,7 +175,7 @@ def main() -> int:
      c4.get("c4_identifiable"), c4["checked"]),
     ("4b   ... and survives held-out object shapes",
      c4.get("c4_generalises"), c4["checked"]),
-    (f"5  oracle recovers >={100 * RECOVERY_MIN:.0f}% over zero-shot",
+    (f"5  oracle closes >={100 * RECOVERY_MIN:.0f}% of the zero-shot gap",
      c5.get("c5_recoverable"), c5["checked"]),
   ]
 
