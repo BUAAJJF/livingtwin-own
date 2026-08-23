@@ -54,6 +54,11 @@ METHODS: dict[str, dict] = {
   "B4_action":    {"latent": 1.0, "action": 1.0},
   "DA":           {"state": None, "latent": None, "action": None},  # fitted
   "B2_classifier": {"clf": 1.0},
+  # Ablations of B4, so that "the latent identifies it" and "the decision the
+  # policy would have taken identifies it" are separable claims rather than one
+  # number.  Free: the components are already cached.
+  "abl_latent_only": {"latent": 1.0},
+  "abl_action_only": {"action": 1.0},
   # Controls.
   "ctrl_wm_shuffled":  {"state_ctrl": 1.0, "latent_ctrl": 1.0,
                         "action_ctrl": 1.0},
