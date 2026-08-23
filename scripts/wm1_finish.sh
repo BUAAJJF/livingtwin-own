@@ -21,7 +21,14 @@ R=results/wm1_latency
 $PY scripts/wm1_digest.py
 $PY scripts/analyze_wm1.py --dirs "$R/runs" \
   --baseline runs/zeroshot --json "$R/analysis.json"
-$PY scripts/wm1_timings.py --json "$R/timings.json"
+# Wall-clock lives in the collection and training logs, which are on the
+# training server and not in this repository.  Run this there and pull the
+# result; running it here would overwrite a real accounting with zeros.
+if [ -d logs/wm1_collect ]; then
+  $PY scripts/wm1_timings.py --json "$R/timings.json"
+else
+  echo "  no logs/wm1_collect here; keeping the timings.json that was pulled"
+fi
 $PY scripts/wm1_gate.py --json "$R/gate.json"
 echo
 echo "=== tables ==="
