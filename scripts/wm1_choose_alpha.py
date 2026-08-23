@@ -41,6 +41,9 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--analysis", default="results/wm1_latency/analysis.json")
   p.add_argument("--plan", default="results/wm1_latency/adapt/screen.json")
+  p.add_argument("--method", default="DA",
+                 help="the method whose posterior is being mixed; anchor runs "
+                      "in the same plan are not alpha candidates")
   p.add_argument("--json", default="results/wm1_latency/adapt/alpha.json")
   a = p.parse_args()
 
@@ -49,7 +52,17 @@ def main() -> int:
 
   threshold = RETENTION_FRACTION * J_NOMINAL
   rows = []
-  for job in plan["jobs"]:
+  # Only the runs that are actually a mixture of the method's posterior with
+  # the source prior.  The screening plan also carries the two anchors, and one
+  # of them -- the source-prior refit -- is alpha = 1 on delta(0) with the best
+  # retention in the table by construction, because it never left the nominal
+  # domain.  Letting it into a "largest alpha that retains" rule would have
+  # selected it and called the answer alpha = 1.
+  jobs = [j for j in plan["jobs"] if a.method in j.get("methods", [])]
+  if not jobs:
+    raise SystemExit(f"no screening run carries method {a.method!r}; "
+                     f"the plan has {sorted({m for j in plan['jobs'] for m in j['methods']})}")
+  for job in jobs:
     # The run's own tag, seed included -- not the seed-pooled configuration.
     # One of the screened alphas coincides with the oracle and therefore has
     # three training seeds behind it while the others have one, and comparing
