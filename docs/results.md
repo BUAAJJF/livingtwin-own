@@ -1,5 +1,28 @@
 # Measured results
 
+> ## ⚠ Two rows and two findings in this file are wrong
+>
+> `docs/novelty_validation_phase_0_2.md` re-ran every number here with the
+> cadence recorded in the output. Six of nine reproduce inside 2%. What does
+> not:
+>
+> * **The "distilled" columns were measured in the EP-All environment**, not
+>   the honest one, despite the claim below. The training runs behind them
+>   (`d1`, `d1r`, `f2`) predate `reshape_on_place` entirely — their wandb
+>   configs have no such field. Scored honestly the single-object distilled
+>   policy is **48.1 objects/min, not 53.3**, and its shell rate is 22–26 per
+>   arm-hour, not 16.4. The three-object row is off by 3.3%.
+> * **"Fine-tuning in the wrong environment buys nothing" is an artefact of
+>   the same mistake.** It compares 53.0 against 53.3 — *both* EP-All numbers.
+>   Scored honestly the same training takes the policy from 47.3 to 52.6,
+>   which is worth +11%.
+> * **"91% of trips happen in free-space reach"** holds for the fine-tuned
+>   policy in clutter (88%) but not for the single-object distilled policy,
+>   where trips split 48% reach / 46% just-after-release.
+>
+> The teacher and fine-tuned rows, and the recurrent-memory finding, stand.
+> Do not quote this file without checking the validation report first.
+
 Every number below is a deterministic rollout of 512 environments for 2400
 control steps (409.6 arm-minutes, ~22k object instances) in the *honest*
 environment, where each object is drawn fresh rather than once per episode.
