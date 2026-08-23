@@ -40,6 +40,13 @@ PREFIX="$(micromamba env list | awk -v e="$MJLAB_ENV" '$1==e {print $NF}')"
 
 mkdir -p "$OUT"
 n_jobs=$(grep -cvE '^\s*(#|$)' "$JOBS")
+# An empty job list is a planner that failed, not a sweep with nothing to do.
+# Without this the runner prints "0 jobs", exits 0, and the failure is only
+# visible as a results directory that never fills up.
+if [ "$n_jobs" -eq 0 ]; then
+  echo "!!! $JOBS is empty -- the planner failed. Not a successful sweep." >&2
+  exit 3
+fi
 echo "=== $n_jobs jobs, ${#GPUS[@]} gpus, ${NUM_ENVS}x${STEPS}, out=$OUT"
 
 fifo=$(mktemp -u); mkfifo "$fifo"; exec 9<>"$fifo"; rm "$fifo"
