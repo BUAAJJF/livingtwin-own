@@ -16,8 +16,11 @@ no world model, no BFM/TeCH, no hardware.
 file records; the mechanism proposed for it is not.
 
 A benchmark that holds object parameters constant within an episode inflates a
-recurrent policy's measured throughput by **11.8%**, while moving a memoryless
-policy on the same task by an amount indistinguishable from zero. About 85% of
+recurrent policy's measured **throughput** by **11.8%**, while moving a
+memoryless policy on the same task by an amount indistinguishable from zero.
+(It does *not* measurably affect the constraint-violation rate — a claim this
+report made and then withdrew when a second training seed reversed its sign,
+§5.3.) About 85% of
 that localises to the **shape** cadence alone, and two thirds of it goes away
 by training in the correctly paced environment with no architectural change
 (§5.2, §5.4). But the recurrent state does **not** carry previous-object
@@ -621,20 +624,33 @@ artefact, and the resulting policy is far outside the distribution it was
 trained in. The residual gaps (+7.1% and +3.2%) are therefore *not* "the
 non-memory part of the effect".
 
-### 5.3 Safety reads better in the leaky environment too
+### 5.3 Safety does **not** move with cadence — a claim withdrawn
 
-The same table in trips per arm-hour, where lower is better:
+The same table in trips per arm-hour, where lower is better. The right-hand
+column is a second *training* seed of the teacher (`h_full_s2`), and it is the
+reason this subsection says the opposite of what it first said:
 
-| policy | OBJ-All | EP-All |
-|---|---:|---:|
-| state teacher | 4.7 | 2.6 |
-| distilled, memory kept | 22.6 | 20.7 |
-| fine-tuned, memory kept | 2.3 | 2.5 |
+| policy | OBJ-All | EP-All | direction |
+|---|---:|---:|---|
+| state teacher, seed 1 | 4.7 | 2.6 | EP-All 45% lower |
+| **state teacher, seed 17** | **3.4** | **4.5** | **EP-All 32% *higher*** |
+| distilled, memory kept | 22.6 | 20.7 | 8% lower |
+| fine-tuned, memory kept | 2.3 | 2.5 | 9% higher |
 
-The teacher's shell rate nearly halves under EP-All. A benchmark that holds
-object parameters constant within an episode under-reports the constraint
-violation rate as well as over-reporting throughput, and the two errors point
-the same way.
+On seed 1 alone the teacher's shell rate nearly halves under EP-All, and it
+was written up here as "the leaky benchmark under-reports violations as well
+as over-reporting throughput". **The second training seed reverses the sign,
+and the arithmetic says it should never have been claimed:** the rollout is
+6.83 arm-hours, so 4.7 per arm-hour is *32 events*. Poisson noise on 32 events
+is ±18%; the seed-1 gap is about 2σ, and the two seeds disagree.
+
+The honest conclusion is that **cadence has no measurable effect on the
+constraint-violation rate** in this data, for any policy. The throughput
+effect (§5.2) is 4× the noise floor and replicated across policies; the safety
+effect is not there. They were assumed to point the same way, and they do not.
+
+This is the clearest case in the document of a second seed earning its cost,
+and it is a direct argument for §11A.
 
 ### 5.4 Which parameter is doing it
 
@@ -1173,7 +1189,7 @@ conditions hold.
 
 | # | condition | verdict | evidence |
 |---|---|---|---|
-| 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy — about 4× the run-to-run noise floor (§7.6) — against nothing measurable for the memoryless control; §5.3: teacher shell rate 4.7 → 2.6 |
+| 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy — about 4× the run-to-run noise floor (§7.6) — against nothing measurable for the memoryless control. Passes on the throughput half only; §5.3 withdraws the safety half, which reverses sign across training seeds |
 | 2 | effect consistent in direction across ≥ 2 **training** seeds | **NOT TESTED** | §7.3: only the memoryless teacher has a second training seed; neither vision student does |
 | 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
 | 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
