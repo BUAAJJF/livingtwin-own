@@ -206,7 +206,7 @@ domains and never on the target, on reward, or on task performance.
 |---|---|---|
 | **B0** | the prior. No target data: the answer is the source domain, `δ(0)`. The policy that ships if calibration is not worth doing. | nothing |
 | **B1a** | cross-correlation between the commanded action and the joint response — the textbook latency estimator. Included *because* it should fail: an observation delay does not move the actuator's response to a command. | nothing |
-| **B1b** | ridge regression from the **image** half of the encoder latent to joint positions `θ` steps earlier, scored on a held-out half of the same session. The depth image contains the arm, so a delayed image is a picture of where the arm was. | nothing |
+| **B1b** | ridge regression from the **image** half of the encoder latent to joint positions `θ` steps earlier, fitted on the first 60% of the session and scored on the last 40%. The depth image contains the arm, so a delayed image is a picture of where the arm was. | nothing |
 | **B2** | a small GRU classifier from raw history to `q(θ)`. Amortised system identification: all the simulator knowledge is spent offline and inference is one forward pass. | one classifier fit |
 | **B3** | trajectory matching: proprioception and servo-error NLL under the parameter-conditioned dynamics model. The channels a classical system-identification pipeline uses. | the dynamics ensemble |
 | **B4** | the actor latent's NLL plus the action the frozen policy would have taken had the next observation been the predicted one. | the dynamics ensemble |

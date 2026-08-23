@@ -1,0 +1,82 @@
+{
+  "pose": {
+    "distance_m": 0.7208354814057979,
+    "n_corners": 16,
+    "reproj_rms_px": 0.3633401095867157,
+    "tilt_deg": 41.8155975024201,
+    "board_span_px": 89.25396728515625,
+    "plane_uncertainty_m": 0.0029067195123151303,
+    "cross_frame": true
+  },
+  "regions": {
+    "charuco": {
+      "n_pixels": 225,
+      "range_m": 0.8929281614153242,
+      "fill": 0.042666666666666665,
+      "gross_outlier_frac": 0.9566666666666667,
+      "stable_fill": 0.013333333333333334,
+      "bias_m": 0.0441662086557566,
+      "spatial_rms_m": 0.00588089280749506,
+      "temporal_std_m": NaN,
+      "temporal_n_pixels": 12,
+      "p95_abs_m": 0.049484564040002565
+    },
+    "white": {
+      "n_pixels": 33,
+      "range_m": 0.8096878565533701,
+      "fill": 0.0,
+      "gross_outlier_frac": 1.0,
+      "stable_fill": 0.0,
+      "bias_m": NaN,
+      "spatial_rms_m": NaN,
+      "temporal_std_m": NaN,
+      "temporal_n_pixels": 0,
+      "p95_abs_m": NaN
+    },
+    "black": {
+      "n_pixels": 30,
+      "range_m": 0.8273026134149394,
+      "fill": 0.0033333333333333335,
+      "gross_outlier_frac": 0.9966666666666667,
+      "stable_fill": 0.0,
+      "bias_m": 0.0037133706215714546,
+      "spatial_rms_m": 0.00845262295430007,
+      "temporal_std_m": NaN,
+      "temporal_n_pixels": 0,
+      "p95_abs_m": 0.014647020638653922
+    }
+  },
+  "capture": {
+    "backend": "odin1",
+    "model": "Manifold Tech Odin 1",
+    "serial": "884531645a142e70",
+    "sdk": "odin_ros_driver v0.14.0 (liblydHostApi_amd.a)",
+    "resolution": [
+      256,
+      192
+    ],
+    "fps": 29,
+    "depth_units_m": 0.001,
+    "conf_min": 30,
+    "emitter": "SPAD dTOF, active illumination",
+    "colour_model": "FishPoly rectified to a pinhole",
+    "colour_resolution": [
+      1280,
+      1024
+    ],
+    "colour_fx_px": 620.0,
+    "geometry": "measured ray table (the depth grid is not a pinhole)",
+    "cross_frame_pose": true,
+    "rays_measured_frac": 0.9739583333333334,
+    "rays_cache": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/capture/odin1_raytable.npz",
+    "n_frames": 40
+  },
+  "target": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/targets/target_a4.json",
+  "label": "desk_070",
+  "provenance": {
+    "commit": "bf642767f39e6bf3da4add113c47ca9308b599ab",
+    "dirty": true,
+    "opencv": "4.12.0",
+    "numpy": "2.2.6"
+  }
+}

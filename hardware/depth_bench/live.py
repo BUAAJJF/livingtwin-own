@@ -54,7 +54,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import metrics as M
-from capture import Capture, open_backend
+import view
+from capture import Capture, open_backend, rays_from_K
 
 VIS_NEAR, VIS_FAR = 0.10, 1.50
 """Depth colour scale, shared by every camera so the panels are comparable by
@@ -92,7 +93,8 @@ class CameraWorker(threading.Thread):
     self.fps = 0.0
     self.error: str | None = None
     self.meta: dict = {}
-    self.K = self.dist = None
+    self.K = self.dist = self.rays = None
+    self.T_dg = np.eye(4)
     self._stop = threading.Event()
     self._prev_small: np.ndarray | None = None
     self._jpeg: bytes | None = None
@@ -107,6 +109,10 @@ class CameraWorker(threading.Thread):
       self.error = f"{type(e).__name__}: {e}"
       return
     self.K, self.dist, self.meta = stream.K, stream.dist, stream.meta
+    self.rays = getattr(stream, "rays", None)
+    if self.rays is None:
+      self.rays = rays_from_K(self.K, (args.height, args.width))
+    self.T_dg = getattr(stream, "T_dg", np.eye(4))
 
     n, t0, pose_every, i = 0, time.time(), 2, 0
     try:
@@ -162,7 +168,8 @@ class CameraWorker(threading.Thread):
         return None
       return Capture(depth=np.stack(self.ring), gray=self.gray.copy(),
                      K=self.K, dist=self.dist,
-                     meta=dict(self.meta, n_frames=RING))
+                     meta=dict(self.meta, n_frames=RING),
+                     rays=self.rays, T_dg=self.T_dg)
 
   def state(self) -> dict:
     with self.lock:
@@ -193,32 +200,14 @@ class CameraWorker(threading.Thread):
       return self._jpeg
     with self.lock:
       gray, depth, pose = self.gray, self.depth, self.pose
-    if gray is None:
+    if gray is None or depth is None:
       img = np.zeros((360, 640, 3), np.uint8)
       cv2.putText(img, self.error or "starting...", (20, 180),
                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (60, 60, 220), 2)
     else:
-      vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-      dn = np.clip((depth - VIS_NEAR) / (VIS_FAR - VIS_NEAR), 0, 1)
-      dv = cv2.applyColorMap((dn * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
-      dv[depth <= 0] = (0, 0, 0)  # invalid stays black, not "far away"
-      if pose is not None:
-        for name, region in self.spec["regions"].items():
-          quad = np.array([
-            [region["x_min_m"], region["y_min_m"], 0.0],
-            [region["x_max_m"], region["y_min_m"], 0.0],
-            [region["x_max_m"], region["y_max_m"], 0.0],
-            [region["x_min_m"], region["y_max_m"], 0.0]])
-          proj, _ = cv2.projectPoints(quad, pose["rvec"], pose["tvec"],
-                                      self.K, self.dist)
-          pts = np.round(proj.reshape(-1, 2)).astype(np.int32)
-          c = {"charuco": (0, 255, 0), "white": (255, 128, 0),
-               "black": (0, 200, 255)}.get(name, (255, 255, 255))
-          cv2.polylines(vis, [pts], True, c, 2)
-          cv2.polylines(dv, [pts], True, c, 2)
-      img = np.hstack([vis, dv])
-    scale = width * 2 / img.shape[1]
-    img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+      img = view.compose(gray, depth, self.K, self.dist, self.rays, self.T_dg,
+                         self.spec, pose_img=pose, width=width,
+                         banner=None if pose is not None else "target not visible")
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 78])
     self._jpeg, self._jpeg_at = buf.tobytes(), now
     return self._jpeg

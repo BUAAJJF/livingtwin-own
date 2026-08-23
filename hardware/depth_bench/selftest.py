@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import metrics as M
-from capture import Capture
+from capture import Capture, rays_from_K
 
 W, H = 848, 480
 K = np.array([[430.0, 0, 424.0], [0, 430.0, 240.0], [0, 0, 1.0]])
@@ -53,7 +53,8 @@ def render(spec, distance=0.45, tilt_deg=8.0, seed=0,
   pose = {"rvec": rvec, "tvec": tvec, "R": R,
           "normal": R[:, 2] / np.linalg.norm(R[:, 2])}
 
-  gt = M.plane_depth(K, pose, (H, W))
+  rays = rays_from_K(K, (H, W))
+  gt = M.plane_depth(rays, pose)
 
   # Camera ray -> plane point -> board coordinates -> paper pixel.
   u, v = np.meshgrid(np.arange(W, dtype=float), np.arange(H, dtype=float))
@@ -82,8 +83,9 @@ def render(spec, distance=0.45, tilt_deg=8.0, seed=0,
   depth = np.where(np.isfinite(gt), gt + bias, 0.0)[None].repeat(n, 0)
   depth += rng.normal(0.0, sigma, depth.shape)
 
+  _, p_board = M.board_coords(rays, pose)
   for name, rate in drop.items():
-    mask = M.region_mask(K, DIST, pose, spec["regions"][name], (H, W))
+    mask = M.region_mask(p_board, spec["regions"][name])
     hit = rng.random(depth.shape) < rate
     depth[hit & mask[None]] = 0.0
   depth[~np.isfinite(gt)[None].repeat(n, 0)] = 0.0

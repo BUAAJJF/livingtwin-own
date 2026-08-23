@@ -1,6 +1,6 @@
 {
   "index": 3,
-  "t": 5.2226269245147705,
+  "t": 5.4174158573150635,
   "manual": false,
   "cameras": {
     "GOOD": {
@@ -10,44 +10,45 @@
         "reproj_rms_px": 0.24030126631259918,
         "tilt_deg": 16.427751571132173,
         "board_span_px": 59.253509521484375,
-        "plane_uncertainty_m": 0.0029182784792928934
+        "plane_uncertainty_m": 0.0029182784792928934,
+        "cross_frame": false
       },
       "regions": {
         "charuco": {
-          "n_pixels": 5970,
-          "range_m": 0.7350527277363705,
-          "fill": 0.9803671133445003,
+          "n_pixels": 5843,
+          "range_m": 0.735023425895197,
+          "fill": 0.9803825089851104,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.61892797319933,
-          "bias_m": 0.0015060870242094015,
-          "spatial_rms_m": 0.0022615616777405586,
-          "temporal_std_m": 0.0022143488749861717,
-          "temporal_n_pixels": 5970,
-          "p95_abs_m": 0.00526093789758244
+          "stable_fill": 0.6195447544069828,
+          "bias_m": 0.0015057229113937254,
+          "spatial_rms_m": 0.0022610548463390346,
+          "temporal_std_m": 0.0022139500360935926,
+          "temporal_n_pixels": 5843,
+          "p95_abs_m": 0.005258885896579413
         },
         "white": {
-          "n_pixels": 624,
-          "range_m": 0.771228938701099,
-          "fill": 0.9030448717948718,
+          "n_pixels": 555,
+          "range_m": 0.7712601166752105,
+          "fill": 0.9013513513513514,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.08493589743589744,
-          "bias_m": 0.0008426730135388527,
-          "spatial_rms_m": 0.002251691469178129,
-          "temporal_std_m": 0.002208288758993149,
-          "temporal_n_pixels": 624,
-          "p95_abs_m": 0.004703188177504046
+          "stable_fill": 0.06846846846846846,
+          "bias_m": 0.0008548756625417209,
+          "spatial_rms_m": 0.002242809862721115,
+          "temporal_std_m": 0.0022024428471922874,
+          "temporal_n_pixels": 555,
+          "p95_abs_m": 0.004695392216651162
         },
         "black": {
-          "n_pixels": 625,
-          "range_m": 0.7629890820251122,
-          "fill": 0.9232666666666667,
+          "n_pixels": 588,
+          "range_m": 0.7629581522848411,
+          "fill": 0.9239654195011338,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.1536,
-          "bias_m": 0.0012222023956673933,
-          "spatial_rms_m": 0.002253047034438646,
-          "temporal_std_m": 0.0022186755668371916,
-          "temporal_n_pixels": 625,
-          "p95_abs_m": 0.004988360367331297
+          "stable_fill": 0.16156462585034015,
+          "bias_m": 0.0012283747506716125,
+          "spatial_rms_m": 0.002247589199579261,
+          "temporal_std_m": 0.002212860155850649,
+          "temporal_n_pixels": 588,
+          "p95_abs_m": 0.004982750180353684
         }
       },
       "capture": {
@@ -65,44 +66,45 @@
         "reproj_rms_px": 0.24030126631259918,
         "tilt_deg": 16.427751571132173,
         "board_span_px": 59.253509521484375,
-        "plane_uncertainty_m": 0.0029182784792928934
+        "plane_uncertainty_m": 0.0029182784792928934,
+        "cross_frame": false
       },
       "regions": {
         "charuco": {
-          "n_pixels": 5970,
-          "range_m": 0.7350527277363705,
-          "fill": 0.949574260189838,
+          "n_pixels": 5843,
+          "range_m": 0.735023425895197,
+          "fill": 0.9495835472645331,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.2825795644891122,
-          "bias_m": 0.001535828637320824,
-          "spatial_rms_m": 0.006761066054561816,
-          "temporal_std_m": 0.006639742758125067,
-          "temporal_n_pixels": 5970,
-          "p95_abs_m": 0.013586213062214532
+          "stable_fill": 0.2835871983570084,
+          "bias_m": 0.0015369538330400334,
+          "spatial_rms_m": 0.00676006632089758,
+          "temporal_std_m": 0.0066383276134729385,
+          "temporal_n_pixels": 5843,
+          "p95_abs_m": 0.01358565349186881
         },
         "white": {
-          "n_pixels": 624,
-          "range_m": 0.771228938701099,
-          "fill": 0.31603899572649574,
+          "n_pixels": 555,
+          "range_m": 0.7712601166752105,
+          "fill": 0.3044294294294294,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.019230769230769232,
-          "bias_m": 0.0006444123708636562,
-          "spatial_rms_m": 0.006760019515559309,
-          "temporal_std_m": 0.006620433647185564,
-          "temporal_n_pixels": 113,
-          "p95_abs_m": 0.013327761375511147
+          "stable_fill": 0.0018018018018018018,
+          "bias_m": 0.0006731183307229216,
+          "spatial_rms_m": 0.0067137917688333305,
+          "temporal_std_m": 0.00657577533274889,
+          "temporal_n_pixels": 93,
+          "p95_abs_m": 0.01325718944483221
         },
         "black": {
-          "n_pixels": 625,
-          "range_m": 0.7629890820251122,
-          "fill": 0.6014,
+          "n_pixels": 588,
+          "range_m": 0.7629581522848411,
+          "fill": 0.6057256235827665,
           "gross_outlier_frac": 0.0,
-          "stable_fill": 0.0,
-          "bias_m": 0.0011778002035230939,
-          "spatial_rms_m": 0.006705880879161826,
-          "temporal_std_m": 0.006569375284016132,
-          "temporal_n_pixels": 612,
-          "p95_abs_m": 0.013328472331147756
+          "stable_fill": 0.01020408163265306,
+          "bias_m": 0.0012106379403661882,
+          "spatial_rms_m": 0.006693781713315465,
+          "temporal_std_m": 0.00654428917914629,
+          "temporal_n_pixels": 575,
+          "p95_abs_m": 0.013265863560793276
         }
       },
       "capture": {

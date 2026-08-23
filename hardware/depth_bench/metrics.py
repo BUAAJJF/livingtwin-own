@@ -110,32 +110,70 @@ def detect_pose(gray, K, dist, board) -> dict:
   }
 
 
-def plane_depth(K, pose, shape) -> np.ndarray:
-  """Ground-truth Z of the sheet's plane at every pixel.
+def transform_pose(pose: dict, T: np.ndarray) -> dict:
+  """Carry a pose from the camera it was found in into the depth frame.
 
-  Depth images store Z along the optical axis, not radial distance, so the ray
-  is normalised to z = 1 and the intersection parameter *is* the depth.
+  Needed because the two are not always the same camera.  On the Odin 1 the
+  board is found in the 1600x1296 colour image -- in the 256x192 lidar image a
+  25 mm marker is under two pixels across and no detector will read it -- and
+  the pose then has to travel into the lidar frame across the factory
+  extrinsic.  That extrinsic's error lands in ``bias`` and is *not* covered by
+  ``plane_uncertainty_m``, which only knows about the fit in the image it saw.
   """
-  h, w = shape
-  u, v = np.meshgrid(np.arange(w, dtype=np.float64), np.arange(h, dtype=np.float64))
-  d = np.stack([(u - K[0, 2]) / K[0, 0], (v - K[1, 2]) / K[1, 1], np.ones_like(u)], -1)
+  R = T[:3, :3] @ pose["R"]
+  t = (T[:3, :3] @ pose["tvec"].ravel() + T[:3, 3]).reshape(3, 1)
+  normal = R[:, 2] / np.linalg.norm(R[:, 2])
+  out = dict(pose)
+  out["R"], out["tvec"] = R, t
+  out["rvec"] = cv2.Rodrigues(R)[0]
+  out["normal"] = normal
+  out["plane_distance_m"] = abs(float(normal @ t.ravel()))
+  out["tilt_deg"] = float(np.degrees(np.arccos(
+    min(1.0, abs(float(normal @ np.array([0, 0, 1.0])))))))
+  return out
+
+
+def plane_depth(rays: np.ndarray, pose: dict) -> np.ndarray:
+  """Ground-truth depth of the sheet's plane along every pixel's ray.
+
+  The rays are z-normalised, so the intersection parameter *is* the depth in
+  the same sense the sensor reports it -- Z along the optical axis, not radial
+  range.  Rays that run parallel to the sheet, or meet it behind the camera,
+  come back NaN rather than as a very large number that would quietly pass a
+  distance check.
+  """
   n = pose["normal"]
   num = float(n @ pose["tvec"].ravel())
-  den = d @ n
+  den = rays @ n
   with np.errstate(divide="ignore", invalid="ignore"):
     z = np.where(np.abs(den) > 1e-9, num / den, np.nan)
-  return z
+  return np.where(z > 0, z, np.nan)
 
 
-def region_mask(K, dist, pose, region: dict, shape) -> np.ndarray:
-  """Pixels covered by a rectangle of the sheet, in the sheet's own frame."""
-  x0, x1 = region["x_min_m"], region["x_max_m"]
-  y0, y1 = region["y_min_m"], region["y_max_m"]
-  quad = np.array([[x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0]])
-  proj, _ = cv2.projectPoints(quad, pose["rvec"], pose["tvec"], K, dist)
-  mask = np.zeros(shape, np.uint8)
-  cv2.fillConvexPoly(mask, np.round(proj.reshape(-1, 2)).astype(np.int32), 1)
-  return mask.astype(bool)
+def board_coords(rays: np.ndarray, pose: dict) -> tuple[np.ndarray, np.ndarray]:
+  """Where each pixel's ray lands on the sheet, in the sheet's own frame.
+
+  Regions are selected here rather than by projecting their corners into the
+  image, which is what this used to do.  Two reasons, and the second is why it
+  had to change: intersecting the ray is exact where rasterising a projected
+  quadrilateral is not, and projection needs a forward camera model that a
+  lidar does not have.  A ray table is enough for this, and every sensor on the
+  bench has one.
+  """
+  z = plane_depth(rays, pose)
+  p_cam = rays * z[..., None]
+  p_board = np.einsum("ij,hwj->hwi", pose["R"].T,
+                      p_cam - pose["tvec"].reshape(1, 1, 3))
+  return z, p_board
+
+
+def region_mask(p_board: np.ndarray, region: dict) -> np.ndarray:
+  """Pixels whose ray lands inside a rectangle of the sheet."""
+  x, y = p_board[..., 0], p_board[..., 1]
+  with np.errstate(invalid="ignore"):
+    return ((x >= region["x_min_m"]) & (x <= region["x_max_m"]) &
+            (y >= region["y_min_m"]) & (y <= region["y_max_m"]) &
+            np.isfinite(x) & np.isfinite(y))
 
 
 def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
@@ -198,8 +236,9 @@ def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
 
 
 def evaluate(cap, board, spec, outlier_m: float = 0.05) -> dict:
-  pose = detect_pose(cap.gray, cap.K, cap.dist, board)
-  gt = plane_depth(cap.K, pose, cap.gray.shape)
+  pose_img = detect_pose(cap.gray, cap.K, cap.dist, board)
+  pose = transform_pose(pose_img, cap.T_dg)
+  gt, p_board = board_coords(cap.rays, pose)
   out = {
     "pose": {
       "distance_m": pose["plane_distance_m"],
@@ -208,10 +247,11 @@ def evaluate(cap, board, spec, outlier_m: float = 0.05) -> dict:
       "tilt_deg": pose["tilt_deg"],
       "board_span_px": pose["board_span_px"],
       "plane_uncertainty_m": pose["plane_uncertainty_m"],
+      "cross_frame": bool(not np.allclose(cap.T_dg, np.eye(4))),
     },
     "regions": {},
   }
   for name, region in spec["regions"].items():
-    mask = region_mask(cap.K, cap.dist, pose, region, cap.gray.shape)
+    mask = region_mask(p_board, region)
     out["regions"][name] = region_metrics(cap.depth, gt, mask, outlier_m)
   return out

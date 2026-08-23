@@ -33,6 +33,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import metrics as M
+import view
 from capture import Capture, open_backend
 
 HERE = Path(__file__).resolve().parent
@@ -40,48 +41,13 @@ DEFAULT_TARGET = HERE / "targets" / "target_a4.json"
 
 
 def annotate(cap: Capture, board, spec) -> np.ndarray:
-  """Grayscale + depth side by side, with the regions drawn where they landed.
+  """The framing check: are the region outlines on the printed patches?
 
-  This is the check that the sheet is framed and that the region rectangles sit
-  on the printed patches rather than beside them -- a pose that is subtly wrong
-  produces plausible numbers about the wrong pixels.
+  A pose that is subtly wrong produces plausible numbers about the wrong
+  pixels, and this is the only place that shows it.
   """
-  vis = cv2.cvtColor(cap.gray, cv2.COLOR_GRAY2BGR)
-  d = cap.depth[0]
-  finite = d[d > 0]
-  lo, hi = (np.percentile(finite, [2, 98]) if finite.size else (0.0, 1.0))
-  dn = np.clip((d - lo) / max(hi - lo, 1e-6), 0, 1)
-  dv = cv2.applyColorMap((dn * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
-  dv[d <= 0] = (0, 0, 0)  # invalid pixels stay black, not "far away"
-
-  try:
-    pose = M.detect_pose(cap.gray, cap.K, cap.dist, board)
-  except RuntimeError as e:
-    cv2.putText(vis, str(e)[:70], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                (0, 0, 255), 2)
-    return np.hstack([vis, dv])
-
-  colours = {"charuco": (0, 255, 0), "white": (255, 128, 0), "black": (0, 200, 255)}
-  for name, region in spec["regions"].items():
-    quad = np.array([
-      [region["x_min_m"], region["y_min_m"], 0.0],
-      [region["x_max_m"], region["y_min_m"], 0.0],
-      [region["x_max_m"], region["y_max_m"], 0.0],
-      [region["x_min_m"], region["y_max_m"], 0.0],
-    ])
-    proj, _ = cv2.projectPoints(quad, pose["rvec"], pose["tvec"], cap.K, cap.dist)
-    pts = np.round(proj.reshape(-1, 2)).astype(np.int32)
-    c = colours.get(name, (255, 255, 255))
-    for img in (vis, dv):
-      cv2.polylines(img, [pts], True, c, 2)
-      cv2.putText(img, name, tuple(pts[0] + np.array([4, -6])),
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1, cv2.LINE_AA)
-  cv2.putText(vis, f"{pose['plane_distance_m'] * 1000:.0f} mm  "
-                   f"tilt {pose['tilt_deg']:.0f} deg  "
-                   f"{pose['n_corners']} corners  "
-                   f"reproj {pose['reproj_rms_px']:.2f} px",
-              (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA)
-  return np.hstack([vis, dv])
+  return view.compose(cap.gray, cap.depth[0], cap.K, cap.dist, cap.rays, cap.T_dg,
+                      spec, board=board, width=640)
 
 
 def provenance() -> dict:
