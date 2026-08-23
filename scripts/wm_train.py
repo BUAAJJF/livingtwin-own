@@ -63,8 +63,8 @@ def losses(m, norms, b, theta, weights):
 
   total = (weights["z"] * l_z + weights["p"] * l_p + weights["e"] * l_e
            + weights["m"] * l_m)
-  return total, {"z": float(l_z), "p": float(l_p), "e": float(l_e),
-                 "multi": float(l_m)}
+  return total, {"z": float(l_z.detach()), "p": float(l_p.detach()),
+                 "e": float(l_e.detach()), "multi": float(l_m.detach())}
 
 
 @torch.no_grad()
@@ -204,27 +204,44 @@ def main() -> int:
   # For validation windows of known latency, the NLL under every candidate.
   # The diagonal has to be the cheapest column or the posterior cannot work,
   # and finding that out here costs a minute rather than a PPO run.
-  print()
-  print("  NLL(z) by true lag (row) under each candidate (column):")
-  grid = {}
-  for true_lag in latency.LAGS:
-    sub = [(s, n) for s, n in val if s.lag == true_lag]
-    if not sub:
-      continue
-    si, _ = make_index(sub, a.stride * 4, length)
-    row = []
-    for cand in latency.LAGS:
-      r = evaluate(members, norms, sub, si, length, dev,
-                   theta_override=cand, limit=2000)
-      row.append(r["z"] + r["p"] + r["e"])
-    grid[true_lag] = row
-    best = min(range(len(row)), key=lambda i: row[i])
-    mark = "  <-- correct" if latency.LAGS[best] == true_lag else "  <-- WRONG"
-    print(f"    lag {true_lag}: " + " ".join(f"{v:9.3f}" for v in row) + mark)
-  report["candidate_grid"] = {str(k): v for k, v in grid.items()}
-  report["candidate_grid_argmin_correct"] = {
-    str(k): latency.LAGS[min(range(len(v)), key=lambda i: v[i])] == k
-    for k, v in grid.items()}
+  # Reported per component, not only summed.  Which of them carries the
+  # domain is the difference between "the world model works" and "one head
+  # works and the others are along for the ride", and it decides what the
+  # decision-aware weighting has left to do.
+  grids: dict[str, dict[int, list[float]]] = {}
+  for split_name, split in (("val", val), ("valh", valh)):
+    raw = {}
+    for true_lag in latency.LAGS:
+      sub = [(s, n) for s, n in split if s.lag == true_lag]
+      if not sub:
+        continue
+      si, _ = make_index(sub, a.stride * 4, length)
+      raw[true_lag] = [evaluate(members, norms, sub, si, length, dev,
+                                theta_override=cand, limit=2000)
+                       for cand in latency.LAGS]
+    for comp in ("z", "p", "e", "multi", "sum"):
+      grid = {}
+      for lag, rows in raw.items():
+        grid[lag] = [(r["z"] + r["p"] + r["e"] if comp == "sum" else r[comp])
+                     for r in rows]
+      grids[f"{split_name}/{comp}"] = grid
+
+  for key, grid in grids.items():
+    n_right = sum(latency.LAGS[min(range(len(v)), key=lambda i: v[i])] == k
+                  for k, v in grid.items())
+    print()
+    print(f"  {key}: NLL by true lag (row) under each candidate (column) "
+          f"-- {n_right}/{len(grid)} argmins correct")
+    for lag, v in grid.items():
+      best = min(range(len(v)), key=lambda i: v[i])
+      mark = "  <-- correct" if latency.LAGS[best] == lag else "  <-- WRONG"
+      print(f"    lag {lag}: " + " ".join(f"{x:9.3f}" for x in v) + mark)
+  report["candidate_grids"] = {
+    key: {str(k): v for k, v in grid.items()} for key, grid in grids.items()}
+  report["candidate_grid_correct"] = {
+    key: sum(latency.LAGS[min(range(len(v)), key=lambda i: v[i])] == k
+             for k, v in grid.items())
+    for key, grid in grids.items()}
 
   rname = ("train_report_shuffled.json" if a.shuffle_theta
            else "train_report.json")
