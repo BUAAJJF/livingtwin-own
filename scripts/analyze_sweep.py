@@ -206,36 +206,57 @@ def section(stage: str, as_json: bool) -> dict:
       })
 
   # Which axes are worth taking to the next stage.
+  # With one repeat per point nothing can separate, so requiring separation
+  # here would rank every axis at zero -- which is exactly what screening must
+  # not do.  Screening ranks by raw effect and says so; S2 re-measures with
+  # repeats and only then is separation meaningful.
+  tested = nominal.n >= 2
   print()
-  print("  strongest effect per axis (by |Δ| that separates from nominal):")
+  print("  strongest effect per axis, by |Δ| "
+        + ("that separates from nominal:" if tested
+           else "(RAW -- one repeat, nothing is tested):"))
   ranked = []
   for axis in sorted(by_axis):
-    best_t = max((r for r in rows if r["axis"] == axis),
-                 key=lambda r: abs(r["effect_throughput"]["rel"])
-                 if r["effect_throughput"]["separated"] else -1, default=None)
-    best_p = max((r for r in rows if r["axis"] == axis),
-                 key=lambda r: abs(r["effect_trips"]["rel"])
-                 if r["effect_trips"]["separated"] else -1, default=None)
-    t_rel = best_t["effect_throughput"]["rel"] if best_t and best_t["effect_throughput"]["separated"] else 0.0
-    p_rel = best_p["effect_trips"]["rel"] if best_p and best_p["effect_trips"]["separated"] else 0.0
-    ranked.append((axis, t_rel, p_rel, best_t["value"] if best_t else None))
-  ranked.sort(key=lambda x: -max(abs(x[1]), abs(x[2]) / 4))
-  for axis, t_rel, p_rel, at in ranked:
-    tag = ""
+    cand = [r for r in rows if r["axis"] == axis]
+
+    def score(r, key):
+      e = r[key]
+      if math.isnan(e["rel"]):
+        return -1.0
+      return abs(e["rel"]) if (e["separated"] or not tested) else -1.0
+
+    best_t = max(cand, key=lambda r: score(r, "effect_throughput"), default=None)
+    best_p = max(cand, key=lambda r: score(r, "effect_trips"), default=None)
+    t_rel = (best_t["effect_throughput"]["rel"]
+             if best_t and score(best_t, "effect_throughput") >= 0 else 0.0)
+    p_rel = (best_p["effect_trips"]["rel"]
+             if best_p and score(best_p, "effect_trips") >= 0 else 0.0)
+    ranked.append((axis, t_rel, p_rel,
+                   best_t["value"] if best_t else None,
+                   best_p["value"] if best_p else None))
+  # Sorted on throughput, with tail risk discounted rather than ignored: an
+  # axis that leaves throughput alone and quadruples the shell rate is a
+  # calibration target, and sorting on throughput alone would bury it.
+  ranked.sort(key=lambda x: -max(abs(x[1]), abs(x[2]) / 8))
+  for axis, t_rel, p_rel, at_t, at_p in ranked:
+    tags = []
     if abs(t_rel) >= 0.10:
-      tag = "  <- throughput gap >=10%"
-    elif abs(p_rel) >= 1.0:
-      tag = "  <- tail risk >=2x"
-    print(f"    {axis:22s} throughput {100 * t_rel:+7.1f}%   "
-          f"trips {100 * p_rel:+8.1f}%   at {at}{tag}")
+      tags.append("throughput >=10%")
+    if abs(p_rel) >= 1.0:
+      tags.append("tail >=2x")
+    tag = ("  <- " + ", ".join(tags)) if tags else ""
+    print(f"    {axis:22s} throughput {100 * t_rel:+7.1f}% at {str(at_t):>7s}   "
+          f"trips {100 * p_rel:+9.1f}% at {str(at_p):>7s}{tag}")
 
   out = {"stage": stage, "nominal": {
     "repeats": nominal.n,
     **{m: {"mean": nominal.mean(m), "sd": nominal.sd(m),
            "ci": list(nominal.ci(m))} for m, *_ in METRICS}},
     "points": rows,
-    "ranked": [{"axis": a, "throughput_rel": t, "trips_rel": p, "at": v}
-               for a, t, p, v in ranked]}
+    "separation_tested": tested,
+    "ranked": [{"axis": a, "throughput_rel": t, "trips_rel": p,
+                "at_throughput": vt, "at_trips": vp}
+               for a, t, p, vt, vp in ranked]}
   if as_json:
     RESULTS.mkdir(parents=True, exist_ok=True)
     (RESULTS / f"{stage}_summary.json").write_text(json.dumps(out, indent=1))
