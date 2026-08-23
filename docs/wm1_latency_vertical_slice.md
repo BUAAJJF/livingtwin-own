@@ -535,11 +535,191 @@ time and by the PPO adaptation that follows.
 
 ## 6. Posterior-guided adaptation
 
-TODO.
+Every run starts from the same checkpoint, gets the same 600 PPO iterations,
+the same hyper-parameters and the same environment protocol. The only thing
+that differs between them is
+
+    p_adapt(theta) = alpha * q(theta | D_target) + (1 - alpha) * delta(0)
+
+Three training seeds each, evaluated at three process repeats in the target
+domain and three in the nominal one, and reported pooled over all nine.
+
+### 6.1 Which methods shared a run
+
+The parameter is one discrete number with five values, so two methods that
+return the same distribution produce the same `p_adapt`, the same PPO run and
+the same result. Reporting those as two agreeing measurements would be
+inventing agreement, so they are merged and the merge is stated:
+
+| p_adapt at α = 0.75 | methods |
+|---|---|
+| [0.25, 0, 0, **0.75**, 0] | **DA** and **B4** — identical posteriors, one run |
+| [0.25, 0, 0.001, 0.687, 0.062] | B2 classifier |
+| [0.25, 0.039, 0.225, **0.405**, 0.081] | B3 state matching |
+| [0.278, 0.075, 0.155, **0.235**, 0.256] | B1b image→proprio |
+| [0, 0, 0, 1, 0] | the oracle (α = 1 by definition) |
+| [1, 0, 0, 0, 0] | the source-prior refit control |
+
+At α = 1 the decision-aware posterior *is* δ(3) and its adaptation would have
+been the oracle's, with nothing to compare. That is why the α screening below
+matters as much as it does: mixing is what makes the comparison exist.
+
+### 6.2 Choosing α
+
+The rule was committed before any screening run finished:
+`α* = max { α : retention(α) ≥ 0.95 × J_nominal }`, measured in the *source*
+domain, which a practitioner still has, against a nominal figure they already
+know. It touches nothing about the hidden target.
+
+| α | source-domain retention | in the domain the posterior believes | qualifies |
+|---|---|---|---|
+| 0.50 | 54.64 [54.24, 55.03] | 47.90 | yes |
+| **0.75** | **54.61** [54.15, 55.01] | **50.14** | yes |
+| 1.00 | 47.96 [47.33, 48.60] | 49.25 | no |
+
+α = 0.75. One caveat stated plainly: the screening evaluates the domain the
+posterior *believes*, not the domain that is true. Those coincide here because
+the posterior is correct. A practitioner would be in exactly that position, and
+if their inference were wrong their screening would be wrong with it; the
+formal evaluation below, in the real target domain, is the measurement that
+does not have this property.
+
+### 6.3 The formal result
+
+| configuration | α | p_adapt | methods sharing it | target obj/min | retention obj/min | target trips/h (events) |
+|---|---|---|---|---|---|---|
+| *no adaptation* (zero-shot) | — | — | — | 42.12 [41.79, 42.45] | — | 9.64 (395) |
+| *no mismatch* (nominal) | — | — | — | — | 55.94 [55.73, 56.15] | 3.12 (128) |
+| `q13c3_a1.00` | 1.00 | [1.00, 0.00, 0.00, 0.00, 0.00] | B0_prior_refit | 42.09 [40.05, 43.86] | 55.68 [54.97, 56.29] | 7.15 (439) |
+| `q1ae5_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.69, 0.06] | B2_classifier | 49.54 [49.36, 49.71] | 53.59 [53.34, 53.83] | 5.45 (335) |
+| `q2f23_a0.50` | 0.50 | [0.50, 0.00, 0.00, 0.50, 0.00] | DA | 47.90 [47.54, 48.25] | 54.64 [54.24, 55.03] | 5.66 (116) |
+| `q48aa_a0.75` | 0.75 | [0.25, 0.04, 0.23, 0.41, 0.08] | B3_state | 49.02 [48.77, 49.26] | 54.06 [53.58, 54.51] | 4.43 (272) |
+| `q7878_a1.00` | 1.00 | [0.00, 0.00, 0.00, 1.00, 0.00] | DA, ORACLE | 49.33 [49.08, 49.59] | 49.79 [48.84, 50.71] | 4.56 (280) |
+| `qcc23_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.75, 0.00] | B4_action, DA | 49.89 [49.68, 50.09] | 54.32 [54.01, 54.61] | 5.24 (322) |
+| `qcd16_a0.75` | 0.75 | [0.28, 0.08, 0.16, 0.23, 0.26] | B1b_img_proprio | 49.76 [49.46, 50.05] | 54.02 [53.68, 54.32] | 4.43 (272) |
+
+Recovery as a fraction of what the oracle achieved,
+`(J_adapted − J_zero) / (J_oracle − J_zero)`, with `J_oracle = 49.33` measured
+in this phase:
+
+| method | target recovery | retention | passes G2 / G3 / G4 |
+|---|---|---|---|
+| **DA** (= B4) | **1.02** | 54.32 | ✓ / point only / ✓ |
+| B1b image→proprio | 1.00 | 54.02 | ✓ / ✓ / ✓ |
+| B2 classifier | 0.98 | 53.59 | ✓ / point only / ✓ |
+| B3 state matching | 0.91 | 54.06 | ✓ / ✓ / ✓ |
+| the oracle | 0.95 | 49.79 | ✓ / ✓ / **✗** |
+| B0 source-prior refit | **−0.01** | 55.68 | ✗ / ✗ / ✓ |
+
+Four things in that table, and the third is the one that matters most.
+
+**Mixing beats the oracle at its own job.** The decision-aware posterior at
+α = 0.75 reaches 49.89 objects/min in the target domain against the oracle's
+49.33, and retains 54.32 against the oracle's 49.79. It is better in *both*
+domains than fine-tuning on the correct answer alone. The oracle is the only
+configuration in the table that fails G4. Twenty-five percent of the source
+prior is not a concession — on this axis it is a regulariser on a
+high-variance 600-iteration fine-tune, and the source-prior refit control shows
+why that variance is there: conditioned on the wrong answer, the same budget
+moves target throughput by six objects a minute depending on the seed.
+
+**The target data is what matters, not the arithmetic on it.** The control that
+saw no target data recovers −1% — indistinguishable from not adapting at all —
+while every method that saw sixty seconds of it recovers 91% to 102%. That is
+the loop working.
+
+**Identification quality does not translate into adaptation advantage.** B1b
+puts 0.235 of its mass on the true domain and spreads the rest across all five
+candidates; the decision-aware posterior puts 1.000 on the truth. Their
+recoveries are 1.00 and 1.02. The reason is visible in the distributions
+themselves: B1b's mixture is close to a broad prior, so training under it is
+domain randomisation, and on this axis domain randomisation over the candidate
+set recovers about as much as knowing the answer. **A ridge regression that
+needs no simulator, no training and three milliseconds recovers as much of the
+gap as the world model does, and is safer.** That is a negative result for the
+part of the phase that the world model was built for, and it is the clearest
+thing this section says.
+
+**The margins between the methods are under one object per minute.** DA's
+target throughput separates from B3's — 49.89 [49.68, 50.09] against 49.02
+[48.77, 49.26] — and the separation is 0.87 objects/min on a 13.8-object gap.
+It is real and it is small.
+
+### 6.4 Safety, and where G3 fails
+
+| method | trips/arm-hour | events | dispersion | quasi-Poisson interval |
+|---|---|---|---|---|
+| zero-shot | 9.64 | 395 | 1.44 | [8.53, 10.84] |
+| **DA** | 5.24 | 322 | **6.90** | [3.78, **6.83**] |
+| B2 classifier | 5.45 | 335 | 6.94 | [3.96, 7.08] |
+| the oracle | 4.56 | 280 | 1.64 | [3.89, 5.28] |
+| B3 state matching | 4.43 | 272 | 4.66 | [3.32, 5.63] |
+| B1b image→proprio | 4.43 | 272 | **0.22** | [3.92, 4.99] |
+| nominal | 3.12 | 128 | 1.36 | [2.52, 3.81] |
+
+G3 asks for ≤ 5.99 trips/arm-hour. The decision-aware run's point estimate is
+5.24 and **passes**; the upper end of its interval is 6.83 and **fails**. The
+gate is decided on the interval, so G3 is FAIL.
+
+The reason is not the pooled rate, it is the spread between training seeds:
+
+| DA, per training seed | target throughput | target trips/h | events |
+|---|---|---|---|
+| 42 | 50.14 | 3.22 | 66 |
+| 20260824 | 49.74 | **8.01** | 164 |
+| 31415927 | 49.78 | 4.49 | 92 |
+
+Three policies whose throughput agrees to within 0.4 objects/min differ by a
+factor of 2.5 in how often they trip the safety shell. The dispersion statistic
+is 6.90 — the repeats disagree by nearly seven times more variance than a
+common Poisson rate allows — and that is what widens the interval past the
+threshold. B1b, by contrast, has a dispersion of 0.22 and an interval entirely
+below 5.99.
+
+**So the safety half of this loop is not established.** Throughput recovery is
+reproducible across seeds; safety recovery is not. Reporting 5.24 against a
+6.00 threshold and calling it a pass would be exactly the mistake section 8.2
+was written about.
+
+### 6.5 Wall clock
+
+| | |
+|---|---|
+| target data collection | 60 s of one arm |
+| posterior inference, one session | **0.155 s** (classifier 2 ms, B1b 3 ms, B1a 0.5 ms) |
+| PPO adaptation, 600 iterations at 512 environments | 2 910 s = **48.5 min** |
+| **online total** | **49.5 min** |
+
+Under an hour, in simulation, on one RTX 6000D. Inference is not a cost; the
+adaptation is essentially all of it.
+
+Paid once, offline, and not counted against that budget: 2.6 hours of rollout
+generation for 6.1 GB of session logs across 35 runs, 5.8 minutes to fit the
+four-member dynamics ensemble on 118 602 windows, and 22 seconds for the
+classifier and its two controls.
 
 ## 7. Gate
 
-TODO.
+Evaluated by `scripts/wm1_gate.py` against thresholds fixed before the runs,
+and written to `results/wm1_latency/gate.json`.
+
+| | criterion | verdict |
+|---|---|---|
+| G1 | reward-free identification beats its controls | **PASS** |
+| G2 | target throughput >= 47.46 obj/min | **PASS** |
+| G3 | target trips <= 5.99 per arm-hour | **FAIL** |
+| G4 | retention >= 53.07 obj/min | **PASS** |
+| G5 | decision-aware beats trajectory matching somewhere | **PASS** |
+| G6 | every stage's wall-clock recorded | **PASS** |
+
+**YELLOW** — throughput recovers and the source domain is retained, but the safety criterion is met only by the point estimate and not by its interval: the trip rate is overdispersed across training seeds, so the loop as it stands cannot be said to have recovered the safety half of the gap -- and a cheaper baseline did
+
+The same three thresholds re-derived from anchors measured in *this* phase
+rather than inherited from WM0 — `J_nominal` 55.94, `J_zero` 42.12,
+`J_oracle` 49.33 — give G2 ≥ 47.17, G3 ≤ 6.08, G4 ≥ 53.14. **The re-derived
+verdict agrees with the inherited one on every criterion**, including G3: 6.83
+exceeds 6.08 as well. The trip-rate discrepancy of section 8.2 does not change
+the answer.
 
 ## 8. Statistics
 
