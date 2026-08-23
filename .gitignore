@@ -11,3 +11,6 @@ docs/*.mp4
 results/sim2real_sweep/s1/
 results/sim2real_sweep/s2/
 results/sim2real_sweep/s3/
+# WM1 session logs: ~4 GB of fp16 rollout tensors.  The manifest, the
+# per-file descriptions and everything derived from them are tracked.
+results/wm1_latency/data/*.pt

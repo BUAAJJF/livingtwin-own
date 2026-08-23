@@ -184,7 +184,7 @@ def main() -> int:
   p.add_argument("--num-envs", type=int, default=64)
   p.add_argument("--steps", type=int, default=1500)
   p.add_argument("--split", required=True,
-                 choices=("train", "val", "valh", "target", "benign"))
+                 choices=("train", "val", "valh", "test"))
   p.add_argument("--shapes", default="train", choices=tuple(SHAPE_PRESETS))
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--out", default="results/wm1_latency/data")
