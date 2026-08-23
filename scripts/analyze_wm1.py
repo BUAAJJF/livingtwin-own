@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import random
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -259,14 +260,30 @@ def holm(pvals: dict[str, float]) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 
-def load(dirs: list[Path]) -> dict[str, list[dict]]:
-  """Group result files by ``<tag>_<kind>``, keeping the repeat order."""
+SEED_SUFFIX = re.compile(r"_s\d+(?=_(?:target|retention)$)")
+
+
+def load(dirs: list[Path], pool_seeds: bool = True) -> dict[str, list[dict]]:
+  """Group result files by ``<tag>_<kind>``, keeping the repeat order.
+
+  With ``pool_seeds`` an extra group per configuration is emitted with the
+  training seed stripped from the tag.  That pooled group is the formal
+  result: a gate criterion on three process repeats of one training seed would
+  be a claim about that seed, and the trip counts in particular need the
+  exposure of all nine evaluations before an interval on them means anything.
+  The per-seed groups stay, because "which seed" is exactly what a reader
+  wants when the pooled number is close to a threshold.
+  """
   groups: dict[str, list[dict]] = defaultdict(list)
   for d in dirs:
     for f in sorted(d.glob("*__r*.json")):
-      stem = f.stem
-      base, _, _rep = stem.rpartition("__r")
+      base, _, _rep = f.stem.rpartition("__r")
       groups[f"{d.name}/{base}"].append(json.loads(f.read_text()))
+      if pool_seeds:
+        pooled = SEED_SUFFIX.sub("", base)
+        if pooled != base:
+          groups[f"{d.name}/pooled:{pooled}"].append(
+            json.loads(f.read_text()))
   return dict(groups)
 
 
@@ -291,11 +308,13 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--dirs", nargs="+", required=True)
   p.add_argument("--json", default=None)
+  p.add_argument("--no-pool", action="store_true",
+                 help="do not emit the seed-pooled groups")
   p.add_argument("--baseline", default=None,
                  help="group name to compare every other group against")
   a = p.parse_args()
 
-  groups = load([Path(d) for d in a.dirs])
+  groups = load([Path(d) for d in a.dirs], pool_seeds=not a.no_pool)
   if not groups:
     raise SystemExit("no result files found")
   out = {"groups": {}}

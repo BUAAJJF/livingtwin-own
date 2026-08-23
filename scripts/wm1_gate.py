@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -114,8 +115,14 @@ def criterion_1(post: dict | None) -> dict:
 
 
 def _group(analysis: dict, tag: str, kind: str) -> dict | None:
+  """The seed-pooled group for a configuration, or the per-seed one.
+
+  ``tag`` here is a configuration key -- the run tag with its ``_s<seed>``
+  suffix removed -- so what this finds is the group that pools all three
+  training seeds.  Nine evaluations rather than three, which is what a trip
+  count needs before an interval on it says anything."""
   for name, g in analysis.get("groups", {}).items():
-    if name.endswith(f"/{tag}_{kind}"):
+    if name.endswith(f"/pooled:{tag}_{kind}") or name.endswith(f"/{tag}_{kind}"):
       return g
   return None
 
@@ -125,9 +132,12 @@ def criteria_2_3_4(analysis: dict | None, formal: dict | None) -> dict:
   out = {"checked": bool(analysis and formal), "runs": []}
   if not out["checked"]:
     return out
+  # One entry per configuration, not per (configuration, seed): the gate is
+  # evaluated on the pooled result and the per-seed ones are reported beside it.
   by_tag: dict[str, list[str]] = {}
   for job in formal["jobs"]:
-    by_tag.setdefault(job["tag"], job["methods"])
+    cfg = re.sub(r"_s\d+$", "", job["tag"])
+    by_tag.setdefault(cfg, job["methods"])
   for tag, methods in sorted(by_tag.items()):
     tgt = _group(analysis, tag, "target")
     ret = _group(analysis, tag, "retention")
@@ -203,13 +213,13 @@ def criterion_5(analysis: dict | None, formal: dict | None,
   if formal:
     for job in formal["jobs"]:
       if DA_METHOD in job["methods"] and TM_METHOD in job["methods"]:
-        shared = job["tag"]
+        shared = re.sub(r"_s\d+$", "", job["tag"])
   out["shared_adaptation_run"] = shared
   if analysis and formal and shared is None:
     def find(method, kind):
       for job in formal["jobs"]:
         if method in job["methods"]:
-          g = _group(analysis, job["tag"], kind)
+          g = _group(analysis, re.sub(r"_s\d+$", "", job["tag"]), kind)
           if g:
             return g
       return None
