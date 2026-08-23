@@ -28,6 +28,26 @@ import time
 from pathlib import Path
 
 ADAPT = Path("results/wm1_latency/adapt")
+RUNS = Path("logs/rsl_rl/piperx_pick_place_vision")
+
+
+def adopt(tag: str, iterations: int) -> bool:
+  """Claim a finished training that no shard is left to collect.
+
+  A training outlives the shell that started it, so stopping a shard -- to
+  rebalance, to kill a duplicate -- leaves a run that will finish and then be
+  forgotten, and the next queue pass would train it again from scratch.  If the
+  final checkpoint is on disk, write the pointer that `wm1_adapt.sh` looks for;
+  it then skips straight to the evaluations.
+  """
+  ck = ADAPT / f"{tag}.ckpt"
+  if ck.exists():
+    return False
+  final = sorted(RUNS.glob(f"*wm1_{tag}/model_{iterations - 1}.pt"))
+  if not final:
+    return False
+  ck.write_text(str(final[-1]))
+  return True
 
 
 def gpu_free_mib() -> dict[int, int]:
@@ -109,6 +129,12 @@ def main() -> int:
             f"(rc={proc.returncode}, {(time.time() - started) / 60:.1f} min)",
             flush=True)
       del running[gpu]
+
+    for job in jobs:
+      if adopt(job["tag"], job["iterations"]):
+        print(f"  [{(time.time() - t0) / 60:6.1f} min] adopted "
+              f"{job['tag']}: training finished with no shard to collect it",
+              flush=True)
 
     mine = {t for _, t, _ in running.values()}
     busy = mine | busy_elsewhere({j["tag"] for j in jobs} - mine)
