@@ -109,6 +109,11 @@ def main() -> int:
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=770077)
   p.add_argument("--cadence", default=None)
+  p.add_argument("--reset-hidden-on-respawn", action="store_true",
+                 help="zero the recurrent state at every object boundary.  "
+                      "Gate A asks whether doing this reduces history-swap "
+                      "sensitivity, which is only answerable by measuring the "
+                      "swap under both settings.")
   p.add_argument("--json", default=None)
   a = p.parse_args()
 
@@ -231,6 +236,13 @@ def main() -> int:
         prev_cls[idx] = cur_cls[idx]
         prev_mass[idx] = cur_mass[idx]
         seen[idx] += 1
+        if a.reset_hidden_on_respawn:
+          policy.reset(placed)
+          if h_alt is not None:
+            # Both branches, or the comparison stops being about the swap and
+            # starts being about which branch got cleared.
+            h_main = _clone(policy.get_hidden_state())
+            _zero(h_alt, placed)
       cur_cls, cur_mass = cur_labels()
       if bool(dones.any()):
         d = dones.nonzero().flatten()
@@ -263,6 +275,7 @@ def main() -> int:
   report = {
     "task": a.task, "checkpoint": a.checkpoint, "seed": a.seed,
     "cadence": a.cadence,
+    "reset_hidden_on_respawn": bool(a.reset_hidden_on_respawn),
     "redraw_on_place": list(pick.redraw_on_place),
     "n_samples": int(len(x)), "hidden_width": int(x.shape[1]),
     "probes": {}, "history_swap": swap,
