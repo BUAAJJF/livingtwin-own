@@ -1,7 +1,11 @@
 # Phase WM1-A — a reward-free calibration loop for 60 ms of observation delay
 
-*Status: in progress. Sections marked TODO are waiting on runs that are still
-going; nothing in the finished sections will be rewritten to match them.*
+**Verdict: YELLOW — five of six criteria.** The loop closes on throughput and
+on retention, and does not close on safety. Two results the phase did not
+expect: mixing a quarter of the source prior back in beats the known-parameter
+oracle in *both* domains, and a three-millisecond ridge regression whose
+posterior puts 0.235 of its mass on the truth recovers as much of the gap as a
+world model whose posterior puts 1.000 there — and is safer.
 
 ## 0. What this phase asked
 
@@ -681,7 +685,34 @@ reproducible across seeds; safety recovery is not. Reporting 5.24 against a
 6.00 threshold and calling it a pass would be exactly the mistake section 8.2
 was written about.
 
-### 6.5 Wall clock
+### 6.5 Does decision-awareness earn its place? (G5)
+
+The phase specification named four places it could, and G5 is decided on those
+four alone. The comparator is B3 — proprioception and servo-error matching,
+the channels a classical system-identification pipeline uses.
+
+| criterion | decision-aware | trajectory matching | verdict |
+|---|---|---|---|
+| benign-domain false positives | **0.000** | 0.250 | **DA**, by 25 points |
+| target recovery | **49.89** [49.68, 50.09] | 49.02 [48.77, 49.26] | **DA**, separated by 0.87 obj/min |
+| recovery–retention Pareto | (49.89, 54.32) | (49.02, 54.06) | **DA** dominates |
+| safety recovery | 5.24 [3.78, 6.83] | 4.43 [3.32, 5.63] | **not separated**, and the point estimate favours B3 |
+
+Three of four. G5 passes — and the one it loses is the one that also fails G3.
+
+Reported alongside but *not* counted, because it is not one of the four the
+specification named: balanced accuracy over the five domains, 1.000 against
+0.600. That is by far the largest difference between the two methods and it is
+an identification result, not an adaptation one.
+
+The benign false-positive row deserves its own sentence, because it is the
+cleanest thing decision-awareness buys here. B3 reads **32 of 32** sessions
+from a domain with 80 ms of delay as the 60 ms target; the decision-aware
+posterior reads **0 of 128** benign sessions as the target. A calibration loop
+that fires on the wrong domain is worse than one that does nothing, and that is
+a property of the score, not of the adaptation.
+
+### 6.6 Wall clock
 
 | | |
 |---|---|
@@ -815,10 +846,10 @@ landed on each:
 |---|---|---|
 | reward-free history cannot separate the domains | the data is not exciting enough, or the model is wrong; do not run PPO | **not hit.** 1.000 balanced accuracy on 160 held-out-shape sessions from 5 s of arm time, against three controls at or below chance |
 | posterior wrong where cross-correlation is right | the learned inference is broken | **not hit**, and the reverse: B1a is at chance and B1b reaches 0.438 where the learned posterior reaches 1.000 |
-| posterior right, target does not recover | simulator adaptation is the failure, not inference | TODO |
-| target recovers, retention collapses | the posterior is too narrow; mix more source prior | TODO |
+| posterior right, target does not recover | simulator adaptation is the failure, not inference | **not hit.** every method that saw 60 s of target data recovers 91–102% of the oracle's gain; the control that saw none recovers −1% |
+| target recovers, retention collapses | the posterior is too narrow; mix more source prior | **hit, and fixed by the mechanism that exists for it.** at α = 1 retention is 49.79 and G4 fails; at α = 0.75 it is 54.32 and G4 passes, with *higher* target throughput as well |
 | trajectory matching indistinguishable from decision-aware | the decision-aware novelty is not established | **not hit at the identification level** — 0.600 against 1.000 balanced accuracy, and a 25-point benign false-positive gap — but see section 5.1 on *which* part of the decision-aware score is doing it |
-| the oracle is unstable across training seeds | fix the oracle before evaluating anything against it | TODO |
+| the oracle is unstable across training seeds | fix the oracle before evaluating anything against it | **not hit** for throughput — 49.16, 49.21, 49.71 across three seeds, against WM0's 49.72 — but **hit for safety**: the trip rate is overdispersed by a factor of 6.9 across seeds for the decision-aware run and 1.6 for the oracle, and that is why G3 fails on its interval (section 6.4) |
 
 ## 10. Limitations
 
@@ -908,6 +939,18 @@ posterior, and a head trained on simulator safety labels would add a way to be
 wrong without adding a way to notice. It is the right tool for a *tail-only*
 mismatch — WM0's `servo_damping_scale = 0.75` costs 4.5% of throughput and
 multiplies trips by 89 — and that is where it belongs.
+
+**The world model's advantage is in inference, not in adaptation.** Section
+6.3 is the phase's most uncomfortable result: a ridge regression with a badly
+identified posterior recovers as much of the gap as the ensemble with a perfect
+one, because a badly identified posterior over a five-value parameter *is* a
+broad prior, and training under a broad prior over the candidate set is domain
+randomisation. Nothing here shows that the world model would still be
+redundant on a parameter with a wider range, a continuous one, or several at
+once — where a broad prior is expensive and a sharp posterior is not something
+a diffuse estimator would stumble into. But on this axis, the identification
+result and the adaptation result do not line up, and that gap is the phase's
+finding rather than a caveat on it.
 
 **Held-out shapes, not held-out everything.** Test sessions use object shape
 classes the models never saw, generated with zero probability on the training
