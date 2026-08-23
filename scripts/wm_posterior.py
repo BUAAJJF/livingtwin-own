@@ -40,7 +40,14 @@ from piper_push import latency, wm_data, wm_infer, wm_model
 BURN_IN = 8
 HORIZON = 16
 LENGTH = BURN_IN + HORIZON + 1          # 25 control steps, 0.5 s
-BUDGETS = (10.0, 30.0, 60.0, 180.0, 300.0)
+BUDGETS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 180.0, 300.0)
+"""The five the phase was asked for, plus three below them.
+
+Everything model-based saturates at 10 s, so the ten-second row says only "at
+least this easy".  Where it *stops* working is the number that matters for a
+loop whose whole premise is an hour of robot time, and the smaller budgets cost
+nothing: the per-window scores are already computed, and a budget is a prefix
+of them.  One second is two non-overlapping windows."""
 
 # The components a session's score vector is built from.  Named here so that
 # a method is a *subset of these names* plus weights, and adding a method
