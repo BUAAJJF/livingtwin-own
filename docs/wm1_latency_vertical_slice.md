@@ -265,12 +265,158 @@ TODO.
 
 ## 8. Statistics
 
-TODO.
+### 8.1 Two metrics, two treatments
+
+Throughput is a ratio of two large totals — objects placed over arm-minutes,
+over 512 environments and three process repeats per condition, nine when the
+three training seeds are pooled. Its interval is a **hierarchical bootstrap**:
+resample repeats, then resample environments within each resampled repeat, and
+recompute the pooled ratio. That carries both the process-level spread — which
+is what differs between repeats of an identical command, because MuJoCo-Warp is
+not run-to-run reproducible ([mujoco_warp#562]) — and the environment-level
+spread. The statistic is the pooled ratio and not the mean of per-environment
+rates, which would weight an environment that lived four seconds like one that
+ran the whole rollout.
+
+Safety-shell trips are **counts**, and small ones. A nominal 512 × 2400 run
+produces about twenty events in 6.83 arm-hours. Reporting a standard deviation
+over three repeats of a rate built from twenty events is reporting Poisson
+noise as a measurement. So trips are pooled as counts over exposure, given an
+exact Poisson interval (bisection on the closed-form chi-square CDF for even
+degrees of freedom — Wilson–Hilferty is off by a factor of two at the two
+degrees of freedom a zero-trip condition would need), and checked for
+overdispersion with Pearson's statistic across repeats. Where the repeats
+disagree by more than a common Poisson rate allows, the interval is widened by
+the square root of the dispersion rather than the disagreement being averaged
+away.
+
+### 8.2 The trip rate did not regress, and reading it as a mean would have said it did
+
+This matters enough to state on its own, because G3 is a threshold on exactly
+this quantity.
+
+The nominal condition's code path did not change between Phase WM0 and this
+phase — `apply_session_mismatch` returns before touching anything when no axis
+is active, and `apply_latency_prior` is not called by the evaluator at all. Its
+throughput reproduced to within a tenth of an object per minute. Its trip rate
+did not: WM0 measured 2.29/h and the re-measurement 3.15/h, which reads as a
+37% regression.
+
+Read as counts it is 47 events in 20.5 arm-hours against 43 in 13.7:
+
+| | events | exposure | rate |
+|---|---|---|---|
+| WM0 nominal | 47 | 20.5 h | 2.29/h |
+| WM1 nominal, same command | 43 | 13.7 h | 3.15/h |
+| rate ratio | | | **1.37, 95% CI [0.91, 2.08], p = 0.13** |
+
+Nothing happened. The lesson is not that the difference is small but that
+three repeats of a twenty-event count cannot resolve a 40% change, and Phase
+WM0's reported standard deviation on this metric (±0.22 on 2.29) understates
+its spread. The anchors in this phase therefore get six repeats rather than
+three, and the gate's trip criterion is evaluated on nine evaluations pooled
+across training seeds — about 61 arm-hours, several hundred events — rather
+than on three.
+
+### 8.3 Comparisons
+
+Conditions are compared **paired on the evaluation seed**: the run-to-run term
+is shared between a pair and cancels, which is what makes three repeats usable
+at all. Where several comparisons are made against one baseline the p-values
+are Holm-corrected. The primary evidence is the interval, not the p-value;
+p-values appear only to order the comparisons before correction.
+
+Session-level identification results are over 32 independent sessions per
+domain, and the reported figure is **balanced accuracy** over the five domains
+rather than raw accuracy, so that a method which always answers with one
+domain cannot be read as being at chance when it is not.
 
 ## 9. Limitations
 
-TODO.
+The honest boundaries of what this phase establishes.
+
+**One axis, one value, one direction.** `obs_latency_steps = 3` and nothing
+else. Phase WM0 found five axes that clear their own uncertainty; the reason to
+start with this one is that it is the largest and the cleanest, not that it is
+representative. Section 4.2 in particular — proprioception barely identifying
+the domain while the latent identifies it decisively — is a statement about an
+*observation-side* mismatch. A plant-side mismatch such as servo damping would
+be expected to come out the other way round, and WM1-B is where that gets
+tested rather than assumed.
+
+**Simulation only.** There is no real robot in this phase. The "target domain"
+is a simulator configured differently from the one the policy trained in, and
+every claim about recovery is a claim about that. Nothing here shows that a
+real 60 ms camera pipeline produces the same signature, and the calibration
+loop has never been run on data from hardware.
+
+**The identification depends on the policy that collected the data.** The
+signature the world model reads is not the plant's alone; it is the plant as
+driven by *this* frozen policy, whose behaviour under delay is part of what
+makes the domain visible. A different policy would leave a different
+signature, and the dynamics model is conditioned on this one's statistics. That
+is fine for the deployment story — the policy that will be adapted is the
+policy that collects the data — but it means the model is not a reusable model
+of the robot.
+
+**A risk head was specified and is not here.** The optional deployable safety
+score `C_obs(history)` was not implemented. The reason is that on this axis it
+could not have been measured: the latent and action scores already identify the
+domain at ceiling on every test session, so a third score cannot move the
+posterior, and a head trained on simulator safety labels would add a way to be
+wrong without adding a way to notice. It is the right tool for a *tail-only*
+mismatch — WM0's `servo_damping_scale = 0.75` costs 4.5% of throughput and
+multiplies trips by 89 — and that is where it belongs.
+
+**Held-out shapes, not held-out everything.** Test sessions use object shape
+classes the models never saw, generated with zero probability on the training
+classes. They do not vary the camera, the table, the bin geometry, or the
+task. A method that survives an unseen object is not thereby a method that
+survives an unseen scene.
 
 ## 10. Exact commands
 
-TODO.
+Every command below was run from the repository root on the training server,
+with `MUJOCO_GL=disable` and the mjlab environment's `lib` on
+`LD_LIBRARY_PATH`. Provenance — commit, checkpoint sha256, argv, library
+versions — is written into each result file by the script that produced it.
+
+```bash
+# 0. freeze
+git tag -a wm0-green -m "..."          # 4351a8a
+
+# 1. the delay implementation change, re-measured
+scripts/wm1_equivalence.sh 0
+scripts/wm1_anchor_extra.sh 3
+
+# 2. the dataset: 25 rollouts, six shards
+for i in 0 1 2 3 4 5; do scripts/wm1_collect.sh $GPU $i 6 & done
+for i in 0 1 2;       do scripts/wm1_collect_cal.sh $GPU $i 3 & done
+python scripts/wm_manifest.py
+
+# 3. the models
+python scripts/wm_train.py --members 4 --epochs 6 --stride 16 --device cuda:7
+python scripts/wm_train.py --members 4 --epochs 6 --stride 16 --shuffle-theta \
+    --device cuda:7
+python scripts/wm_classifier.py --device cuda:7
+
+# 4. inference
+python scripts/wm_posterior.py --device cuda:7
+
+# 5. adaptation
+python scripts/wm1_adapt_plan.py --stage anchor --out .../anchor.json
+python scripts/wm1_adapt_plan.py --stage screen --out .../screen.json
+for i in 0 1 2 3 4 5; do scripts/wm1_adapt.sh $GPU $i 6 .../anchor.json & done
+python scripts/analyze_wm1.py --dirs results/wm1_latency/adapt ...
+python scripts/wm1_choose_alpha.py
+python scripts/wm1_adapt_plan.py --stage formal --alpha $ALPHA --out .../formal.json
+for i in ...; do scripts/wm1_adapt.sh $GPU $i N .../formal.json & done
+
+# 6. the verdict
+python scripts/analyze_wm1.py --dirs results/wm1_latency/adapt \
+    results/wm1_latency/equivalence --json results/wm1_latency/analysis.json
+python scripts/wm1_timings.py
+python scripts/wm1_gate.py --json results/wm1_latency/gate.json
+```
+
+[mujoco_warp#562]: https://github.com/google-deepmind/mujoco_warp/issues/562
