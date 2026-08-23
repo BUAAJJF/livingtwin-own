@@ -27,16 +27,29 @@ TASK=Mjlab-Pick-Place-PiperX-Vision
 OUT=results/wm1_latency/adapt
 mkdir -p "$OUT" logs/wm1_adapt
 
-N=$(micromamba run -n mjlab python -c "
-import json,sys; print(len(json.load(open('$PLAN'))['jobs']))")
+# The env's interpreter directly, not `micromamba run`: that wrapper merges
+# stderr into stdout, and a single import warning captured into a variable that
+# is then used as a loop bound is how Phase WM0 got a sweep that reported
+# success over zero jobs.
+PY="$PREFIX/bin/python"
+[ -x "$PY" ] || { echo "!!! no interpreter at $PY" >&2; exit 2; }
+
+N=$("$PY" -c "import json; print(len(json.load(open('$PLAN'))['jobs']))")
+case "$N" in
+  ''|*[!0-9]*) echo "!!! job count is not a number: '$N'" >&2; exit 3 ;;
+  0) echo "!!! plan $PLAN has no jobs" >&2; exit 3 ;;
+esac
+echo "=== $PLAN: $N jobs, shard $SHARD of $NSHARD on cuda:$GPU"
 
 for ((i = 0; i < N; i++)); do
   [ $((i % NSHARD)) -eq "$SHARD" ] || continue
-  read -r TAG PROBS SEED ITERS METHODS < <(micromamba run -n mjlab python -c "
+  read -r TAG PROBS SEED ITERS METHODS < <("$PY" -c "
 import json
 j = json.load(open('$PLAN'))['jobs'][$i]
 print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
       '+'.join(j['methods']))")
+  [ -n "$TAG" ] && [ -n "$PROBS" ] && [ -n "$SEED" ] \
+    || { echo "!!! job $i did not parse: tag='$TAG' probs='$PROBS'" >&2; exit 4; }
   echo "=== [gpu $GPU] job $i: $TAG  probs=$PROBS  seed=$SEED  ($METHODS)"
 
   if [ ! -e "$OUT/$TAG.ckpt" ]; then
