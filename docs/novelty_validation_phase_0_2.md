@@ -779,19 +779,42 @@ else. Divergence is normalised by the across-environment spread of the action,
 so "large" means large relative to how much the policy varies its output at
 all.
 
-| policy | eval cadence | ‖Δa‖ / action spread |
-|---|---|---:|
-| distilled | OBJ-All | 0.69 |
-| distilled | EP-All | 0.65 |
-| fine-tuned | OBJ-All | 0.74 |
+Divergence at the moment of the swap, and how it decays over the following
+25 control steps (0.5 s) while both branches see the same observations:
 
-The memory is doing a **lot** — swapping it moves the action by about
-two-thirds of the policy's entire output range. But it moves it by the same
-amount under both cadences and for both policies, including the one trained
-honestly. That is consistent with §5.2's finding that clearing the hidden state
-costs 21–25% of throughput: what the state carries is mostly the deployable
+| policy | eval cadence | memory | k=0 | k=3 | k=8 | k=18 | k=25 |
+|---|---|---|---:|---:|---:|---:|---:|
+| distilled | OBJ-All | kept | 0.69 | 0.26 | 0.14 | 0.09 | 0.06 |
+| distilled | EP-All | kept | 0.67 | 0.26 | 0.14 | 0.09 | 0.06 |
+| fine-tuned | OBJ-All | kept | 0.74 | 0.30 | 0.16 | 0.09 | 0.06 |
+| fine-tuned | EP-All | kept | 0.74 | 0.27 | 0.15 | 0.10 | 0.06 |
+| distilled | OBJ-All | zeroed each object | **0.77** | — † | — † | — † | — † |
+
+† The zeroed condition's curve collapses to exactly 0.000 from k=1 and the
+cause is not established; the k=0 value is unaffected (the branches are
+constructed at that step) and is the one the gate needs. The decay for this
+row should be treated as **not measured**, not as zero.
+
+Two readings:
+
+**The memory matters enormously in the instant, and its horizon is about half
+a second.** Swapping it moves the action by ~70% of the policy's entire
+across-environment output spread; two thirds of that is gone within three
+control steps and it is down to 6% by 0.5 s. A single object cycle is about
+1.0 s. **The memory's influence therefore decays well inside one object's
+lifetime**, which is an independent, mechanistic confirmation of §6.2: there is
+no channel by which a fact about the previous object could still be steering
+the current one.
+
+**Zeroing per object does not reduce swap sensitivity — it slightly raises
+it** (0.77 against 0.69). This is Gate A condition 4, and it fails. It fails
+for an intelligible reason: if the state is cleared at every object boundary,
+then whatever it holds is *by construction* within-object information, and
+swapping it therefore perturbs exactly the belief the policy is currently
+relying on. Combined with §5.2 — clearing the state costs 21–25% of throughput
+— the picture is consistent: the recurrent state is carrying the deployable
 belief the observation no longer provides (am I holding something, did the last
-squeeze work), not a stale fact about a previous object.
+squeeze take), not a stale fact about a previous object.
 
 ### 6.5 What this means for the hypothesis
 
