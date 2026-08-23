@@ -21,6 +21,40 @@ from mjlab.envs.mdp.actions import JointPositionAction, JointPositionActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names_values
 
 
+def apply_plant(
+    commanded: torch.Tensor,
+    prev_effective: torch.Tensor,
+    delay_buf: list[torch.Tensor],
+    response_scale: float,
+    deadband: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """What the servo does with a command, as opposed to what we asked for.
+
+    Transport delay, then stiction, then incomplete travel -- the order the
+    signal meets them on the way down. ``delay_buf`` is mutated in place and
+    holds one whole batch of targets per step of delay.
+
+    Free-standing rather than a method so it can be tested without building a
+    simulator: the arithmetic here is the entire content of three of the Phase
+    WM0 axes, and an error in it would look exactly like "actuation mismatch
+    does not matter".
+
+    Returns the effective target and a count of dead-banded elements.
+    """
+    if delay_buf:
+        delay_buf.append(commanded.clone())
+        commanded = delay_buf.pop(0)
+    step = commanded - prev_effective
+    held = torch.zeros((), device=step.device)
+    if deadband > 0.0:
+        mask = step.abs() < deadband
+        held = mask.sum()
+        step = torch.where(mask, torch.zeros_like(step), step)
+    if response_scale != 1.0:
+        step = step * response_scale
+    return prev_effective + step, held
+
+
 @dataclass(kw_only=True)
 class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     """Joint position targets with a per-joint slew ceiling.
@@ -65,6 +99,30 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     acceleration discontinuity at the boundary -- but its peak rate is 1.5x the
     average for the same displacement, so it buys smoothness with headroom.
     Which of those dominates is the measurement, not an assumption."""
+
+    # -- session-persistent plant mismatch (Phase WM0) --------------------
+    # Distinct in purpose from the four fields above: those are *filters we
+    # choose to apply*, these are *ways the real arm differs from the model*.
+    # Both are inert at their defaults and neither is set by any training
+    # config; see piper_push.perturb.
+
+    latency_steps: int = 0
+    """Whole control steps of delay between the policy's command and the
+    servo receiving it.  The deployed stack has a USB-CAN hop, a driver
+    queue and a 200 Hz inner loop, none of which is modelled at all -- the
+    simulator currently hands the command over in the same tick it was
+    computed."""
+
+    response_scale: float = 1.0
+    """Multiplies the commanded *displacement* from the previous target.  A
+    real position servo under load does not travel the full commanded step
+    within one control period; below 1.0 the arm undershoots every command
+    by a fixed fraction, which is what a stiffness or gear-ratio error looks
+    like from outside."""
+
+    deadband: float = 0.0
+    """Radians of commanded displacement below which the servo does not move
+    at all.  Stiction and encoder quantisation both present this way."""
 
     def build(self, env) -> "RateLimitedJointPositionAction":
         return RateLimitedJointPositionAction(self, env)
@@ -127,6 +185,24 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self.cmd_acc = torch.zeros_like(self._default)
         self.cmd_jerk = torch.zeros_like(self._default)
 
+        # -- session-persistent plant mismatch, all inert at defaults --------
+        self._latency = max(int(cfg.latency_steps), 0)
+        # One slot per step of delay, each holding a whole batch of targets.
+        # Seeded with the reset posture rather than zeros: an empty pipeline
+        # should behave as "the arm was already where it is", not as "the arm
+        # was commanded to the origin".
+        self._delay_buf = (
+            [self._default.clone() for _ in range(self._latency)]
+            if self._latency else []
+        )
+        self._response_scale = float(cfg.response_scale)
+        self._deadband = float(cfg.deadband)
+        self._prev_effective = self._default.clone()
+        self._plant_active = bool(
+            self._latency or self._response_scale != 1.0 or self._deadband > 0.0
+        )
+        self.stats["held_deadband"] = torch.zeros((), device=self.device)
+
     @property
     def max_step(self) -> torch.Tensor:
         """Largest change in target permitted per control step, per joint."""
@@ -181,6 +257,22 @@ class RateLimitedJointPositionAction(JointPositionAction):
         # and the two names would alias for a step before the rebind split them.
         self._ramp_from.copy_(self._previous_target)
         self._previous_target.copy_(self._processed_actions)
+
+        # -- the plant, downstream of everything we chose to do ---------------
+        # `_previous_target` tracks the COMMAND stream, which is what the slew
+        # and acceleration ceilings are constraints on.  What the servo
+        # receives is that stream delayed, dead-banded and scaled -- a
+        # different sequence -- so the substep ramp has to start from the
+        # previous EFFECTIVE target rather than the previous commanded one, or
+        # the ramp would jump to close a gap the servo never saw.
+        if self._plant_active:
+            effective, held = apply_plant(
+                self._processed_actions, self._prev_effective,
+                self._delay_buf, self._response_scale, self._deadband)
+            self.stats["held_deadband"] += held
+            self._ramp_from.copy_(self._prev_effective)
+            self._prev_effective.copy_(effective)
+            self._processed_actions = effective
         self._substep = 0
 
     def apply_actions(self) -> None:
@@ -225,5 +317,12 @@ class RateLimitedJointPositionAction(JointPositionAction):
         # first steps of the new one unwinding a move that is no longer being
         # made, and the acceleration limit would fight the reset posture.
         self._lp_state[env_ids] = self._previous_target[env_ids]
+        # The plant's pipeline is flushed with the reset posture, not left
+        # holding commands aimed at where the arm used to be: a delayed
+        # command surviving a teleport would drive the fresh episode towards
+        # the previous one's pose for as many steps as the delay is long.
+        self._prev_effective[env_ids] = self._previous_target[env_ids]
+        for slot in self._delay_buf:
+            slot[env_ids] = self._previous_target[env_ids]
         self._prev_cmd_vel[env_ids] = 0.0
         self._prev_cmd_acc[env_ids] = 0.0
