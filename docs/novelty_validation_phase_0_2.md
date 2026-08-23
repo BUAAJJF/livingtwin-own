@@ -40,10 +40,11 @@ noise floor that several numbers in this project sit under (§7.5–7.6); and
 **two of the four "isolated findings" in `docs/results.md` are artefacts of
 measuring both terms of a comparison inside the leak** (§3.3, §5.5).
 
-Status: all eleven sections complete. Three confirmatory evaluations (two
-filter combinations in clutter, the second-seed teacher pair) and three of six
-probe re-runs were still executing at the time of writing; §4.4 and §5.6 say
-which, and none of them bears on §10.
+Status: complete. 72 evaluations at the full 512 × 2400 protocol, six
+hidden-state probes, one cadence-plumbing check and one three-way determinism
+repeat, all in `results/novelty_validation/` with per-environment counts and
+provenance; every table and figure in this document is generated from them by
+`scripts/analyze_novelty.py`.
 
 ---
 
