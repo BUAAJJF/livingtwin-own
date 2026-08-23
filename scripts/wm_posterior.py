@@ -321,6 +321,35 @@ def main() -> int:
               for s, sess in splits.items()}
   torch.save(analytic, out / "analytic.pt")
 
+  # -- what one session costs, at the budget the adaptation stage uses -------
+  # G6 counts this against a deployment's online time, so it is measured on a
+  # single 60 s session rather than divided out of a batch over hundreds.
+  timing = {}
+  if splits.get("test"):
+    s0 = splits["test"][0][0]
+    v60 = wm_infer.SessionView.from_session(s0, 0, 60.0, device=dev)
+    for tag, fn in (
+      ("world_model_scores_s",
+       lambda: session_scores(v60, ens, None, head, {})),
+      ("classifier_s",
+       lambda: session_scores(v60, None, None, None,
+                              {"classifier": clfs["classifier"]})
+       if "classifier" in clfs else None),
+      ("b1b_ridge_s",
+       lambda: wm_infer.xcorr_latent_proprio(v60, head.obs_dim_1d)),
+      ("b1a_xcorr_s", lambda: wm_infer.xcorr_action_joint(v60)),
+    ):
+      fn()                                   # warm the kernels
+      t0 = time.time()
+      for _ in range(3):
+        fn()
+      timing[tag] = (time.time() - t0) / 3
+    timing["n_windows_60s"] = len(v60.windows(LENGTH))
+    print("  inference wall-clock on one 60 s session: "
+          + "  ".join(f"{k} {v:.3f}" for k, v in timing.items()
+                      if k.endswith("_s")))
+  (out / "inference_timing.json").write_text(json.dumps(timing, indent=1))
+
   # -- per budget -----------------------------------------------------------
   report = {"budgets": {}, "length": LENGTH, "burn_in": BURN_IN,
             "horizon": HORIZON, "enc_split": head.obs_dim_1d,
