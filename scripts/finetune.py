@@ -70,6 +70,11 @@ def main() -> int:
   p.add_argument("--run-name", default="")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=42)
+  p.add_argument("--cadence", default=None,
+                 help="randomisation cadence to TRAIN under: 'object' (every "
+                      "object is a new object), 'episode' (one object per "
+                      "episode, re-posed), or a comma-separated subset of "
+                      "shape,mass,friction.  Unset leaves the task alone.")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
   a = p.parse_args()
@@ -84,6 +89,17 @@ def main() -> int:
   env_cfg.scene.num_envs = a.num_envs
   env_cfg.seed = a.seed
   agent_cfg.seed = a.seed
+  if a.cadence is not None:
+    from piper_push.shapes import ALL_QUANTITIES
+    redraw = (ALL_QUANTITIES if a.cadence == "object"
+              else () if a.cadence == "episode"
+              else tuple(s.strip() for s in a.cadence.split(",") if s.strip()))
+    unknown = set(redraw) - set(ALL_QUANTITIES)
+    if unknown:
+      p.error(f"--cadence: unknown {sorted(unknown)}")
+    env_cfg.commands["pick"].redraw_on_place = redraw
+    env_cfg.commands["pick"].reshape_on_place = bool(redraw)
+    print(f"[INFO] training cadence: redraw_on_place={redraw}")
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger
