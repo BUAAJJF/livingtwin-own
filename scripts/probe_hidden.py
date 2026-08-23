@@ -81,18 +81,46 @@ def _fit_linear_probe(x: torch.Tensor, y: torch.Tensor, groups: torch.Tensor,
     opt.step()
 
   with torch.no_grad():
-    acc = ((xte @ w + b).argmax(-1) == yte).float().mean().item()
+    pred = (xte @ w + b).argmax(-1)
+    acc = (pred == yte).float().mean().item()
     train_acc = ((xtr @ w + b).argmax(-1) == ytr).float().mean().item()
   # The honest floor: always predict whichever class is commonest in TRAIN,
   # scored on test.
   major = torch.bincount(ytr, minlength=n_classes).argmax()
   chance = (yte == major).float().mean().item()
+
+  # Raw accuracy and lift are both contaminated when two conditions have
+  # different label marginals, which EP-All and OBJ-All emphatically do: under
+  # EP-All the label is constant for a whole episode, so the empirical class
+  # frequencies are lumpy and the majority baseline moves.  Balanced accuracy
+  # -- the mean per-class recall -- is invariant to the class prior and is the
+  # number the two conditions can be compared on.
+  recalls = []
+  for k in range(n_classes):
+    m = yte == k
+    if bool(m.any()):
+      recalls.append((pred[m] == k).float().mean().item())
+  bal = sum(recalls) / max(len(recalls), 1)
+
   return {
     "test_accuracy": acc, "train_accuracy": train_acc,
     "majority_class_baseline": chance,
     "lift_over_chance": acc - chance,
+    "balanced_accuracy": bal,
+    "balanced_chance": 1.0 / max(len(recalls), 1),
+    "balanced_lift": bal - 1.0 / max(len(recalls), 1),
+    "classes_present_in_test": len(recalls),
     "n_train": int(len(xtr)), "n_test": int(len(xte)),
     "n_train_envs": int(len(uniq) - n_test), "n_test_envs": n_test,
+    # How many INDEPENDENT labels the test set really contains.  Under EP-All
+    # the label is constant for a whole episode, so tens of thousands of frames
+    # carry only a few hundred distinct (environment, label) facts, and a
+    # confidence read off the frame count would be wildly overconfident.  Under
+    # OBJ-All the label turns over every second or so and the two counts are
+    # much closer.  Reported so the two conditions are not compared as though
+    # they had the same statistical weight.
+    "n_effective_test": int(len(set(zip(
+      groups[is_test].tolist(), yte.tolist())))),
   }
 
 
@@ -285,9 +313,13 @@ def main() -> int:
     y = torch.cat(lab[key])
     res = _fit_linear_probe(x, y, g, k)
     report["probes"][key] = res
-    print(f"  {key:10s} test {100 * res['test_accuracy']:5.1f}%   "
-          f"majority {100 * res['majority_class_baseline']:5.1f}%   "
-          f"lift {100 * res['lift_over_chance']:+5.1f} pp")
+    print(f"  {key:10s} acc {100 * res['test_accuracy']:5.1f}%  "
+          f"maj {100 * res['majority_class_baseline']:5.1f}%  "
+          f"lift {100 * res['lift_over_chance']:+5.1f}pp  |  "
+          f"balanced {100 * res['balanced_accuracy']:5.1f}% vs "
+          f"{100 * res['balanced_chance']:4.1f}% "
+          f"({100 * res['balanced_lift']:+5.1f}pp)  "
+          f"n_eff={res['n_effective_test']}")
 
   if swap:
     print(f"  history swap: mean |da| = {swap['immediate_abs']:.4f} "
