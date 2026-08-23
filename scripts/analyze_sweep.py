@@ -150,6 +150,121 @@ def effect(a: Point, b: Point, metric: str) -> dict:
   return out
 
 
+def section_interaction(stage: str, as_json: bool) -> dict:
+  """A 3x3 grid: does calibrating one axis survive the other being wrong?
+
+  The reference is the (nominal, nominal) cell, which in an interaction sweep
+  is a grid point rather than a separate `nominal` run.  The question is not
+  whether the corner is bad -- it will be -- but whether the corner is
+  PREDICTABLE from the two edges.  If it is, single-axis calibration composes
+  and each parameter can be estimated on its own.  If the corner is much worse
+  than either composition rule predicts, the axes are entangled and a
+  one-at-a-time posterior will be wrong in a way no amount of data fixes.
+  """
+  pts = load(stage)
+  if not pts:
+    print(f"  (no runs in {RESULTS / stage})")
+    return {}
+  points = {k: Point(k, v) for k, v in pts.items()}
+
+  # Recover each cell's coordinates from the run's own recorded mismatch.
+  cells: dict[tuple[float, float], Point] = {}
+  names: list[str] = []
+  for p in points.values():
+    act = {}
+    for r in p.runs:
+      act = (r.get("mismatch") or {}).get("_active") or {}
+      if act:
+        break
+    ax = sorted(act) if act else []
+    for a in ax:
+      if a not in names:
+        names.append(a)
+    key = tuple(float(act.get(n, _nominal_of(n))) for n in sorted(names or ax))
+    cells[key] = p
+  if len(names) != 2:
+    print(f"  ! expected 2 interacting axes, found {names}")
+    return {}
+  a_name, b_name = sorted(names)
+  ref_key = (_nominal_of(a_name), _nominal_of(b_name))
+  ref = cells.get(ref_key)
+  if ref is None:
+    print(f"  ! no reference cell at {ref_key}")
+    return {}
+
+  la = sorted({k[0] for k in cells})
+  lb = sorted({k[1] for k in cells})
+  print(f"  reference cell: {a_name}={ref_key[0]:g}, {b_name}={ref_key[1]:g}"
+        f"  ->  {ref.mean('throughput_per_min'):.2f} obj/min "
+        f"(sd {ref.sd('throughput_per_min'):.2f}, n={ref.n})")
+  print()
+  print(f"  throughput (obj/min), rows {a_name}, cols {b_name}:")
+  header = "         " + "".join(f"{v:>12g}" for v in lb)
+  print(header)
+  for va in la:
+    row = f"  {va:7g}"
+    for vb in lb:
+      c = cells.get((va, vb))
+      row += f"{c.mean('throughput_per_min'):12.2f}" if c else f"{'-':>12s}"
+    print(row)
+
+  rows = []
+  print()
+  print("  is the corner predictable from the edges?")
+  print(f"  {'cell':>22s} {'observed':>9s} {'additive':>9s} {'multipl.':>9s} "
+        f"{'obs-mult':>9s} {'beyond CI':>10s}")
+  base = ref.mean("throughput_per_min")
+  for va in la:
+    for vb in lb:
+      if va == ref_key[0] or vb == ref_key[1]:
+        continue
+      cell = cells.get((va, vb))
+      ea = cells.get((va, ref_key[1]))
+      eb = cells.get((ref_key[0], vb))
+      if not (cell and ea and eb):
+        continue
+      da = ea.mean("throughput_per_min") - base
+      db = eb.mean("throughput_per_min") - base
+      obs = cell.mean("throughput_per_min")
+      add = base + da + db
+      mul = base * (1 + da / base) * (1 + db / base)
+      e = effect(cell, cell, "throughput_per_min")  # for the shape
+      # Uncertainty on the observed corner alone; the two edges enter the
+      # prediction as means, so this is the conservative comparison.
+      lo, hi = cell.ci("throughput_per_min")
+      beyond = "yes" if (mul < lo or mul > hi) else "no"
+      print(f"  {f'{va:g},{vb:g}':>22s} {obs:9.2f} {add:9.2f} {mul:9.2f} "
+            f"{obs - mul:+9.2f} {beyond:>10s}")
+      rows.append({
+        "stage": stage, "a": a_name, "b": b_name, "a_value": va, "b_value": vb,
+        "reference": base, "edge_a": ea.mean("throughput_per_min"),
+        "edge_b": eb.mean("throughput_per_min"), "observed": obs,
+        "additive_prediction": add, "multiplicative_prediction": mul,
+        "obs_minus_multiplicative": obs - mul,
+        "observed_ci": [lo, hi], "outside_ci": beyond == "yes",
+        "repeats": cell.n,
+      })
+      del e
+
+  grid = [{"a_value": k[0], "b_value": k[1], "repeats": c.n,
+           **{f"{m}_mean": c.mean(m) for m, *_ in METRICS},
+           **{f"{m}_sd": c.sd(m) for m, *_ in METRICS}}
+          for k, c in sorted(cells.items())]
+  out = {"stage": stage, "axes": [a_name, b_name], "reference_cell": list(ref_key),
+         "grid": grid, "interaction": rows}
+  if as_json:
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    (RESULTS / f"{stage}_summary.json").write_text(json.dumps(out, indent=1))
+    _csv(RESULTS / f"{stage}_grid.csv", grid)
+    print(f"\n  -> results/sim2real_sweep/{stage}_summary.json and _grid.csv")
+  return out
+
+
+def _nominal_of(axis: str) -> float:
+  from piper_push.perturb import AXES
+  return AXES[axis].nominal
+
+
 def section(stage: str, as_json: bool) -> dict:
   pts = load(stage)
   if not pts:
@@ -377,7 +492,12 @@ def main() -> int:
   for s in stages:
     print()
     print(f"=== Phase WM0 {s}")
-    section(s, a.json)
+    # An interaction stage has no separate `nominal` run: its reference is the
+    # (nominal, nominal) grid cell, and the question it answers is different.
+    if s.startswith("s3"):
+      section_interaction(s, a.json)
+    else:
+      section(s, a.json)
   print()
   return 0
 
