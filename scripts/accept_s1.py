@@ -136,9 +136,6 @@ def main() -> int:
                    help="seconds after a grasp ends before it counts as dropped")
     p.add_argument("--lift-clear", type=float, default=0.010,
                    help="metres of clearance that make a pad contact a grasp")
-    p.add_argument("--reshape-on-place", action="store_true",
-                   help="draw a new shape for every object rather than one per "
-                        "episode; see below")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=None,
                    help="seeds the whole rollout.  Note that this makes a run "
@@ -152,6 +149,35 @@ def main() -> int:
                         "printed table.")
     p.add_argument("--label", default="",
                    help="name for this run inside the JSON")
+
+    # -- evaluation-time command shaping (Phase 1).  All inert by default; the
+    # trained command path is already slew-limited to 0.62 x trip and
+    # interpolated across substeps, so "none" here means that path, not a raw
+    # policy output.
+    g = p.add_argument_group("command shaping")
+    g.add_argument("--slew-scale", type=float, default=1.0,
+                   help="multiply the trained slew ceiling (1.0 = unchanged)")
+    g.add_argument("--accel-limit", type=float, default=None,
+                   help="ceiling on commanded joint acceleration, rad/s^2")
+    g.add_argument("--lowpass-hz", type=float, default=None,
+                   help="first-order low-pass on the joint target, Hz")
+    g.add_argument("--interp", default="linear", choices=("linear", "cubic"),
+                   help="within-control-step command ramp shape")
+
+    # -- randomisation cadence (Phase 2).  The ranges never change; only how
+    # long a drawn value is held.
+    c = p.add_argument_group("randomisation cadence")
+    c.add_argument("--cadence", default=None,
+                   help="what is redrawn when an object is replaced: "
+                        "'object' (all of it, the trained default), 'episode' "
+                        "(nothing -- one object per episode, re-posed), or a "
+                        "comma-separated subset of shape,mass,friction. "
+                        "Unset leaves the task's own setting alone.")
+    c.add_argument("--reset-hidden-on-respawn", action="store_true",
+                   help="zero the recurrent state every time an object is "
+                        "replaced, not just at the episode boundary.  The "
+                        "control for 'is the memory carrying anything across "
+                        "objects'.")
     a = p.parse_args()
 
     env_cfg = load_env_cfg(a.task, play=True)
@@ -159,6 +185,33 @@ def main() -> int:
     env_cfg.scene.num_envs = a.num_envs
     if a.seed is not None:
         env_cfg.seed = a.seed
+    # Only the arm.  The gripper's rate limit is a grasp parameter, not a
+    # safety-shell one, and shaping it would change what the policy can do
+    # rather than how smoothly it does it.
+    arm_action = env_cfg.actions["arm"]
+    arm_action.slew_scale = a.slew_scale
+    arm_action.accel_limit = a.accel_limit
+    arm_action.lowpass_hz = a.lowpass_hz
+    arm_action.interp = a.interp
+
+    if a.cadence is not None:
+        from piper_push.shapes import ALL_QUANTITIES
+        if a.cadence == "object":
+            redraw = ALL_QUANTITIES
+        elif a.cadence == "episode":
+            redraw = ()
+        else:
+            redraw = tuple(s.strip() for s in a.cadence.split(",") if s.strip())
+            unknown = set(redraw) - set(ALL_QUANTITIES)
+            if unknown:
+                p.error(f"--cadence: unknown {sorted(unknown)}, "
+                        f"expected a subset of {ALL_QUANTITIES}")
+        cmd_cfg = env_cfg.commands["pick"]
+        cmd_cfg.redraw_on_place = redraw
+        # The boolean alias would otherwise still say "all of them" and win
+        # nothing -- but leaving it true while asking for () is a contradiction
+        # the property cannot see, so it is settled here.
+        cmd_cfg.reshape_on_place = bool(redraw)
     env = ManagerBasedRlEnv(cfg=env_cfg, device=a.device, render_mode=None)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
@@ -186,27 +239,6 @@ def main() -> int:
     recurrent = bool(getattr(policy, "is_recurrent", False))
     if recurrent:
         policy.reset()
-
-    # The shape event is a reset event, so within an episode every object the
-    # policy is handed is the same geometry re-posed.  A recurrent policy can
-    # therefore identify the shape once and coast on it for the rest of the
-    # episode -- legal here, and worth nothing on a real table where the next
-    # object is a different object.  This redraws the shape as each object is
-    # replaced, which is what deployment looks like.
-    if a.reshape_on_place:
-        from mjlab.managers.event_manager import RecomputeLevel
-
-        from piper_push import shapes as _shapes
-
-        term = u.event_manager.get_term_cfg("object_shape")
-
-        def _reshape(ids: torch.Tensor) -> None:
-            _shapes.randomize_object_shape(u, ids, **term.params)
-            u.sim.recompute_constants(RecomputeLevel.set_const)
-            # Re-place after re-shaping, not before: the placement height is
-            # computed from the object's half-extent, so a taller object
-            # dropped into the old pose starts inside the table.
-            pick._place_object(ids)
 
     obs = env.get_observations()
     if isinstance(obs, tuple):
@@ -242,6 +274,37 @@ def main() -> int:
         for k in ("placed", "ok", "fail", "grasps", "drops", "stuck", "trips",
                   "clears", "strays")
     }
+
+    # -- Phase 1 instrumentation ------------------------------------------
+    # The commanded derivatives, kept as histograms so any quantile and any
+    # CVaR falls out of one scatter-add per step.  Peaks alone cannot answer
+    # "how bad is the tail", which is the only interesting question about a
+    # safety limit.
+    arm_term = u.action_manager.get_term("arm")
+    CMD_BINS = 256
+    cmd_scale = {  # per-quantity histogram ceiling, in the quantity's own units
+        "cmd_vel": 1.6,      # normalised by the trip speed
+        "cmd_acc": 400.0,    # rad/s^2
+        "cmd_jerk": 40000.0,  # rad/s^3
+    }
+    cmd_hist = {k: torch.zeros(len(jids), CMD_BINS, device=dev) for k in cmd_scale}
+    cmd_peak = {k: torch.zeros(len(jids), device=dev) for k in cmd_scale}
+    # Which part of the cycle a trip happened in.  Read one step late on
+    # purpose: env.step() has already reset the tripped environments, so the
+    # phase at the moment of the trip is the phase recorded before the step.
+    PHASES = ("reach", "close", "carry", "release", "idle")
+    phase_steps = torch.zeros(len(PHASES), device=dev)
+    phase_trips = torch.zeros(len(PHASES), device=dev)
+    prev_phase = torch.full((n,), PHASES.index("idle"), dtype=torch.long, device=dev)
+
+    def _hist_add(name: str, value: torch.Tensor) -> None:
+        """value is (B, J) in the quantity's own units."""
+        v = value.abs()
+        cmd_peak[name] = torch.maximum(cmd_peak[name], v.max(dim=0).values)
+        idx = (v * (CMD_BINS / cmd_scale[name])).long().clamp(
+            0, CMD_BINS - 1).t().contiguous()
+        cmd_hist[name].scatter_add_(
+            1, idx, torch.ones_like(idx, dtype=cmd_hist[name].dtype))
     peak_ratio = torch.zeros(len(jids), device=dev)
     # A peak over a third of a million samples is an extreme-value statistic:
     # one environment touching the shell for one step reads exactly the same as
@@ -282,6 +345,22 @@ def main() -> int:
             clear = pos[:, 2] - half[:, 2]
             both = (pick.pad_found > 0).all(dim=1)
             just_placed = pick.just_placed.bool()
+
+            # Zero the memory at the object boundary as well as the episode
+            # boundary.  This is the control that separates "the recurrent
+            # state is integrating evidence about the object in the hand" from
+            # "the recurrent state is carrying facts about the PREVIOUS object
+            # that happen to still be true".  Only the second survives being
+            # cleared here, and only the second is an artefact.
+            if recurrent and a.reset_hidden_on_respawn and bool(just_placed.any()):
+                policy.reset(just_placed)
+
+            # The command the servo was handed this step, which is what a
+            # deterministic filter can change; the measured speed below is what
+            # the plant did with it, which is what the shell reacts to.
+            _hist_add("cmd_vel", arm_term.cmd_vel / trip)
+            _hist_add("cmd_acc", arm_term.cmd_acc)
+            _hist_add("cmd_jerk", arm_term.cmd_jerk)
 
             ratio = robot.data.joint_vel[:, jids].abs() / trip
             peak_ratio = torch.maximum(peak_ratio, ratio.max(dim=0).values)
@@ -352,6 +431,29 @@ def main() -> int:
             over_speed = u.termination_manager.get_term("over_speed")
             trips += over_speed.sum()
             per_env["trips"] += over_speed.float()
+            # Attribute the trip to the phase the arm was in one step earlier:
+            # env.step() has already reset the tripped environments, so reading
+            # the phase now describes the fresh episode, not the trip.
+            phase_trips.index_add_(
+                0, prev_phase[over_speed],
+                torch.ones(int(over_speed.sum()), device=dev))
+            phase_now = torch.full((n,), PHASES.index("idle"),
+                                   dtype=torch.long, device=dev)
+            off_table = clear > a.lift_clear
+            phase_now = torch.where(~both & ~off_table,
+                                    torch.tensor(PHASES.index("reach"), device=dev),
+                                    phase_now)
+            phase_now = torch.where(both & ~off_table,
+                                    torch.tensor(PHASES.index("close"), device=dev),
+                                    phase_now)
+            phase_now = torch.where(both & off_table,
+                                    torch.tensor(PHASES.index("carry"), device=dev),
+                                    phase_now)
+            phase_now = torch.where(~both & off_table,
+                                    torch.tensor(PHASES.index("release"), device=dev),
+                                    phase_now)
+            phase_steps.index_add_(0, phase_now, torch.ones(n, device=dev))
+            prev_phase = phase_now
             if has_cleanup:
                 # clamp(min=0) because a reset drops the counter to zero, and a
                 # negative delta is that reset rather than un-cleared tables.
@@ -363,8 +465,6 @@ def main() -> int:
                 per_env["strays"] += d_stray
                 prev_clears = pick.table_clears.clone()
                 prev_strays = pick.objects_strayed.clone()
-            if a.reshape_on_place and just_placed.any():
-                _reshape(just_placed.nonzero(as_tuple=False).flatten())
 
             e = dones.nonzero(as_tuple=False).flatten()
             if e.numel():
@@ -448,6 +548,40 @@ def main() -> int:
     p99, p999 = quantile(0.99), quantile(0.999)
     first_over = int(SPEED_HEADROOM / width)
     over = speed_hist[:, first_over:].sum(dim=1) / tot_samples.squeeze(1)
+
+    def cvar(hist: torch.Tensor, hi: float, p: float) -> torch.Tensor:
+        """Mean of the worst (1-p) of the samples, per joint, from a histogram.
+
+        The expected value in the tail rather than its boundary: p99 says where
+        the tail starts and says nothing about how far past it the worst
+        excursions go, which for a limit that stops the robot is the part that
+        matters.
+        """
+        bins = hist.shape[1]
+        w = hi / bins
+        centres = (torch.arange(bins, device=hist.device) + 0.5) * w
+        total = hist.sum(dim=1, keepdim=True).clamp(min=1)
+        cum = hist.cumsum(dim=1)
+        # Everything strictly above the p-quantile bin, plus the part of that
+        # bin which lies in the tail, so the answer is continuous in p.
+        start = (cum >= total * p).float().argmax(dim=1)
+        rows = torch.arange(hist.shape[0], device=hist.device)
+        below = torch.where(
+            torch.arange(bins, device=hist.device)[None, :] > start[:, None],
+            hist, torch.zeros_like(hist))
+        partial = (cum[rows, start] - total.squeeze(1) * p).clamp(min=0)
+        mass = below.sum(dim=1) + partial
+        weighted = (below * centres).sum(dim=1) + partial * centres[start]
+        return weighted / mass.clamp(min=1e-9)
+
+    def _hist_quantile(hist: torch.Tensor, hi: float, p: float) -> torch.Tensor:
+        bins = hist.shape[1]
+        e = (torch.arange(bins, device=hist.device) + 1) * (hi / bins)
+        c = hist.cumsum(dim=1)
+        return e[(c >= c[:, -1:].clamp(min=1) * p).float().argmax(dim=1)]
+
+    speed_cvar95 = cvar(speed_hist, SPEED_MAX, 0.95)
+    speed_cvar99 = cvar(speed_hist, SPEED_MAX, 0.99)
     print("  |qd| / safety-shell trip")
     print(f"    {'joint':8s} {'p99':>6s} {'p99.9':>7s} {'peak':>6s}"
           f" {'time>' + f'{SPEED_HEADROOM:.2f}':>10s}")
@@ -455,6 +589,31 @@ def main() -> int:
         flag = "   <-- lives at the shell" if over[i] > 0.01 else ""
         print(f"    {name:8s} {p99[i]:6.3f} {p999[i]:7.3f} {peak_ratio[i]:6.3f}"
               f" {100 * over[i]:9.2f}%{flag}")
+
+    shaped = (a.slew_scale != 1.0 or a.accel_limit is not None
+              or a.lowpass_hz is not None or a.interp != "linear")
+    elements = max(float(arm_term.stats["elements"]), 1.0)
+    print()
+    print(f"  command shaping        slew x{a.slew_scale:g}"
+          f"  accel {a.accel_limit}  lowpass {a.lowpass_hz}  {a.interp}"
+          f"{'' if shaped else '   (as trained)'}")
+    print(f"    commands clipped by the slew ceiling  "
+          f"{100 * float(arm_term.stats['clipped_slew']) / elements:5.2f}%")
+    if a.accel_limit is not None:
+        print(f"    commands clipped by the accel ceiling "
+              f"{100 * float(arm_term.stats['clipped_accel']) / elements:5.2f}%")
+    if a.lowpass_hz is not None:
+        print(f"    commands moved by the low-pass        "
+              f"{100 * float(arm_term.stats['moved_lowpass']) / elements:5.2f}%")
+    print(f"    worst-joint CVaR95 |qd|/trip  {speed_cvar95.max():.3f}"
+          f"    CVaR99 {speed_cvar99.max():.3f}")
+    print()
+    print(f"  {'phase':9s} {'% of time':>10s} {'trips':>7s} {'% of trips':>11s}")
+    for i, name in enumerate(PHASES):
+        share = phase_steps[i] / phase_steps.sum().clamp(min=1)
+        t = float(phase_trips[i])
+        pct = 100 * t / max(float(trips), 1.0)
+        print(f"  {name:9s} {100 * share:9.1f}% {t:7.0f} {pct:10.1f}%")
 
     verdict = (overall >= PASS_OVERALL and class_pass and drop_rate <= PASS_DROP_RATE)
     print()
@@ -472,7 +631,6 @@ def main() -> int:
             "config": {
                 "num_envs": n, "steps": a.steps, "budget": a.budget,
                 "drop_grace": a.drop_grace, "lift_clear": a.lift_clear,
-                "reshape_on_place_flag": a.reshape_on_place,
                 "seed_requested": a.seed,
                 # What the environment ended up on, which is what mjlab
                 # writes back into the field.  With no --seed this is null and
@@ -482,8 +640,12 @@ def main() -> int:
                 "episode_length_s": env_cfg.episode_length_s,
                 "control_dt": dt,
                 "num_objects": pick.num_objects,
-                "reshape_on_place_env": bool(
-                    getattr(env_cfg.commands["pick"], "reshape_on_place", False)),
+                # What the command actually did, read off the built term, not
+                # what was asked for on the command line.
+                "redraw_on_place": list(pick.redraw_on_place),
+                "cadence_arg": a.cadence,
+                "reset_hidden_on_respawn": bool(a.reset_hidden_on_respawn),
+                "recurrent": recurrent,
                 "sim_seconds": sim_seconds,
                 "arm_hours": hours,
             },
@@ -526,10 +688,44 @@ def main() -> int:
                 "p999": p999.cpu().tolist(),
                 "peak": peak_ratio.cpu().tolist(),
                 "frac_above_headroom": over.cpu().tolist(),
+                "cvar95": speed_cvar95.cpu().tolist(),
+                "cvar99": speed_cvar99.cpu().tolist(),
                 "headroom": SPEED_HEADROOM,
                 "hist_bins": SPEED_BINS,
                 "hist_max": SPEED_MAX,
                 "hist": speed_hist.cpu().tolist(),
+            },
+            "shaping": {
+                "slew_scale": a.slew_scale,
+                "accel_limit": a.accel_limit,
+                "lowpass_hz": a.lowpass_hz,
+                "interp": a.interp,
+                "as_trained": not shaped,
+                "elements": elements,
+                "frac_clipped_slew":
+                    float(arm_term.stats["clipped_slew"]) / elements,
+                "frac_clipped_accel":
+                    float(arm_term.stats["clipped_accel"]) / elements,
+                "frac_moved_lowpass":
+                    float(arm_term.stats["moved_lowpass"]) / elements,
+            },
+            "command": {
+                k: {
+                    "peak": cmd_peak[k].cpu().tolist(),
+                    "p99": [float(x) for x in
+                            _hist_quantile(cmd_hist[k], cmd_scale[k], 0.99)],
+                    "cvar95": cvar(cmd_hist[k], cmd_scale[k], 0.95).cpu().tolist(),
+                    "cvar99": cvar(cmd_hist[k], cmd_scale[k], 0.99).cpu().tolist(),
+                    "hist_max": cmd_scale[k],
+                    "hist_bins": CMD_BINS,
+                    "hist": cmd_hist[k].cpu().tolist(),
+                }
+                for k in cmd_scale
+            },
+            "phase": {
+                "names": list(PHASES),
+                "steps": phase_steps.cpu().tolist(),
+                "trips": phase_trips.cpu().tolist(),
             },
             "provenance": _provenance(a.checkpoint),
         }

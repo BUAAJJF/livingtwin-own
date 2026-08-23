@@ -131,22 +131,44 @@ class PickCommandCfg(CommandTermCfg):
   only be cleared if every object is reachable, so one knocked into the corner
   would stall the episode for as long as it lasted.  The cost shows up as
   ``objects_strayed`` instead of as a deadlock."""
+  redraw_on_place: tuple[str, ...] = ()
+  """Which object parameters are redrawn when an object is put back.
+
+  This is the *cadence* knob, and it is deliberately separate from the ranges
+  the parameters are drawn from, which live in the reset event and do not
+  change.  Every setting below draws from identical marginals; the only thing
+  that differs is how long a value is held.
+
+    ``("shape", "mass", "friction")``  every object is a new object (OBJ-All)
+    ``()``                             one object per episode, re-posed (EP-All)
+    any subset                         that quantity turns over per object and
+                                       the rest are held for the episode
+
+  The reset event always draws all three, so an episode always *starts* with a
+  fresh object; the question this controls is what happens at the ninth
+  placement of the same episode.
+
+  Redrawing costs about 14% of training throughput at 1024 environments,
+  because the per-world model fields it writes are only visible after the
+  derived constants are recomputed, and at scale a placement happens on nearly
+  every step."""
+
   reshape_on_place: bool = False
-  """Draw a new shape for every object rather than one per episode.
+  """Backwards-compatible alias: true means redraw everything on placement.
 
-  The shape randomiser is a reset event, so without this the whole episode is
-  one geometry re-posed, and a recurrent policy can identify it once and coast
-  on that for the remaining dozen placements.  Measured on the vision policy:
-  58.2 objects a minute with the shape held for the episode, 54.0 when every
-  object is a new one.  The state teacher, which is fed the shape and has no
-  memory to carry, loses 2.0% over the same change -- so most of the student's
-  7.2% was a trick that does not survive a real table.
+  Kept because it is what the trained checkpoints' recorded configs say.  When
+  ``redraw_on_place`` is left empty this is what decides the cadence, so the
+  default configuration means exactly what it did before the split.
 
-  It costs about 14% of training throughput at 1024 environments, because the
-  per-world model fields it writes are only visible after the derived constants
-  are recomputed, and at scale a placement happens on nearly every step."""
-  """How far the object spawns from wherever the arm was just reset to."""
+  The shape randomiser is a reset event, so without either of these the whole
+  episode is one geometry re-posed, and a recurrent policy can identify it once
+  and coast on that for the remaining dozen placements.  Measured on the vision
+  policy: 58.2 objects a minute with the shape held for the episode, 54.0 when
+  every object is a new one.  The state teacher, which is fed the shape and has
+  no memory to carry, loses 2.0% over the same change."""
+
   spawn_attempts: int = 6
+  """How many times to resample a spawn pose before giving up on clearance."""
 
   bin_center: tuple[float, float] = (0.30, -0.22)
   bin_inner: tuple[float, float] = (0.080, 0.070)
@@ -277,6 +299,23 @@ class PickCommand(CommandTerm):
   @property
   def num_objects(self) -> int:
     return len(self._names)
+
+  @property
+  def redraw_on_place(self) -> tuple[str, ...]:
+    """Which object parameters are redrawn on placement.
+
+    Resolved from the config on every read rather than cached in ``__init__``,
+    so a cadence experiment can set it on the built environment without
+    rebuilding the scene -- which for the vision task means not re-rendering
+    and re-allocating a camera to change one tuple.
+
+    The explicit ``redraw_on_place`` wins; ``reshape_on_place`` is the older
+    boolean spelling of "all of them", and is what the trained checkpoints'
+    recorded configs contain.
+    """
+    if self.cfg.redraw_on_place:
+      return tuple(self.cfg.redraw_on_place)
+    return shapes.ALL_QUANTITIES if self.cfg.reshape_on_place else ()
 
   @property
   def target_geom_ids(self) -> torch.Tensor:
@@ -547,7 +586,11 @@ class PickCommand(CommandTerm):
     term = self._shape_terms[idx]
     if term is None:
       return
-    term.func(self._env, env_ids, **term.params)
+    # The event's own params carry the ranges; only the cadence is overridden
+    # here, so there is still one description of what an object can be.
+    params = dict(term.params)
+    params["redraw"] = self.redraw_on_place
+    term.func(self._env, env_ids, **params)
     self._env.sim.recompute_constants(RecomputeLevel.set_const)
 
   def _place_object(self, env_ids: torch.Tensor) -> None:
@@ -591,7 +634,7 @@ class PickCommand(CommandTerm):
     inside one another.  Objects landing next to each other is the point of
     this task, not something to design out.
     """
-    if self.cfg.reshape_on_place and not self._resetting:
+    if self.redraw_on_place and not self._resetting:
       self._reshape(idx, env_ids)
     count = len(env_ids)
     half = self.all_half_sizes[env_ids, idx]

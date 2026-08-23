@@ -240,6 +240,18 @@ def _mass_properties(
   return com, evals.float().clamp(min=1e-9), quat
 
 
+ALL_QUANTITIES = ("shape", "mass", "friction")
+"""What an object draw can redraw, as independently selectable parts.
+
+Split out because *how often* a parameter changes is a separate question from
+*what values it takes*, and the two were previously one atomic call.  Every
+subset here draws from exactly the same ranges; only the redraw interval
+differs.  That is what makes a cadence comparison a controlled one -- the
+marginal distribution of each quantity is identical across conditions and the
+only thing that moves is how long a value is held.
+"""
+
+
 # Without this the writes below land only in world 0: these model fields are
 # broadcast across environments until an event declares it needs them
 # expanded, and reading one back afterwards returns world 0's value for
@@ -264,14 +276,30 @@ def randomize_object_shape(
   mass_range: tuple[float, float] = objects.OBJECT_MASS_RANGE,
   friction_range: tuple[float, float] = objects.OBJECT_FRICTION_RANGE,
   variety: float = 1.0,
+  redraw: tuple[str, ...] = ALL_QUANTITIES,
 ) -> None:
-  """Draw a fresh object: shape class, size, mass, inertia and friction."""
+  """Draw a fresh object: shape class, size, mass, inertia and friction.
+
+  ``redraw`` selects which of those are drawn afresh.  Anything left out keeps
+  the value the object already had, read back from the per-asset record rather
+  than from the model, so that holding one quantity fixed while another turns
+  over is expressible without a second code path.
+
+  Inertia and centre of mass are always recomputed, because they are not
+  independent parameters -- they are a function of the shape and the mass, and
+  leaving them stale is the bug this module's docstring was written about.
+  """
   asset = env.scene[asset_cfg.name]
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)
   env_ids = env_ids.to(env.device)
   n = int(env_ids.numel())
   if n == 0:
+    return
+  unknown = set(redraw) - set(ALL_QUANTITIES)
+  if unknown:
+    raise ValueError(f"redraw got {sorted(unknown)}, expected {ALL_QUANTITIES}")
+  if not redraw:
     return
 
   local, _ = asset.find_geoms(list(objects.OBJECT_GEOMS), preserve_order=True)
@@ -280,18 +308,36 @@ def randomize_object_shape(
   )
   body_local, _ = asset.find_bodies(["object"], preserve_order=True)
   bid = int(asset.indexing.body_ids[body_local[0]])
+  state = _state(env, asset_cfg.name)
 
-  size, pos, half, cls = _compose(n, env.device, None, variety)
-  lo, hi = mass_range
-  mass = lo + (hi - lo) * torch.rand(n, device=env.device)
+  # The draws happen in this order whatever the subset, so that the default --
+  # all three -- consumes the global stream exactly as it did before this
+  # parameter existed.
+  if "shape" in redraw:
+    size, pos, half, cls = _compose(n, env.device, None, variety)
+  else:
+    size = state["size"][env_ids]
+    pos = state["pos"][env_ids]
+    half = state["half"][env_ids]
+    cls = state["cls"][env_ids]
+
+  if "mass" in redraw:
+    lo, hi = mass_range
+    mass = lo + (hi - lo) * torch.rand(n, device=env.device)
+  else:
+    mass = state["mass"][env_ids]
+
+  if "friction" in redraw:
+    flo, fhi = friction_range
+    fric = flo + (fhi - flo) * torch.rand(n, 1, device=env.device)
+  else:
+    fric = state["fric"][env_ids].unsqueeze(-1)
+
   com, inertia, iquat = _mass_properties(size, pos, mass, cls == 1)
 
   grid_env, grid_geom = torch.meshgrid(env_ids, gids, indexing="ij")
   env.sim.model.geom_size[grid_env, grid_geom] = size
   env.sim.model.geom_pos[grid_env, grid_geom] = pos
-
-  flo, fhi = friction_range
-  fric = flo + (fhi - flo) * torch.rand(n, 1, device=env.device)
   env.sim.model.geom_friction[grid_env, grid_geom, 0] = fric.expand(n, len(gids))
 
   env.sim.model.body_mass[env_ids, bid] = mass
@@ -303,10 +349,16 @@ def randomize_object_shape(
 
   # The command term reads these for spawn height, the grasp test and the
   # observation, and recomputing them from the model would mean redoing the
-  # union of three offset parts on every step.
-  state = _state(env, asset_cfg.name)
+  # union of three offset parts on every step.  Mass and friction are kept for
+  # the same reason plus one more: a quantity that is NOT being redrawn has to
+  # be readable, and reading it back out of the per-world model arrays is both
+  # slower and, for the composed half-extents, not possible at all.
+  state["size"][env_ids] = size
+  state["pos"][env_ids] = pos
   state["half"][env_ids] = half
   state["cls"][env_ids] = cls
+  state["mass"][env_ids] = mass
+  state["fric"][env_ids] = fric.squeeze(-1)
 
 
 def _state(env, asset_name: str = "object") -> dict:
@@ -344,9 +396,35 @@ def _state(env, asset_name: str = "object") -> dict:
     torch.stack((size[..., 0], size[..., 0], size[..., 1]), dim=-1),
     size,
   )
+  body_local, _ = asset.find_bodies(["object"], preserve_order=True)
+  bid = int(asset.indexing.body_ids[body_local[0]])
+
+  def per_world(x: torch.Tensor) -> torch.Tensor:
+    """One row per environment, whatever the model field is currently.
+
+    These fields are broadcast across worlds until an event declares it needs
+    them expanded, and this record is built while the observation manager is
+    probing term widths -- which is before any event has run.  So the leading
+    axis here may be 1 rather than num_envs, and a record shaped that way
+    silently fails to write on the first partial reset.
+    """
+    if x.shape[0] == env.num_envs:
+      return x.clone()
+    return x[:1].expand(env.num_envs, *x.shape[1:]).clone()
+
+  mass = torch.as_tensor(env.sim.model.body_mass[:], device=env.device)
+  fric = torch.as_tensor(env.sim.model.geom_friction[:], device=env.device)
   state = {
-    "half": (pos.abs() + ext).max(dim=1).values,
+    "half": per_world((pos.abs() + ext).max(dim=1).values),
     "cls": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
+    # Enough to redraw any subset of the object's parameters: a quantity being
+    # held constant has to be readable, and the composed half-extents in
+    # particular cannot be recovered from the model once several offset parts
+    # have been unioned into them.
+    "size": per_world(size),
+    "pos": per_world(pos),
+    "mass": per_world(mass[:, bid]),
+    "fric": per_world(fric[:, gids[0], 0]),
   }
   cache[asset_name] = state
   return state
