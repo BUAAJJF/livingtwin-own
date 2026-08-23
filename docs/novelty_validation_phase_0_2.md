@@ -252,7 +252,7 @@ One hypothesis per change, nothing bundled.
 | # | change | why it is required | risk to existing results |
 |---|---|---|---|
 | C1 | `--seed` on `accept_s1.py`, recorded in the output | no experiment below is reproducible without it | none — default `None` preserves current behaviour |
-| C2 | per-environment RNG stream for the object draw | Phase 2 needs paired scenes; the global stream cannot provide them | changes the object *sequence*, not its distribution — baselines must be re-measured under it, which Phase 0.2 does |
+| C2 | ~~per-environment RNG stream for the object draw~~ | **not implemented** — see below | — |
 | C3 | machine-readable output (JSON) from `accept_s1.py` | plots must be generated from files, not transcribed | none — additive |
 | C4 | split *cadence* from *distribution* in the object randomiser: per-quantity hold-time (`shape`, `mass`, `friction`) | 2.2 requires mass and friction cadence separately; today they are one atomic draw | none if the default reproduces today's behaviour, which is asserted by test |
 | C5 | evaluation-only action wrappers (slew / accel / LPF / cubic), default off | Phase 1 | none — default off, and the existing rate limiter is left in place |
@@ -261,6 +261,17 @@ One hypothesis per change, nothing bundled.
 
 Deliberately **not** changed: rewards, teacher inputs, network capacity,
 observation spaces, the `COMMAND_DERATE`, or anything in the training path.
+
+**Why C2 was dropped.** Phase 2 asks for paired evaluation scenes, and §1.8
+shows the single global RNG stream cannot provide them. A per-environment
+stream would fix that for *policy-versus-policy* comparisons — but the central
+comparison here is **cadence versus cadence**, and those two conditions differ
+precisely in when object parameters are redrawn, so their object sequences
+cannot be made identical even in principle. Pairing would have helped the
+comparisons that were already tight (0.3–0.8% seed spread, §7.2) and done
+nothing for the one that matters. Variance is handled instead by bootstrap
+intervals over environments (§7.1) and by scoring three policies at two
+rollout seeds. Recorded as a deliberate omission rather than left implied.
 
 ### 2.1 What Phase 1 can and cannot claim
 

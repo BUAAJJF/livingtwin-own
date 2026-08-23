@@ -477,8 +477,25 @@ def main() -> int:
                 age[e] = 0.0
                 pending[e] = False
                 lifted[e] = False
-                cls_now = aspect_class(pick.object_half_size.to(dev))
             holding = both
+
+            # The shape class an instance is attributed to, refreshed at the
+            # END of every step rather than only on an episode boundary.
+            #
+            # It used to be refreshed only on `dones`.  That was correct while
+            # an episode held one object, and became wrong at 6d1d0a9 when the
+            # command started redrawing the object at every placement: every
+            # instance after the first in an episode was scored against the
+            # shape class of whatever the episode STARTED with.  Overall
+            # success, throughput, drop rate and the trip counts are unaffected
+            # -- they sum across classes -- but the per-shape breakdown was
+            # attributing outcomes to the wrong rows.
+            #
+            # End of the step, not the start: on a placement step the object
+            # has already been replaced by the time `half` is read, so the
+            # value used to score the instance that just finished has to be the
+            # one captured on the previous step, which is what this is.
+            cls_now = aspect_class(half)
 
     # ---------------------------------------------------------------- report
     total_ok, total_fail = ok.sum(), fail.sum()
