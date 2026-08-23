@@ -423,15 +423,46 @@ def section_pareto_plot() -> None:
     f'<text x="18" y="{H / 2}" text-anchor="middle" font-size="13" '
     f'transform="rotate(-90 18 {H / 2})">objects per minute</text>',
   ]
+  # One hue per policy, so the two scales do not read as one cloud; the
+  # unfiltered point of each is drawn as a ring, because every other point is
+  # only meaningful as a displacement from it.
+  hues = ["#2f6f8f", "#8f5a2f", "#4a7a3a", "#7a3a6a"]
+  policies = sorted({r["policy"] for r in rows})
+  colour = {p: hues[i % len(hues)] for i, p in enumerate(policies)}
+
+  # The slew family traces the frontier; join it so the knee is visible.
+  for p in policies:
+    fam = sorted((r for r in rows
+                  if r["policy"] == p
+                  and (r["filter"] == "none" or r["filter"].startswith("slew"))),
+                 key=lambda r: -r["trips_per_arm_hour"])
+    if len(fam) > 1:
+      d = " ".join(f'{px(r["trips_per_arm_hour"]):.1f},{py(r["throughput"]):.1f}'
+                   for r in fam)
+      parts.append(f'<polyline points="{d}" fill="none" '
+                   f'stroke="{colour[p]}" stroke-opacity="0.35" stroke-width="1.5"/>')
+
   for r in rows:
     x, y = px(r["trips_per_arm_hour"]), py(r["throughput"])
     lo, hi = px(r["trips_lo"]), px(r["trips_hi"])
-    col = "#b4453c" if r["filter"] == "none" else "#2f6f8f"
+    col = colour[r["policy"]]
+    base = r["filter"] == "none"
     parts.append(f'<line x1="{lo:.1f}" y1="{y:.1f}" x2="{hi:.1f}" y2="{y:.1f}" '
-                 f'stroke="{col}" stroke-opacity="0.45" stroke-width="2"/>')
-    parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{col}"/>')
-    parts.append(f'<text x="{x + 9:.1f}" y="{y + 4:.1f}" font-size="11" '
-                 f'fill="#222">{r["filter"]}</text>')
+                 f'stroke="{col}" stroke-opacity="0.4" stroke-width="2"/>')
+    parts.append(
+      f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{6 if base else 4.5}" '
+      f'fill="{"#fbfbfa" if base else col}" stroke="{col}" stroke-width="2.5"/>')
+    parts.append(f'<text x="{x + 8:.1f}" y="{y + 4:.1f}" font-size="10" '
+                 f'fill="#333">{r["filter"]}</text>')
+
+  for i, p in enumerate(policies):
+    ly = 78 + i * 17
+    parts.append(f'<circle cx="{W - 175}" cy="{ly - 4:.0f}" r="4.5" '
+                 f'fill="{colour[p]}"/>')
+    parts.append(f'<text x="{W - 164}" y="{ly}" font-size="11" fill="#333">'
+                 f'{p}</text>')
+  parts.append(f'<text x="{W - 175}" y="{78 + len(policies) * 17 + 6}" '
+               f'font-size="10" fill="#666">hollow = unfiltered</text>')
   parts.append("</svg>")
   out = RESULTS / "safety_pareto.svg"
   out.write_text("\n".join(parts))
