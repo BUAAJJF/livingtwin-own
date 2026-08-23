@@ -50,17 +50,22 @@ def main() -> int:
   threshold = RETENTION_FRACTION * J_NOMINAL
   rows = []
   for job in plan["jobs"]:
-    cfg = re.sub(r"_s\d+$", "", job["tag"])
+    # The run's own tag, seed included -- not the seed-pooled configuration.
+    # One of the screened alphas coincides with the oracle and therefore has
+    # three training seeds behind it while the others have one, and comparing
+    # a three-seed mean against two one-seed numbers would decide alpha partly
+    # on how many seeds each happened to get.
+    cfg = job["tag"]
     ret = tgt = None
     for name, g in analysis.get("groups", {}).items():
-      if name.endswith(f"/{cfg}_retention") or name.endswith(f"/pooled:{cfg}_retention"):
+      if name.endswith(f"/{cfg}_retention"):
         ret = g
-      if name.endswith(f"/{cfg}_target") or name.endswith(f"/pooled:{cfg}_target"):
+      if name.endswith(f"/{cfg}_target"):
         tgt = g
     if not ret:
       continue
     rows.append({
-      "alpha": job["alpha"], "tag": job["tag"], "config": cfg,
+      "alpha": job["alpha"], "tag": job["tag"], "seed": job["seed"],
       "probs": job["probs"],
       "retention": ret["throughput"]["bootstrap"]["mean"],
       "retention_ci": ret["throughput"]["bootstrap"]["ci"],
@@ -71,6 +76,9 @@ def main() -> int:
       "qualifies": ret["throughput"]["bootstrap"]["mean"] >= threshold,
     })
   rows.sort(key=lambda r: r["alpha"])
+  seeds = {r["seed"] for r in rows}
+  if len(seeds) != 1:
+    print(f"  !! the screened runs do not share a training seed: {seeds}")
   if not rows:
     raise SystemExit("no screening runs found in the analysis")
 
