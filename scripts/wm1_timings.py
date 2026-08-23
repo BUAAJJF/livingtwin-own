@@ -37,8 +37,8 @@ def dataset_totals(data: Path) -> dict:
   by_split: dict[str, dict] = {}
   for f in sorted(data.glob("*.json")):
     d = _load(f)
-    if not d:
-      continue
+    if not d or "split" not in d:
+      continue          # the manifest lives here too
     e = by_split.setdefault(d["split"], {"files": 0, "arm_seconds": 0.0,
                                          "bytes": 0, "wall_clock_s": 0.0})
     e["files"] += 1
