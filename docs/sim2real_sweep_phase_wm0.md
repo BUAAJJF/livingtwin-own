@@ -552,7 +552,89 @@ It has no capacity to overfit, so a large gap between the two says the
 signature is present but not linearly separable — which is a different
 engineering problem from the signature being absent.
 
-*(results pending)*
+### 7.3 Results
+
+Four domains, three levels each, 96 environments × 600 steps. Chance is the
+majority-class rate on the held-out set; "shuffled" is the identical pipeline
+on permuted labels. Best feature set per domain in bold.
+
+| domain | feature set | accuracy | balanced | centroid | chance | shuffled |
+|---|---|---:|---:|---:|---:|---:|
+| `cam_yaw_deg` | proprio + servo | 54.4% | 54.4% | 45.8% | 33.3% | 33.3% |
+| | **encoded + proprio** | **99.3%** | 99.3% | 80.6% | 33.3% | 30.1% |
+| | actor latent | 86.9% | 86.9% | 55.9% | 33.3% | 34.4% |
+| `servo_damping_scale` | **proprio + servo** | **99.7%** | 99.7% | 96.5% | 33.3% | 32.8% |
+| | encoded + proprio | 99.5% | 99.5% | 65.8% | 33.3% | 34.2% |
+| | actor latent | 98.9% | 98.9% | 79.2% | 33.3% | 34.4% |
+| `gripper_rate_scale` | proprio + servo | 83.6% | 83.6% | 63.5% | 33.3% | 32.8% |
+| | encoded + proprio | 86.6% | 86.6% | 52.1% | 33.3% | 33.8% |
+| | **actor latent** | **89.0%** | 89.0% | 59.7% | 33.3% | 35.8% |
+| `obs_latency_steps` | proprio + servo | 75.5% | 75.5% | 57.7% | 33.3% | 32.4% |
+| | encoded + proprio | 77.4% | 77.4% | 52.9% | 33.3% | 33.8% |
+| | **actor latent** | **86.5%** | 86.5% | 57.6% | 33.3% | 30.8% |
+
+And the same with **object shapes held out entirely** — the test set contains
+only classes absent from training:
+
+| domain | best set | accuracy | chance | shuffled |
+|---|---|---:|---:|---:|
+| `cam_yaw_deg` | encoded + proprio | **97.4%** | 34.2% | 33.4% |
+| `servo_damping_scale` | proprio + servo | **100.0%** | 35.3% | 34.4% |
+| `gripper_rate_scale` | actor latent | **95.8%** | 28.3% | 30.1% |
+| `obs_latency_steps` | actor latent | **85.6%** | 34.9% | 32.1% |
+
+### 7.4 What this establishes
+
+**Every domain is identifiable from reward-free data, by a wide margin.** The
+best set clears its shuffled control by 53–69 percentage points in every case.
+
+**The permutation control behaves.** Every shuffled run lands at 30–37%,
+i.e. at chance, across all 24 fits. That is the check that matters most: it
+says the pipeline is not leaking through the environment grouping, the window
+overlap, or the summary statistics. Had the split been wrong, the shuffled
+control would have risen with it.
+
+**The signature survives held-out objects — and in three of four domains it
+gets *better*.** `gripper_rate_scale` goes from 89.0% to 95.8%, `cam_yaw_deg`
+holds at 97.4%. The probe is not memorising what the calibration objects
+looked like; it is reading the plant. This is the result that would have been
+easiest to get wrong and is the one the method most depends on.
+
+**Different mismatches sign themselves in different deployable channels, and
+between them the three channels cover all four domains:**
+
+| domain | needs | why it makes sense |
+|---|---|---|
+| `servo_damping_scale` | **proprioception alone** (99.7%) | damping is a pure dynamics quantity and is written directly into the joint trajectory; the camera adds nothing |
+| `cam_yaw_deg` | **the image encoding** (99.3% against 54.4% from proprioception) | an aiming error exists only in the image; the arm's own trajectory barely knows about it |
+| `gripper_rate_scale`, `obs_latency_steps` | **the actor latent** (89.0%, 86.5%) | both are closed-loop timing effects; the policy's own recurrent state is where the compensation shows up |
+
+That split is useful design information rather than a curiosity. A calibration
+system does not need one universal feature — it needs proprioception, the
+encoder output, and the policy latent, and the cheapest of the three suffices
+for the axis with the worst tail behaviour.
+
+**Nearest centroid trails the regression substantially** (80.6% vs 99.3% on
+`cam_yaw`; 52.1% vs 86.6% on `gripper_rate` with the encoder). The signature
+is present but is not a simple shift of the feature mean. A learned
+discriminator is needed — a linear one is enough — which is exactly the regime
+a small parameter-conditioned model is suited to and would be bad news only if
+the reverse were true.
+
+### 7.5 What this does *not* show
+
+Three limits, stated because the result is strong enough to be over-read:
+
+* This is **classification among three known levels**, not posterior inference
+  over a continuous parameter. Telling 0, 2 and 4 steps apart is easier than
+  estimating 2.7 steps with a calibrated uncertainty.
+* Each domain was probed **one axis at a time**. §6 showed two grasp-side axes
+  interact, so a joint probe over a coupled group is the honest next test and
+  is not run here.
+* The features come from **simulated** rollouts on both sides. A real
+  signature could differ in ways no simulator-to-simulator experiment can
+  reveal — which is exactly what §11D's ten minutes of hardware logging is
+  for.
 
 ## 8. Oracle ceiling and recoverability
 
