@@ -438,6 +438,35 @@ filter cannot reproduce is the joint improvement, and "imitation inherits
 speed but not caution, and RL restores caution without paying speed" remains a
 claim about learning, not about filtering.
 
+### 4.4 Locating the frontier, and clutter
+
+A finer slew sweep (× 0.95 / 0.92 / 0.90 / 0.88), the two combinations
+(`slew 0.90 + accel 120`, `slew 0.90 + cubic`), and the same nine filters on
+the three-object fine-tuned policy were queued to pin down exactly where the
+throughput cost crosses 2%. **These runs were still in flight when the VPN
+connection to the training server dropped for the second time this session**;
+the server-side jobs survive (`setsid nohup` inside `tmux`) but their results
+are not in this document.
+
+What the frontier looks like from the four points that do exist:
+
+| slew scale | Δ throughput | Δ trips |
+|---|---:|---:|
+| 1.00 | — | — |
+| 0.85 | −4.5% | −81.5% |
+| 0.70 | −22.1% | −87.7% |
+
+The trip rate collapses between 1.00 and 0.85 while throughput has only fallen
+4.5%, then throughput falls off a cliff with almost no further safety gain.
+The interesting region is entirely inside 0.85–1.00, which is what the finer
+sweep samples. Whether some point in it reaches −80% trips at ≤ 2% throughput
+decides the Safety Gate's *literal* verdict; it does not change §10.1's
+conclusion either way, because the asymmetry between filtering and fine-tuning
+is what that rests on.
+
+`results/novelty_validation/safety/` and `scripts/analyze_novelty.py --section
+safety` will contain them once the connection returns.
+
 ## 5. Cadence experiment matrix
 
 ### 5.1 Construction
@@ -517,6 +546,24 @@ The teacher's shell rate nearly halves under EP-All. A benchmark that holds
 object parameters constant within an episode under-reports the constraint
 violation rate as well as over-reporting throughput, and the two errors point
 the same way.
+
+### 5.4 Per-quantity cadence, and a second training seed
+
+Two further sets were queued and were still running when the connection
+dropped (see §4.4):
+
+* **Per-quantity attribution** — `--cadence shape`, `mass`, `friction`
+  separately, on both students. The point is to avoid attributing to "shape"
+  an effect that belongs to mass: §6.2 finds the recurrent state decodes the
+  current object's *mass* far better than its shape, and mass is the parameter
+  a camera cannot see at all, so the prediction is that mass cadence carries
+  most of the effect. Untested as of this document.
+* **A second training seed** — `h_full_s2`, the state teacher trained with
+  `--agent.seed 17` (`sweep.sh:81`), under both cadences. This is the only
+  pair of training seeds that exists in the repository and it bounds how much
+  of the memoryless control's +1.5% is seed noise. It does **not** give a
+  second seed for either vision student, which is the gap §7.3 records and
+  §11A proposes closing first.
 
 ## 6. Hidden-state probes and history swap
 
