@@ -823,15 +823,33 @@ previous objects as an implicit privileged observation of the current one".
 **The probes do not support that.** Under the honest cadence there is no
 recoverable previous-object information to treat as anything.
 
-The effect in §5 is nonetheless real and large. What the two sections together
-are consistent with is a different mechanism: not *stale carry-over* but
-*evidence accumulation about a quantity that should have changed*. When the
-object is held constant for an episode, a recurrent policy integrates
-information about it across ten grasps rather than one, and arrives at a
-sharper estimate than any deployment would ever permit. That is still cadence
-leakage and it still inflates the benchmark — but it is a different claim, and
-it implies a different fix. §11C proposes the experiment that would separate
-them.
+Three independent measurements say so, and they are not variations of one
+test:
+
+1. Previous-object attributes are not linearly decodable from the hidden state
+   under the honest cadence (§6.2).
+2. The memory's influence on the action decays to 6% of the action spread
+   within 0.5 s (§6.4), and an object cycle is 1.0 s — so there is no channel
+   of sufficient duration for a previous-object fact to survive into the next
+   object.
+3. Clearing the state at every object boundary does not reduce swap
+   sensitivity (§6.4), which it would if the state's content were dominated by
+   across-boundary history.
+
+The effect in §5 is nonetheless real and large. Put beside §5.4 — where 85–87%
+of it localises to the **shape** cadence, the one parameter the camera sees
+directly — what the evidence supports is not *stale carry-over* but a
+**stationary observation stream**. When every object in an episode looks the
+same, the convolutional encoder and the recurrent state face a far easier
+perceptual problem for ten placements running than deployment would ever
+present, and the benchmark pays them for it. No fact needs to cross the object
+boundary for that to work; the boundary simply stops being a change point.
+
+That is still cadence leakage, and it still inflates the benchmark by 11.8%.
+But it is a different claim from the one proposed, and it implies a different
+fix: not a memory that forgets faster, but a benchmark whose appearance turns
+over as fast as the world's does. §11C proposes the experiment that would
+distinguish a graded version of this from a binary one.
 
 ## 7. Seeds and confidence intervals
 
