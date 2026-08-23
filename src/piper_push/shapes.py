@@ -65,6 +65,7 @@ def _compose(
   device: torch.device,
   generator: torch.Generator | None,
   variety: float,
+  weights: tuple[float, ...] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
   """Sample a shape per environment.
 
@@ -74,6 +75,13 @@ def _compose(
   ``variety`` in [0, 1] interpolates from a single fixed box towards the full
   distribution, so the curriculum can be opened gradually without a second
   code path.
+
+  ``weights`` overrides the class distribution.  It exists so that a session
+  can be restricted to shape classes a model was never trained on -- putting
+  zero mass on a class is a stronger held-out-shape control than filtering the
+  log afterwards, because the policy's memory never sees the excluded objects
+  either.  ``torch.multinomial`` draws the same number of variates whatever the
+  weights, so the global stream is unchanged when the default is used.
   """
 
   def u(lo, hi, shape=(n,)):
@@ -110,8 +118,15 @@ def _compose(
   hy = hy * shrink
   mean_half = 0.5 * (hx + hy)
 
-  weights = torch.tensor(objects.SHAPE_WEIGHTS, device=device)
-  cls = torch.multinomial(weights.expand(n, -1), 1, generator=generator).squeeze(-1)
+  w = torch.tensor(weights if weights is not None else objects.SHAPE_WEIGHTS,
+                   device=device, dtype=torch.float32)
+  if w.numel() != len(objects.SHAPE_CLASSES):
+    raise ValueError(
+      f"shape_weights has {w.numel()} entries, expected "
+      f"{len(objects.SHAPE_CLASSES)} ({', '.join(objects.SHAPE_CLASSES)})")
+  if not bool((w > 0).any()):
+    raise ValueError("shape_weights puts no mass on any class")
+  cls = torch.multinomial(w.expand(n, -1), 1, generator=generator).squeeze(-1)
   # At variety 0 every environment is the plain box the smoke test debugs on.
   if variety < 1.0:
     keep = torch.rand(n, device=device, generator=generator) < variety
@@ -277,6 +292,7 @@ def randomize_object_shape(
   friction_range: tuple[float, float] = objects.OBJECT_FRICTION_RANGE,
   variety: float = 1.0,
   redraw: tuple[str, ...] = ALL_QUANTITIES,
+  shape_weights: tuple[float, ...] | None = None,
 ) -> None:
   """Draw a fresh object: shape class, size, mass, inertia and friction.
 
@@ -314,7 +330,7 @@ def randomize_object_shape(
   # all three -- consumes the global stream exactly as it did before this
   # parameter existed.
   if "shape" in redraw:
-    size, pos, half, cls = _compose(n, env.device, None, variety)
+    size, pos, half, cls = _compose(n, env.device, None, variety, shape_weights)
   else:
     size = state["size"][env_ids]
     pos = state["pos"][env_ids]
