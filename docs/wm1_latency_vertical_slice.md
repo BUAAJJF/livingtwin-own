@@ -467,6 +467,18 @@ is *below* chance and falls further with more data (0.050 at 10 s, 0.000 at
 looks like when a flat score vector is amplified by hundreds of windows; its
 candidate grid is flat to four significant figures (section 4.3).
 
+The same three, measured one window at a time rather than pooled over a
+session, on the simulation validation splits the classifier was selected on:
+
+| | `val` (training shapes) | `valh` (held-out shapes) |
+|---|---|---|
+| B2 classifier, single 0.5 s window | **0.694** | **0.685** |
+| trained on shuffled labels | 0.194 | 0.191 |
+| episode boundaries only | 0.197 | 0.200 |
+
+A single half-second of history is right about seven times in ten across five
+domains, and neither control is distinguishable from the 0.200 floor.
+
 The third control answers a question the others cannot. Reset cadence *is* a
 consequence of the domain — a policy that fails more often restarts more often
 — and a robot can see it, so it would have been an easy accidental win. A

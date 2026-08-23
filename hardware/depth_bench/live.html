@@ -1,0 +1,254 @@
+<!-- Served by live.py.  Deliberately one file with no external anything: it is
+     opened on a laptop that is being carried around a table, and a page that
+     needs the network to render is a page that fails at exactly that moment. -->
+<meta charset="utf-8">
+<title>Depth bench — live comparison</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262c36; --fg: #e6edf3;
+    --dim: #8b949e; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 10;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  button {
+    font: inherit; font-weight: 600; padding: 8px 18px; border-radius: 7px;
+    border: 1px solid var(--line); background: #21262d; color: var(--fg);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .38; cursor: default; }
+  button.go { background: var(--ok); border-color: var(--ok); color: #05130a; }
+  button.stop { background: var(--bad); border-color: var(--bad); color: #1a0505; }
+  .grow { flex: 1; }
+
+  #banner {
+    padding: 14px 20px; font-size: 18px; font-weight: 600;
+    border-bottom: 1px solid var(--line); display: flex; align-items: center;
+    gap: 14px;
+  }
+  #banner.idle { background: #12161c; color: var(--dim); }
+  #banner.wait { background: #26200c; color: var(--warn); }
+  #banner.ready { background: #0d2417; color: var(--ok); }
+  #banner.shoot { background: #0d2b45; color: var(--accent); }
+  #banner.err { background: #2b0f0f; color: var(--bad); }
+
+  #meter { flex: 1; height: 10px; background: #21262d; border-radius: 5px;
+           overflow: hidden; max-width: 420px; }
+  #meterFill { height: 100%; width: 0; background: var(--warn);
+               transition: width .12s linear; }
+  #meterFill.ready { background: var(--ok); }
+
+  main { padding: 16px 20px 40px; }
+  .cams { display: grid; gap: 16px;
+          grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
+  .cam { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+         overflow: hidden; }
+  .cam h2 { margin: 0; padding: 10px 14px; font-size: 14px;
+            border-bottom: 1px solid var(--line); display: flex; gap: 10px;
+            align-items: baseline; }
+  .cam h2 small { color: var(--dim); font-weight: 400; font-size: 12px; }
+  .cam img { width: 100%; display: block; background: #000; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+           background: var(--line); border-top: 1px solid var(--line); }
+  .stat { background: var(--panel); padding: 8px 12px; }
+  .stat .k { color: var(--dim); font-size: 11px; text-transform: uppercase;
+             letter-spacing: .4px; }
+  .stat .v { font-size: 17px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .v.miss { color: var(--bad); }
+
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 18px 0 0;
+             padding: 10px 14px 14px; }
+  legend { color: var(--dim); font-size: 12px; padding: 0 6px; }
+  .thr { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-end; }
+  .thr label { display: flex; flex-direction: column; gap: 4px; font-size: 12px;
+               color: var(--dim); }
+  .thr input { width: 92px; font: inherit; padding: 5px 8px; border-radius: 6px;
+               border: 1px solid var(--line); background: #0d1117; color: var(--fg); }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: right;
+           font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { background: #1b2129; color: var(--dim); font-weight: 600; }
+  .shots { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .shot { border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px;
+          background: var(--panel); font-size: 12px; }
+  .shot b { color: var(--accent); }
+  #reportImg { width: 100%; margin-top: 12px; border-radius: 8px;
+               border: 1px solid var(--line); background: #fff; }
+  .note { color: var(--dim); font-size: 12px; margin-top: 8px; }
+</style>
+
+<header>
+  <h1>Depth bench <span>· 实时对比</span></h1>
+  <button id="btnStart" class="go">开始</button>
+  <button id="btnStop" class="stop" disabled>结束并对比</button>
+  <button id="btnShot" disabled>手动拍一张</button>
+  <div class="grow"></div>
+  <div><span style="color:var(--dim)">已采集</span>
+       <b id="nShots" style="font-size:18px">0</b>
+       <span style="color:var(--dim)">张 ·</span>
+       <span id="elapsed" style="color:var(--dim)">0.0 s</span></div>
+</header>
+
+<div id="banner" class="idle">
+  <span id="bannerText">按「开始」，然后端着两台相机一起绕标定板移动</span>
+  <div id="meter"><div id="meterFill"></div></div>
+</div>
+
+<main>
+  <div class="cams" id="cams"></div>
+
+  <fieldset>
+    <legend>触发阈值</legend>
+    <div class="thr">
+      <label>位移阈值 (m)<input id="d_dist" type="number" step="0.01" min="0.01"></label>
+      <label>转角阈值 (deg)<input id="d_angle" type="number" step="1" min="1"></label>
+      <label>静止判据 (灰阶)<input id="still" type="number" step="0.5" min="0.5"></label>
+      <label>最小间隔 (s)<input id="min_interval" type="number" step="0.5" min="0"></label>
+      <button id="btnCfg">应用</button>
+    </div>
+    <div class="note">
+      新视角要和<em>已拍过的每一张</em>都拉开距离才会触发，所以采样点会自己铺开，不用规划。
+      整个环形缓冲（24 帧）都必须静止才拍——测到的帧全在触发之前，不含接近过程的运动模糊。
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>本次采集</legend>
+    <div class="shots" id="shots"><span class="note">还没有。</span></div>
+  </fieldset>
+
+  <fieldset id="reportBox" style="display:none">
+    <legend>对比结果</legend>
+    <div id="reportTable"></div>
+    <img id="reportImg" alt="comparison">
+    <div class="note" id="reportNote"></div>
+  </fieldset>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let built = false, lastN = -1;
+
+function camPanel(c) {
+  return `<div class="cam" id="cam-${c.name}">
+    <h2>${c.name} <small>${c.model} · ${c.serial}</small>
+      <small style="margin-left:auto">${(c.resolution||[]).join('×')} · ${c.emitter||''}</small></h2>
+    <img src="/stream/${encodeURIComponent(c.name)}" alt="${c.name}">
+    <div class="stats">
+      <div class="stat"><div class="k">距离</div><div class="v" data-f="distance_mm">–</div></div>
+      <div class="stat"><div class="k">倾角</div><div class="v" data-f="tilt_deg">–</div></div>
+      <div class="stat"><div class="k">运动</div><div class="v" data-f="motion">–</div></div>
+      <div class="stat"><div class="k">fps</div><div class="v" data-f="fps">–</div></div>
+    </div></div>`;
+}
+
+function fmt(c, f) {
+  if (f === 'distance_mm') return c.sees_target ? c.distance_mm + ' mm' : '看不到板';
+  if (f === 'tilt_deg')    return c.sees_target ? c.tilt_deg + '°' : '–';
+  if (f === 'motion')      return c.motion == null ? '–' : c.motion.toFixed(1);
+  if (f === 'fps')         return c.fps;
+  return '–';
+}
+
+async function poll() {
+  let s;
+  try { s = await (await fetch('/state')).json(); }
+  catch (e) { return; }
+
+  if (!built) {
+    $('#cams').innerHTML = s.cameras.map(camPanel).join('');
+    const t = s.session.thresholds;
+    for (const k of ['d_dist','d_angle','still','min_interval']) $('#'+k).value = t[k];
+    built = true;
+  }
+  for (const c of s.cameras) {
+    const el = document.getElementById('cam-' + c.name);
+    if (!el) continue;
+    el.querySelectorAll('[data-f]').forEach(n => {
+      n.textContent = fmt(c, n.dataset.f);
+      n.classList.toggle('miss', n.dataset.f === 'distance_mm' && !c.sees_target);
+    });
+  }
+
+  const ss = s.session;
+  $('#nShots').textContent = ss.n_shots;
+  $('#elapsed').textContent = ss.elapsed.toFixed(1) + ' s';
+  $('#btnStart').disabled = ss.running;
+  $('#btnStop').disabled = !ss.running;
+  $('#btnShot').disabled = !ss.running || ss.busy;
+
+  const b = $('#banner'), bt = $('#bannerText'), mf = $('#meterFill');
+  const nov = Math.min(ss.novelty, 1);
+  mf.style.width = (nov * 100) + '%';
+  mf.classList.toggle('ready', ss.novelty >= 1);
+  if (!ss.running) {
+    b.className = ss.has_report ? 'ready' : 'idle';
+    bt.textContent = ss.has_report ? '完成 — 结果在下面' :
+      '按「开始」，然后端着两台相机一起绕标定板移动';
+  } else if (ss.busy) { b.className = 'shoot'; bt.textContent = '正在拍摄 — 别动'; }
+  else if (ss.reason.includes('cannot see')) { b.className='err'; bt.textContent='看不到标定板：' + ss.reason; }
+  else if (ss.reason.includes('settling')) { b.className='wait'; bt.textContent='等待静止 — ' + ss.reason; }
+  else if (ss.novelty >= 1) { b.className='ready'; bt.textContent='停住 — 马上拍'; }
+  else { b.className='wait'; bt.textContent='继续移动 — 这个视角离已拍过的太近'; }
+
+  if (ss.n_shots !== lastN) {
+    lastN = ss.n_shots;
+    $('#shots').innerHTML = ss.shots.length ? ss.shots.map(sh => {
+      const d = Object.entries(sh.distance_mm)
+        .map(([k, v]) => `${k} ${v == null ? '×' : v + 'mm'}`).join(' · ');
+      return `<div class="shot"><b>#${sh.index}</b> ${sh.t}s · ${d}${sh.manual?' · 手动':''}</div>`;
+    }).join('') : '<span class="note">还没有。</span>';
+  }
+}
+
+function table(rep) {
+  const regions = [['charuco','有纹理'],['white','空白白面'],['black','实心黑']];
+  let h = `<table><thead><tr><th>相机 / 区域</th><th>样本</th><th>距离范围 (m)</th>
+    <th>a (σ=a·z²)</th><th>σ @0.70 m (mm)</th><th>时间噪声 (mm)</th>
+    <th>bias 中位 (mm)</th><th>fill 均值</th><th>fill 最差</th></tr></thead><tbody>`;
+  for (const cam of rep.cameras) for (const [r, label] of regions) {
+    const m = rep.summary[cam][r]; if (!m || !m.n) continue;
+    const f = (x, s = 1, d = 2) => (x == null || !isFinite(x)) ? '–' : (x * s).toFixed(d);
+    h += `<tr><td>${cam} · ${label}</td><td>${m.n}</td>
+      <td>${m.range_m ? m.range_m.map(x => x.toFixed(2)).join('–') : '–'}</td>
+      <td>${f(m.a_per_m, 1, 5)}</td><td>${f(m['sigma_at_0.70m'], 1000)}</td>
+      <td>${f(m.temporal_median_m, 1000)}</td><td>${f(m.bias_median_m, 1000)}</td>
+      <td>${f(m.fill_mean, 100, 1)}%</td><td>${f(m.fill_min, 100, 1)}%</td></tr>`;
+  }
+  return h + '</tbody></table>';
+}
+
+$('#btnStart').onclick = () => fetch('/start', {method:'POST'});
+$('#btnShot').onclick  = () => fetch('/shot',  {method:'POST'});
+$('#btnStop').onclick  = async () => {
+  $('#btnStop').disabled = true;
+  const rep = await (await fetch('/stop', {method:'POST'})).json();
+  $('#reportBox').style.display = '';
+  $('#reportTable').innerHTML = table(rep);
+  $('#reportImg').src = '/file/comparison.png?t=' + Date.now();
+  $('#reportNote').textContent =
+    `${rep.n_shots} 张配对采集。每张里所有相机同一瞬间、同一场景，` +
+    `所以相机之外的东西都被约掉了。σ 按 σ=a·z² 拟合后外推到仿真相机的 0.70 m。`;
+  $('#reportBox').scrollIntoView({behavior:'smooth'});
+};
+$('#btnCfg').onclick = () => fetch('/config', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify(Object.fromEntries(
+    ['d_dist','d_angle','still','min_interval'].map(k => [k, +$('#'+k).value])))
+});
+
+poll(); setInterval(poll, 250);
+</script>
