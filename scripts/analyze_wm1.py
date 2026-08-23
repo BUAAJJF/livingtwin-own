@@ -384,6 +384,12 @@ def main() -> int:
     for name, c in comps.items():
       d = c["throughput_diff"]
       rr = c["trip_rate_ratio"]
+      if "ci" not in d:
+        # Fewer than two evaluation seeds in common: there is no paired
+        # comparison to make, and printing a NaN interval as though there were
+        # one is worse than saying so.
+        print(f"  {name:44s} {'-- fewer than two shared evaluation seeds':>47s}")
+        continue
       print(f"  {name:44s} {d['diff']:10.2f} "
             f"[{d['ci'][0]:6.2f},{d['ci'][1]:6.2f}] "
             f"{c.get('throughput_p_holm', float('nan')):8.3f} "

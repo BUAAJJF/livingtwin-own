@@ -9,7 +9,10 @@
 set -Eeuo pipefail
 SUB=${1:-wm1_latency}
 cd "$(dirname "$0")/.."
-rsync -az --info=stats1 \
+# --delete, because the server is the source of truth: a result quarantined
+# there must not survive here and quietly re-enter an analysis.  runs/ is
+# generated on this side and is excluded from the deletion.
+rsync -az --info=stats1 --delete --filter 'protect runs/***' \
   --exclude '*.pt' --exclude 's1/' --exclude 's2/' --exclude 's3/' \
   -e "ssh -o ClearAllForwardings=yes" \
   "shen-teacher:/home/yunfan/work/piper-push/LivingTwin/results/$SUB/" \
