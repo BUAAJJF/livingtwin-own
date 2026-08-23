@@ -439,7 +439,51 @@ commands harder to compensate. The filter smooths the command and the
 compensation un-smooths the plant. Only the slew ceiling helps because it is
 the one filter that bounds the very quantity the shell measures.
 
-### 4.3 Safety Gate
+### 4.3 The same experiment in clutter
+
+Three objects, fine-tuned policy — the deployed one. Every sign replicates.
+
+| filter | obj/min | Δ | trips/arm-h | Δ |
+|---|---:|---:|---:|---:|
+| none | 39.4 | — | 13.3 | — |
+| slew × 0.85 | 38.1 | **−3.3%** | **1.9** | **−85.7%** |
+| slew × 0.70 | 35.6 | −9.6% | 0.7 | −94.7% |
+| accel ≤ 180 | 39.5 | +0.3% | 13.9 | +4.5% |
+| accel ≤ 120 | 38.5 | −2.3% | 25.2 | +89.5% |
+| accel ≤ 80 | 35.1 | −10.9% | 57.6 | **+333%** |
+| low-pass 15 Hz | 39.1 | −0.8% | 22.3 | **+67.7%** |
+
+Both findings from §4.2 hold at the second scale, with the numbers slightly
+*more* favourable to the slew limiter (−85.7% trips for −3.3% throughput,
+against −81.5% for −4.5%) and considerably more damning for the others: an
+80 rad/s² acceleration ceiling more than quadruples the shell rate in clutter.
+
+### 4.4 Locating the frontier
+
+A finer slew sweep (× 0.95 / 0.92 / 0.90 / 0.88) and two combinations
+(`slew 0.90 + accel 120`, `slew 0.90 + cubic`) were queued to pin down where
+the throughput cost crosses 2%. They were still executing when the VPN
+connection dropped for the second time this session; the server-side jobs
+survive (`setsid nohup` inside `tmux`) and land in
+`results/novelty_validation/`, read by `scripts/analyze_novelty.py --section
+safety`.
+
+The shape of the frontier from the points that exist:
+
+| slew scale | Δ throughput (S2 / S3) | Δ trips (S2 / S3) |
+|---|---:|---:|
+| 1.00 | — | — |
+| 0.85 | −4.5% / −3.3% | −81.5% / −85.7% |
+| 0.70 | −22.1% / −9.6% | −87.7% / −94.7% |
+
+The trip rate collapses between 1.00 and 0.85 while throughput has fallen only
+3–4%, then throughput falls off a cliff for almost no further safety. The
+interesting region is entirely inside 0.85–1.00. Whether a point in it reaches
+−80% trips at ≤ 2% throughput decides the Safety Gate's *literal* verdict; it
+does not change §10.1, which rests on the asymmetry between filtering and
+fine-tuning rather than on the threshold.
+
+### 4.5 Safety Gate
 
 **FAIL, narrowly, on the throughput criterion.** The gate asks for ≥ 80% of
 trips removed for ≤ 2% of throughput. `slew × 0.85` removes 81.5% of trips but
@@ -462,35 +506,6 @@ So: **safety alone is not the novelty** — a shell gets most of it. What a
 filter cannot reproduce is the joint improvement, and "imitation inherits
 speed but not caution, and RL restores caution without paying speed" remains a
 claim about learning, not about filtering.
-
-### 4.4 Locating the frontier, and clutter
-
-A finer slew sweep (× 0.95 / 0.92 / 0.90 / 0.88), the two combinations
-(`slew 0.90 + accel 120`, `slew 0.90 + cubic`), and the same nine filters on
-the three-object fine-tuned policy were queued to pin down exactly where the
-throughput cost crosses 2%. **These runs were still in flight when the VPN
-connection to the training server dropped for the second time this session**;
-the server-side jobs survive (`setsid nohup` inside `tmux`) but their results
-are not in this document.
-
-What the frontier looks like from the four points that do exist:
-
-| slew scale | Δ throughput | Δ trips |
-|---|---:|---:|
-| 1.00 | — | — |
-| 0.85 | −4.5% | −81.5% |
-| 0.70 | −22.1% | −87.7% |
-
-The trip rate collapses between 1.00 and 0.85 while throughput has only fallen
-4.5%, then throughput falls off a cliff with almost no further safety gain.
-The interesting region is entirely inside 0.85–1.00, which is what the finer
-sweep samples. Whether some point in it reaches −80% trips at ≤ 2% throughput
-decides the Safety Gate's *literal* verdict; it does not change §10.1's
-conclusion either way, because the asymmetry between filtering and fine-tuning
-is what that rests on.
-
-`results/novelty_validation/safety/` and `scripts/analyze_novelty.py --section
-safety` will contain them once the connection returns.
 
 ## 5. Cadence experiment matrix
 
