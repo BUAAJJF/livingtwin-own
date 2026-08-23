@@ -166,6 +166,110 @@ Two limits on how far these may be read:
   differences of single-digit counts and are used only to decide what to
   measure properly, never as results.
 
+Unperturbed reference at this protocol: **56.4 objects/min**, 99.9% success,
+0.43% drop, p95 1.46 s, 1.17 trips/arm-hour. (The formal protocol reads 55.8;
+smaller samples run 1–2% optimistic, which is why screening and formal numbers
+are never mixed.)
+
+### 4.1 Full screen, 17 axes × 4 levels
+
+Strongest degradation per axis, throughput and safety-shell rate, from
+`results/sim2real_sweep/s1_summary.json`:
+
+| axis | worst throughput | at | trips/arm-h | at |
+|---|---:|---:|---:|---:|
+| `action_latency_steps` | **−95.7%** | 4 | ×1083 | 4 |
+| `cam_yaw_deg` | **−93.7%** | −4° | ×24 | +4° |
+| `servo_damping_scale` | **−92.9%** | 0.50 | **×5354** | 0.50 |
+| `cam_pitch_deg` | **−75.4%** | −4° | ×71 | +4° |
+| `gripper_rate_scale` | **−66.9%** | 0.35 | ×5 | 0.35 |
+| `pad_friction_scale` | **−36.9%** | 0.60 | ×6 | 1.20 |
+| `gripper_latency_steps` | **−34.1%** | 4 | ×16 | 4 |
+| `obs_latency_steps` | **−32.0%** | 4 | ×11 | 4 |
+| `depth_dropout_blob` | **−30.4%** | 0.20 | ×3 | 0.20 |
+| `cam_pos_x_m` | −15.5% | +0.05 | ×5.5 | +0.05 |
+| `depth_dropout` | −7.5% | 0.20 | ×6.5 | 0.20 |
+| `joint_response_scale` | −5.4% | 0.65 | ×4.5 | 0.80 |
+| `table_friction_scale` | −2.8% | 1.30 | ×3 | 0.80 |
+| `depth_scale` | −2.6% | 1.07 | ×3 | 1.03 |
+| `action_deadband_rad` | −2.0% | 0.005 | ×3 | 0.010 |
+| `cam_pos_z_m` | −1.7% | +0.02 | ×3.5 | +0.02 |
+| `depth_bias_m` | +0.7% | +0.03 | ×2.5 | −0.01 |
+
+### 4.2 What the screen says
+
+**Nine of seventeen axes produce a throughput gap of ≥ 10%, and every one of
+those nine is a plausible session parameter.** Broad domain randomisation has
+*not* already covered this: there is a very large amount of headroom.
+
+Four readings that shaped the formal stage.
+
+**Timing dominates, and it was never modelled.** The two largest throughput
+effects in the sweep are `action_latency_steps` (−95.7%) and `cam_yaw_deg`
+(−93.7%), and three of the top eight are latencies. The simulator hands the
+command over in the tick it was computed and shows the policy an image with no
+delay. Four control steps is 80 ms — a USB-CAN hop plus a driver queue plus a
+200 Hz inner loop. This is the single clearest instance of the simulator not
+being approximately right but silently asserting zero.
+
+**Camera *aiming* matters enormously; camera *position* barely does.** Yaw and
+pitch cost 94% and 75% at 4°, while moving the camera 50 mm costs 15% (x) or
+2% (z). Rotation sweeps the target across the image; translation mostly
+changes parallax, which the spatial-softmax encoder is largely invariant to.
+
+**A persistent offset costs far more than the same magnitude of jitter.** The
+policy was trained with ±2° of *per-episode random* camera jitter. A
+*persistent* −1.5° offset — comfortably inside that support — costs **9–11%**
+of throughput. Matching a parameter's marginal distribution is not the same as
+matching its hold time, and this is the sharpest example of it in the sweep.
+It is also exactly the failure mode the README's hypothesis is about.
+
+**Depth *geometry* errors are nearly free; depth *dropout* is not.** A 7%
+depth scale error costs 2.6% and a 30 mm bias costs nothing measurable, while
+20% structured dropout costs 30%. The policy is not reading absolute range
+off the depth channel; it is reading shape and support, and holes destroy
+those while a uniform rescale does not. The masked-depth representation is
+doing more work than the raw depth.
+
+**One axis is tail-only, and it is the most interesting in the sweep.**
+`servo_damping_scale` at 0.75 costs 5.3% of throughput — small — while taking
+the safety-shell rate from 1.17 to 212 per arm-hour, about ×180. At 0.50 the
+plant is simply unstable (6275 trips/arm-hour, throughput −93%) and is not a
+usable adaptation target. A calibration scored on throughput alone would rank
+this axis near the bottom and miss a mismatch that would stop the robot every
+17 seconds on hardware.
+
+### 4.3 What was carried to S2, and what was not
+
+Four axes, chosen to span four *distinct mechanisms* rather than to take the
+top four by size — camera geometry, perception timing, actuation, and gripper:
+
+| axis | mechanism | why |
+|---|---|---|
+| `cam_yaw_deg` | camera geometry | largest camera effect; a calibration residual is the most likely real mismatch of all |
+| `obs_latency_steps` | perception timing | cleanest monotone dose-response in the sweep (−4.2 / −14.4 / −24.8 / −32.0%) |
+| `servo_damping_scale` | actuation | the only axis with a tail-only regime |
+| `gripper_rate_scale` | gripper | −67%, and `robot.py` flags the assumed 0.10 m/s as *not measured* |
+
+**`action_latency_steps` was added afterwards as a fifth.** It screened as the
+single largest effect and finished after the other four were already running.
+Leaving the biggest effect at screening scale, where nothing carries an
+uncertainty, would not have been defensible, so it was re-measured at the
+formal protocol as an extension (`s2b_manifest.json`).
+
+Deliberately **not** carried forward, and why:
+
+* `cam_pitch_deg` and `cam_pos_x_m` — real, but the same *mechanism* as
+  `cam_yaw_deg`. One representative is enough at formal cost.
+* `gripper_latency_steps` — same mechanism as the other latencies.
+* `depth_dropout_blob` — a strong effect (−30%), but it is a *perception*
+  failure whose fix is a perception fix. Section 2.1 keeps it separate from
+  physics calibration on purpose; it should be its own stress test.
+* `depth_scale`, `depth_bias_m`, `cam_pos_z_m`, `action_deadband_rad` — under
+  3%, which at screening scale is not distinguishable from nothing. **These
+  are the axes a decision-aware method should learn to ignore**, and they are
+  useful precisely for that.
+
 ## 5. Stage S2 — formal sweep
 
 *(pending)*
