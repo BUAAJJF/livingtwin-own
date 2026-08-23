@@ -68,19 +68,27 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
   ADAPTED=$(cat "$OUT/$TAG.ckpt")
   echo "=== adapted: $ADAPTED"
 
+  # An evaluation already on disk is not repeated.  A run's tag is a function
+  # of its adaptation distribution and seed, so the same configuration reached
+  # from two plans -- the anchor stage and the formal stage both contain the
+  # oracle -- is one run and one set of evaluations, not two.
   r=0
   for SEED_E in 20260823 31415926 27182818; do
     # target: the hidden domain, 60 ms of observation delay
-    micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
-      --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
-      --obs-latency-steps 3 \
-      --label "${TAG}_target__r$r" --json "$OUT/${TAG}_target__r$r.json" \
-      > "$OUT/${TAG}_target__r$r.log" 2>&1
+    if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
+      micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
+        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
+        --obs-latency-steps 3 \
+        --label "${TAG}_target__r$r" --json "$OUT/${TAG}_target__r$r.json" \
+        > "$OUT/${TAG}_target__r$r.log" 2>&1
+    fi
     # retention: back in the domain the policy was deployed from
-    micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
-      --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
-      --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \
-      > "$OUT/${TAG}_retention__r$r.log" 2>&1
+    if [ ! -e "$OUT/${TAG}_retention__r$r.json" ]; then
+      micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
+        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
+        --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \
+        > "$OUT/${TAG}_retention__r$r.log" 2>&1
+    fi
     echo "[$TAG repeat $r done]"
     r=$((r + 1))
   done
