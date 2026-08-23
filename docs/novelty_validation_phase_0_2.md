@@ -664,26 +664,42 @@ measurement means anything:
 
 ### 6.2 Result
 
-Lift over the majority-class baseline, in percentage points. 71 500 hidden
-states from 256 environments; 3000 steps.
+**Balanced accuracy** (mean per-class recall) above its `1/K` chance level, in
+percentage points — see §6.3 for why raw lift is not usable here. 71 500
+hidden states from 256 environments over 3000 steps; `n_eff` is the number of
+*independent* (environment, label) facts in the held-out set.
 
-| policy (training cadence) | eval cadence | cur shape | **prev shape** | cur mass | **prev mass** |
-|---|---|---:|---:|---:|---:|
-| distilled (EP-All) | OBJ-All | +5.5 | **−0.8** | +7.3 | **+1.4** |
-| distilled (EP-All) | EP-All | +7.0 | +7.0 † | +14.4 | +14.4 † |
-| fine-tuned (OBJ-All) | OBJ-All | +2.5 | **+2.2** | +7.3 | **+1.9** |
+| policy (trained under) | eval cadence | cur shape | **prev shape** | cur mass | **prev mass** | n_eff |
+|---|---|---:|---:|---:|---:|---:|
+| distilled (EP-All) | OBJ-All | +7.1 | **+1.6** | +9.1 | **−0.4** | 320 / 256 |
+| fine-tuned (OBJ-All) | EP-All | +11.6 | +11.6 † | +13.6 | +13.6 † | 113 / 115 |
 
-† Under EP-All the previous object *is* the current object, so those two
-columns are the same measurement written twice. They carry no information
-about carry-over and are shown only to make the tautology explicit.
+† Under EP-All the previous object *is* the current object, so those columns
+are the same measurement written twice. They say nothing about carry-over and
+are shown only to make the tautology explicit. Note also the `n_eff` collapse:
+the EP-All rows rest on about a third as many independent labels.
 
 **Under the honest cadence, the recurrent state carries essentially nothing
-about the previous object.** Previous shape decodes at −0.8 pp for the
-distilled policy — below its own floor — and +2.2 pp for the fine-tuned one;
-previous mass at +1.4 and +1.9 pp. Meanwhile the *current* object's mass
-decodes at +7.3 pp for both, which is the memory doing precisely the job it
-exists for: mass is the one parameter a camera cannot see and must be inferred
-from contact.
+about the previous object.** Previous shape decodes at +1.6 pp and previous
+mass at **−0.4 pp** — below chance. Meanwhile the *current* object decodes at
++7.1 pp (shape) and +9.1 pp (mass), which is the memory doing precisely the
+job it exists for: mass is the one parameter a camera cannot see and must be
+inferred from contact.
+
+The same measurement on raw lift over the majority-class baseline, for
+completeness and because it is what a less careful version of this section
+would have reported:
+
+| policy | eval cadence | cur shape | prev shape | cur mass | prev mass |
+|---|---|---:|---:|---:|---:|
+| distilled | OBJ-All | +3.9 | −3.0 | +4.9 | −1.9 |
+| distilled | EP-All | +7.0 | +7.0 † | +14.4 | +14.4 † |
+| fine-tuned | OBJ-All | +2.5 | +2.2 | +7.3 | +1.9 |
+| fine-tuned | EP-All | +6.1 | +6.1 † | +11.2 | +11.2 † |
+
+Both statistics agree on the conclusion: no previous-object information under
+the honest cadence. They disagree sharply on how big the EP-All numbers look,
+which is the subject of the next subsection.
 
 ### 6.3 A statistic that nearly fooled this section
 
