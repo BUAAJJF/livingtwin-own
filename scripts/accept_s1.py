@@ -29,7 +29,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import subprocess
+import sys
 from dataclasses import asdict
+from pathlib import Path
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
@@ -61,6 +66,54 @@ def aspect_class(half: torch.Tensor) -> torch.Tensor:
     return torch.bucketize(ratio, torch.tensor(ASPECT_CUTS, device=half.device))
 
 
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _provenance(checkpoint: str) -> dict:
+    """Everything needed to say which code and which weights produced a number.
+
+    Recorded per run rather than written down afterwards: a result whose commit
+    is remembered rather than stamped is a result that cannot be re-run.
+    """
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(
+                ("git", *args), cwd=Path(__file__).resolve().parent.parent,
+                capture_output=True, text=True, timeout=15,
+            ).stdout.strip()
+        except Exception:
+            return ""
+
+    import mjlab
+    import mujoco
+    prov = {
+        "git_commit": git("rev-parse", "HEAD"),
+        "git_branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        # The diff itself, not just "dirty": a number measured against
+        # uncommitted code is only interpretable next to that code.
+        "git_dirty": git("status", "--porcelain"),
+        "git_diff": git("diff"),
+        "checkpoint": str(Path(checkpoint).resolve()),
+        "checkpoint_sha256": _sha256(checkpoint),
+        "argv": sys.argv,
+        "python": sys.version.split()[0],
+        "torch": torch.__version__,
+        "mjlab": getattr(mjlab, "__version__", "unknown"),
+        "mujoco": mujoco.__version__,
+    }
+    try:
+        import rsl_rl
+        prov["rsl_rl"] = getattr(rsl_rl, "__version__", "unknown")
+    except Exception:
+        pass
+    return prov
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("task")
@@ -77,11 +130,25 @@ def main() -> int:
                    help="draw a new shape for every object rather than one per "
                         "episode; see below")
     p.add_argument("--device", default="cuda:0")
+    p.add_argument("--seed", type=int, default=None,
+                   help="seeds the whole rollout.  Note that this makes a run "
+                        "repeatable for a FIXED policy; it does not pair "
+                        "scenes across policies, because the single global "
+                        "stream is consumed in an order that depends on when "
+                        "placements happen, which depends on the policy.")
+    p.add_argument("--json", default=None,
+                   help="write metrics, per-environment counts and provenance "
+                        "here.  Plots are generated from this, never from the "
+                        "printed table.")
+    p.add_argument("--label", default="",
+                   help="name for this run inside the JSON")
     a = p.parse_args()
 
     env_cfg = load_env_cfg(a.task, play=True)
     agent_cfg = load_rl_cfg(a.task)
     env_cfg.scene.num_envs = a.num_envs
+    if a.seed is not None:
+        env_cfg.seed = a.seed
     env = ManagerBasedRlEnv(cfg=env_cfg, device=a.device, render_mode=None)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
@@ -152,7 +219,19 @@ def main() -> int:
     drops = torch.zeros(n_cls, device=dev)
     placed_total = torch.zeros((), device=dev)
     cycle_times: list[torch.Tensor] = []
+    cycle_envs: list[torch.Tensor] = []
     stuck_steps = torch.zeros((), device=dev)
+    # The same quantities kept per environment, which the aggregates above
+    # cannot be recovered from.  A confidence interval on any of these has to
+    # resample whole environments -- control steps inside one environment are
+    # about as independent as consecutive frames of a video -- so the
+    # per-environment vector is the unit the bootstrap needs and the aggregate
+    # is not.
+    per_env = {
+        k: torch.zeros(n, device=dev)
+        for k in ("placed", "ok", "fail", "grasps", "drops", "stuck", "trips",
+                  "clears", "strays")
+    }
     peak_ratio = torch.zeros(len(jids), device=dev)
     # A peak over a third of a million samples is an extreme-value statistic:
     # one environment touching the shell for one step reads exactly the same as
@@ -212,14 +291,19 @@ def main() -> int:
             lost = just_placed & (age > a.budget)
             ok.index_add_(0, cls_now[won], won[won].float())
             fail.index_add_(0, cls_now[lost], lost[lost].float())
+            per_env["placed"] += just_placed.float()
+            per_env["ok"] += won.float()
+            per_env["fail"] += lost.float()
             if just_placed.any():
                 cycle_times.append(age[just_placed].clone())
+                cycle_envs.append(just_placed.nonzero().flatten().clone())
             # Per-instance scoring under-weights a stuck object, which
             # blocks its env and so presents fewer instances than a
             # healthy one.  This counts the time instead, so a policy that
             # jams on one shape cannot hide behind the throughput of the
             # envs that did not.
             stuck_steps += (age > a.budget).sum()
+            per_env["stuck"] += (age > a.budget).float()
             age[just_placed] = 0.0
 
             # --- grasp outcome ----------------------------------------------
@@ -233,6 +317,7 @@ def main() -> int:
             g = new_grasp.nonzero(as_tuple=False).flatten()
             if g.numel():
                 grasps.index_add_(0, cls_now[g], torch.ones(g.numel(), device=dev))
+                per_env["grasps"] += new_grasp.float()
                 pending[g] = True
                 pending_age[g] = 0.0
                 pending_cls[g] = cls_now[g]
@@ -247,18 +332,25 @@ def main() -> int:
             d = dropped.nonzero(as_tuple=False).flatten()
             if d.numel():
                 drops.index_add_(0, pending_cls[d], torch.ones(d.numel(), device=dev))
+                per_env["drops"] += dropped.float()
             pending[dropped] = False
 
             # Episode reset re-rolls the shape and ends whatever instance was
             # in flight.  An instance that had its whole budget and was still
             # on the table is a failure; one cut short by the horizon never had
             # the chance, so it is censored rather than counted.
-            trips += u.termination_manager.get_term("over_speed").sum()
+            over_speed = u.termination_manager.get_term("over_speed")
+            trips += over_speed.sum()
+            per_env["trips"] += over_speed.float()
             if has_cleanup:
                 # clamp(min=0) because a reset drops the counter to zero, and a
                 # negative delta is that reset rather than un-cleared tables.
-                clears_total += (pick.table_clears - prev_clears).clamp(min=0).sum()
-                strays_total += (pick.objects_strayed - prev_strays).clamp(min=0).sum()
+                d_clear = (pick.table_clears - prev_clears).clamp(min=0)
+                d_stray = (pick.objects_strayed - prev_strays).clamp(min=0)
+                clears_total += d_clear.sum()
+                strays_total += d_stray.sum()
+                per_env["clears"] += d_clear
+                per_env["strays"] += d_stray
                 prev_clears = pick.table_clears.clone()
                 prev_strays = pick.objects_strayed.clone()
             if a.reshape_on_place and just_placed.any():
@@ -270,6 +362,8 @@ def main() -> int:
                 if stale.numel():
                     fail.index_add_(0, cls_now[stale],
                                     torch.ones(stale.numel(), device=dev))
+                    per_env["fail"].index_add_(
+                        0, stale, torch.ones(stale.numel(), device=dev))
                 age[e] = 0.0
                 pending[e] = False
                 lifted[e] = False
@@ -356,6 +450,84 @@ def main() -> int:
     print()
     print(f"  S1 {'PASS' if verdict else 'FAIL'}")
     print()
+
+    if a.json:
+        hours = sim_seconds / 3600.0
+        c = torch.cat(cycle_times).float() if cycle_times else torch.zeros(0)
+        ce = torch.cat(cycle_envs).long() if cycle_envs else torch.zeros(0).long()
+        out = {
+            "label": a.label or Path(a.checkpoint).parent.name,
+            "task": a.task,
+            "verdict": "PASS" if verdict else "FAIL",
+            "config": {
+                "num_envs": n, "steps": a.steps, "budget": a.budget,
+                "drop_grace": a.drop_grace, "lift_clear": a.lift_clear,
+                "reshape_on_place_flag": a.reshape_on_place,
+                "seed_requested": a.seed,
+                # What the environment ended up on, which is what mjlab
+                # writes back into the field.  With no --seed this is null and
+                # the run is NOT reproducible; recorded either way so a result
+                # cannot be mistaken for a repeatable one.
+                "seed_effective": getattr(env_cfg, "seed", None),
+                "episode_length_s": env_cfg.episode_length_s,
+                "control_dt": dt,
+                "num_objects": pick.num_objects,
+                "reshape_on_place_env": bool(
+                    getattr(env_cfg.commands["pick"], "reshape_on_place", False)),
+                "sim_seconds": sim_seconds,
+                "arm_hours": hours,
+            },
+            "metrics": {
+                "throughput_per_min": per_min,
+                "success": overall,
+                "drop_rate": drop_rate,
+                "stuck_fraction": stuck,
+                "trips_per_arm_hour": per_hour,
+                "trips_per_100_placed": per_100,
+                "trips_total": float(trips),
+                "placed_total": float(placed_total),
+                "p50_s": float(q[0]) if cycle_times else None,
+                "p95_s": float(q[1]) if cycle_times else None,
+                "tables_per_arm_hour": (
+                    float(clears_total) / max(hours, 1e-9) if has_cleanup else None),
+                "strays_per_100_placed": (
+                    100 * float(strays_total) / max(float(placed_total), 1.0)
+                    if has_cleanup else None),
+            },
+            "per_class": {
+                name: {
+                    "instances": float(ok[i] + fail[i]),
+                    "success": float(ok[i] / (ok[i] + fail[i]).clamp(min=1)),
+                    "grasps": float(grasps[i]),
+                    "drop_rate": float(drops[i] / grasps[i].clamp(min=1)),
+                }
+                for i, name in enumerate(ASPECT_NAMES)
+            },
+            # The bootstrap unit.  Everything here is a total over one
+            # environment for the whole rollout, so resampling these rows with
+            # replacement resamples independent arms.
+            "per_env": {k: v.cpu().tolist() for k, v in per_env.items()},
+            "per_env_seconds": dt * a.steps,
+            "cycle_times_s": c.cpu().tolist(),
+            "cycle_env_ids": ce.cpu().tolist(),
+            "joint_speed": {
+                "joints": jnames,
+                "p99": p99.cpu().tolist(),
+                "p999": p999.cpu().tolist(),
+                "peak": peak_ratio.cpu().tolist(),
+                "frac_above_headroom": over.cpu().tolist(),
+                "headroom": SPEED_HEADROOM,
+                "hist_bins": SPEED_BINS,
+                "hist_max": SPEED_MAX,
+                "hist": speed_hist.cpu().tolist(),
+            },
+            "provenance": _provenance(a.checkpoint),
+        }
+        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.json).write_text(json.dumps(out, indent=1))
+        print(f"  wrote {a.json}")
+        print()
+
     return 0 if verdict else 1
 
 
