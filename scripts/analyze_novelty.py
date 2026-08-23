@@ -312,13 +312,57 @@ def section_probe() -> None:
   if not files:
     print("  (no probe results yet)")
     return
+
+  print("  Balanced accuracy (mean per-class recall) -- invariant to the class")
+  print("  prior, which differs between cadences and makes raw lift")
+  print("  incomparable.  Chance is 1/K.  n_eff is the number of independent")
+  print("  (environment, label) facts in the held-out set.")
+  print()
+  print(f"  {'run':28s} {'cadence':9s} {'hid':5s} "
+        f"{'cur_cls':>9s} {'prev_cls':>9s} {'cur_mass':>9s} {'prev_mass':>9s}"
+        f" {'n_eff':>7s}")
+  rows = []
   for f in files:
     d = json.loads(f.read_text())
-    print(f"  --- {f.stem}")
-    for k, v in d.items():
-      if k.startswith("_"):
-        continue
-      print(f"      {k}: {v}")
+    pr = d.get("probes", {})
+    if not pr:
+      continue
+    cad = ",".join(d.get("redraw_on_place") or []) or "episode"
+    cad = "object" if cad == "shape,mass,friction" else cad
+    hid = "zero" if d.get("reset_hidden_on_respawn") else "keep"
+
+    def bal(k):
+      v = pr.get(k, {})
+      return v.get("balanced_lift")
+
+    vals = {k: bal(k) for k in ("cur_cls", "prev_cls", "cur_mass", "prev_mass")}
+    n_eff = pr.get("cur_cls", {}).get("n_effective_test")
+    fmt = lambda v: f"{100 * v:+8.1f}" if v is not None else "       -"
+    print(f"  {f.stem:28s} {cad:9s} {hid:5s} "
+          + " ".join(fmt(vals[k]) for k in
+                     ("cur_cls", "prev_cls", "cur_mass", "prev_mass"))
+          + f" {n_eff if n_eff is not None else '-':>7}")
+    row = {"run": f.stem, "cadence": cad, "hidden": hid,
+           "n_effective_test": n_eff}
+    for k, v in vals.items():
+      row[f"{k}_balanced_lift"] = v
+      row[f"{k}_accuracy"] = pr.get(k, {}).get("test_accuracy")
+      row[f"{k}_majority"] = pr.get(k, {}).get("majority_class_baseline")
+    sw = d.get("history_swap") or {}
+    row["swap_immediate_normalised"] = sw.get("immediate_normalised")
+    row["swap_final_normalised"] = sw.get("final_normalised")
+    rows.append(row)
+
+  print()
+  print(f"  history swap, action divergence as a fraction of the")
+  print(f"  across-environment action spread:")
+  print(f"  {'run':28s} {'cadence':9s} {'hid':5s} {'k=0':>8s} {'k=25':>8s}")
+  for r in rows:
+    a0, a1 = r["swap_immediate_normalised"], r["swap_final_normalised"]
+    print(f"  {r['run']:28s} {r['cadence']:9s} {r['hidden']:5s} "
+          f"{a0 if a0 is None else f'{a0:8.3f}':>8} "
+          f"{a1 if a1 is None else f'{a1:8.3f}':>8}")
+  _write("probe_summary", rows)
 
 
 def _write(name: str, rows: list[dict]) -> None:
