@@ -100,7 +100,8 @@ def _label(axis: str, v: float, rep: int) -> str:
   return f"{axis}__{tag}__r{rep}"
 
 
-def emit(stage: str, axes: list[str], pair: str | None) -> list[str]:
+def emit(stage: str, axes: list[str], pair: str | None,
+         pair_levels: str | None = None) -> list[str]:
   spec = STAGES[stage]
   reps, lines = spec["repeats"], []
 
@@ -112,8 +113,13 @@ def emit(stage: str, axes: list[str], pair: str | None) -> list[str]:
     # Three levels each: nominal, moderate, large -- taken from the same
     # LEVELS lists so the interaction points sit on the main-effect grid and
     # the two can be read against each other.
-    la = [LEVELS[a][0], LEVELS[a][2], LEVELS[a][-1]]
-    lb = [LEVELS[b][0], LEVELS[b][2], LEVELS[b][-1]]
+    if pair_levels:
+      sa, sb = pair_levels.split(";")
+      la = [float(x) for x in sa.split(",")]
+      lb = [float(x) for x in sb.split(",")]
+    else:
+      la = [LEVELS[a][0], LEVELS[a][2], LEVELS[a][-1]]
+      lb = [LEVELS[b][0], LEVELS[b][2], LEVELS[b][-1]]
     for va in la:
       for vb in lb:
         for r in range(reps):
@@ -141,6 +147,12 @@ def main() -> int:
   p.add_argument("--axes", default=None,
                  help="comma-separated subset; default is every axis")
   p.add_argument("--pair", default=None, help="s3 only: 'axis_a:axis_b'")
+  p.add_argument("--pair-levels", default=None,
+                 help="s3 only: '1,0.7,0.5;1,0.8,0.6' -- three levels for each "
+                      "axis, semicolon-separated.  Default takes them off the "
+                      "main-effect grid, which spans both directions and is "
+                      "usually not what an interaction test wants: the useful "
+                      "cells are the ones where BOTH axes degrade.")
   p.add_argument("--out", default=None,
                  help="write the job list here.  Prefer this to shell "
                       "redirection: `micromamba run` merges stdout and "
@@ -157,7 +169,7 @@ def main() -> int:
   if a.stage == "s3" and not a.pair:
     p.error("s3 needs --pair axis_a:axis_b")
 
-  lines = emit(a.stage, axes, a.pair)
+  lines = emit(a.stage, axes, a.pair, a.pair_levels)
   if a.out:
     with open(a.out, "w") as f:
       f.write("\n".join(lines) + "\n")
