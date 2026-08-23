@@ -458,54 +458,72 @@ Both findings from §4.2 hold at the second scale, with the numbers slightly
 against −81.5% for −4.5%) and considerably more damning for the others: an
 80 rad/s² acceleration ceiling more than quadruples the shell rate in clutter.
 
-### 4.4 Locating the frontier
+### 4.4 The frontier
 
-A finer slew sweep (× 0.95 / 0.92 / 0.90 / 0.88) and two combinations
-(`slew 0.90 + accel 120`, `slew 0.90 + cubic`) were queued to pin down where
-the throughput cost crosses 2%. They were still executing when the VPN
-connection dropped for the second time this session; the server-side jobs
-survive (`setsid nohup` inside `tmux`) and land in
-`results/novelty_validation/`, read by `scripts/analyze_novelty.py --section
-safety`.
+The slew ceiling is the only filter that works, so it is the only one worth
+resolving finely. Single object, distilled policy, against the `none`
+baseline of 46.7 obj/min at 22.7 trips/arm-h:
 
-The shape of the frontier from the points that exist:
+| slew scale | obj/min | Δ throughput | trips/arm-h | Δ trips |
+|---|---:|---:|---:|---:|
+| 1.00 (as deployed) | 46.7 | — | 22.7 | — |
+| **0.95** | **47.0** | **+0.6%** | **15.2** | **−33.0%** |
+| **0.92** | **47.0** | **+0.6%** | **12.2** | **−46.3%** |
+| 0.90 | 45.6 | −2.4% | 9.1 | −59.9% |
+| 0.85 | 44.6 | −4.5% | 4.2 | −81.5% |
+| 0.70 | 36.4 | −22.1% | 2.8 | −87.7% |
 
-| slew scale | Δ throughput (S2 / S3) | Δ trips (S2 / S3) |
-|---|---:|---:|
-| 1.00 | — | — |
-| 0.85 | −4.5% / −3.3% | −81.5% / −85.7% |
-| 0.70 | −22.1% / −9.6% | −87.7% / −94.7% |
+**No point reaches −80% trips at ≤ 2% throughput.** −80% arrives only at 0.85,
+which costs 4.5%; the ≤ 2% budget buys about −50%. The Safety Gate's numeric
+threshold is therefore genuinely unreachable with this filter, not merely
+unsampled.
 
-The trip rate collapses between 1.00 and 0.85 while throughput has fallen only
-3–4%, then throughput falls off a cliff for almost no further safety. The
-interesting region is entirely inside 0.85–1.00. Whether a point in it reaches
-−80% trips at ≤ 2% throughput decides the Safety Gate's *literal* verdict; it
-does not change §10.1, which rests on the asymmetry between filtering and
-fine-tuning rather than on the threshold.
+Two things worth taking out of the table anyway:
+
+* **Tightening the slew ceiling from 0.62 to 0.57 of the trip speed
+  (`slew_scale = 0.92`) is free.** It cuts the shell rate almost in half
+  *and* reads +0.6% throughput. That is not a paradox: a shell trip terminates
+  the episode, so trips that do not happen are resets that are not paid for.
+  This is a one-line change to `COMMAND_DERATE` and it should be made
+  regardless of anything else in this document.
+* The knee is sharp. Between 0.92 and 0.85 the trip rate falls another 35
+  points for 5 points of throughput; below 0.85 throughput collapses for
+  almost nothing. If a deployment wants the safety, 0.85 is where to buy it.
+
+The combinations (`slew 0.90 + accel 120`, `slew 0.90 + cubic`) and the
+three-object versions of the same sweep were still executing when the VPN
+dropped for the second time; the jobs survive (`setsid nohup` inside `tmux`)
+and land in `results/novelty_validation/`, read by
+`scripts/analyze_novelty.py --section safety`. Given §4.2 and §4.3 — where
+both accel limiting and cubic interpolation *raised* the trip rate at every
+setting on both scales — the combinations are expected to be worse than the
+slew ceiling alone, and nothing in §10.1 turns on them.
 
 ### 4.5 Safety Gate
 
-**FAIL, narrowly, on the throughput criterion.** The gate asks for ≥ 80% of
-trips removed for ≤ 2% of throughput. `slew × 0.85` removes 81.5% of trips but
-costs 4.5%. No filter tested reached the pair. *(A finer sweep at 0.88/0.90/
-0.92/0.95 is in §4.4 to locate the frontier exactly.)*
+**FAIL on the throughput criterion**, and §4.4 shows it fails properly rather
+than for want of sampling: the gate asks for ≥ 80% of trips removed for ≤ 2%
+of throughput, −80% arrives only at `slew × 0.85` where the cost is 4.5%, and
+the ≤ 2% budget buys about −50%.
 
 But the gate's *purpose* — deciding whether safety should be the paper's
 contribution — is answered more clearly than the threshold suggests, and in
 the direction the gate was written to detect:
 
-* A deterministic shell buys **most** of the safety. 81.5% of the trips are
-  reachable with one scalar and no retraining.
-* It buys it by **strictly trading throughput away**. Every filter here moves
-  down and left; none moves up.
+* A deterministic shell buys **most** of the safety. 81.5% of the trips (85.7%
+  in clutter) go with one scalar and no retraining, and roughly half of them
+  go for free (§4.4).
+* Beyond that it buys safety by **trading throughput away**, monotonically.
 * PPO fine-tuning moved this policy from **46.7 obj/min @ 22.7 trips/h** to
   **55.8 @ 2.3** — 19% *more* throughput and 90% fewer trips *at the same
-  time*. No filter can do that, because a filter can only remove authority.
+  time*. No filter can do that, because a filter can only remove authority
+  and the policy needs its authority to be fast.
 
-So: **safety alone is not the novelty** — a shell gets most of it. What a
-filter cannot reproduce is the joint improvement, and "imitation inherits
-speed but not caution, and RL restores caution without paying speed" remains a
-claim about learning, not about filtering.
+So: **safety alone is not the novelty** — a shell gets most of it, and the
+cheapest part of it is a one-line constant change (§4.4). What a filter cannot
+reproduce is the *joint* improvement, so "imitation inherits speed but not
+caution, and RL restores caution without paying speed" survives as a claim
+about learning rather than about filtering.
 
 ## 5. Cadence experiment matrix
 
@@ -959,9 +977,10 @@ network capacity, `COMMAND_DERATE`, or anything else in the training path.
 ### 10.1 Safety Gate — **FAIL on the threshold, PASS on the question**
 
 The threshold asked for a filter removing ≥ 80% of safety-shell events at
-≤ 2% throughput cost. The best result was `slew × 0.85`: **−81.5% events for
-−4.5% throughput**. No filter reached the pair, so the literal verdict is
-**FAIL**.
+≤ 2% throughput cost. Resolving the frontier finely (§4.4): −80% arrives only
+at `slew × 0.85`, costing 4.5%, and the ≤ 2% budget buys about −50%. The
+literal verdict is **FAIL**, and it fails by a real margin rather than for
+want of sampling.
 
 The finding the gate was written to produce is nonetheless available, and it
 points the way the gate anticipated:
