@@ -177,9 +177,9 @@ class SessionMismatchCfg:
 class PerturbedCameraScene:
   """``pick_mdp.camera_scene`` with a session's depth and timing error on top.
 
-  Class-based because observation latency needs a per-environment ring buffer
-  and that buffer has to be flushed on an episode boundary -- mjlab calls
-  ``reset`` on any term whose ``func`` provides one.
+  Class-based so that it can be given a ``reset`` hook: mjlab files a term as
+  a class term iff its func has one, and :mod:`piper_push.latency` builds on
+  that to redraw a per-environment lag at the episode boundary.
 
   The ordering is the sensor's: geometry first (already baked into the render
   by the camera pose), then the sensor's own scale and bias, then its
@@ -195,18 +195,13 @@ class PerturbedCameraScene:
     p = cfg.params
     self._scale = float(p.get("depth_scale", 1.0))
     self._bias = float(p.get("depth_bias_m", 0.0))
-    self._blob = float(p.get("depth_dropout_blob", 0.0))
-      # NOTE: mjlab already provides this -- ObservationTermCfg.delay_min_lag /
-    # delay_max_lag, "use min=max for constant delay".  Found after the WM0
-    # sweep was already running.  The two are equivalent here (both delay the
-    # final term output by a constant number of steps; the camera group has
-    # enable_corruption=False so mjlab's noise stage is a no-op), so the
-    # results stand, but WM1 should switch to the native fields and delete
-    # this buffer: better tested, and it supports a sampled lag range rather
-    # than only a constant, which is what a real pipeline does.
-    self._latency = max(int(p.get("obs_latency_steps", 0)), 0)
-    self._buf: list[torch.Tensor] = []
     self._env = env
+    # Observation latency used to live here as a hand-rolled ring buffer.  It
+    # is now ``delay_min_lag``/``delay_max_lag`` on this term's config --
+    # mjlab's own DelayBuffer, which does the same thing, is tested, and takes
+    # a sampled lag range rather than only a constant.  ``apply_session_mismatch``
+    # sets those fields; ``obs_latency_steps`` survives in ``params`` only so
+    # that the provenance written next to every result still names the axis.
 
   def __call__(self, env, sensor_name: str, command_name: str,
                cutoff_distance: float = 1.5, min_depth: float = 0.05,
@@ -239,27 +234,18 @@ class PerturbedCameraScene:
       if restore is not None:
         sensor.data.depth = restore
 
-    if not self._latency:
-      return obs
-    # Seed the pipeline with the first real frame rather than zeros: an empty
-    # buffer should mean "the camera has not moved yet", not "the scene is
-    # black", which is a state the policy has never seen and would react to.
-    while len(self._buf) < self._latency:
-      self._buf.append(obs.clone())
-    self._buf.append(obs.clone())
-    return self._buf.pop(0)
+    return obs
 
   def reset(self, env_ids=None) -> None:
-    if not self._latency or not self._buf:
-      return
-    if env_ids is None:
-      self._buf.clear()
-      return
-    # Flush only the environments that reset, by making their delayed frames
-    # equal to the newest one available.
-    newest = self._buf[-1]
-    for slot in self._buf[:-1]:
-      slot[env_ids] = newest[env_ids]
+    """Nothing to flush -- the delay buffer is the manager's and it resets it.
+
+    Kept because its presence is what registers this term as a class term:
+    ``ObservationManager._prepare_terms`` files a term under
+    ``_group_obs_class_term_cfgs`` iff its func has a callable ``reset``, and
+    :class:`piper_push.latency.LatencyScene`, which wraps this one, needs that
+    hook to redraw its per-environment lag at the episode boundary.
+    """
+    del env_ids
 
 
 def _blob_dropout(depth: torch.Tensor, frac: float, far: float) -> torch.Tensor:
@@ -334,8 +320,14 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
     params.update(depth_scale=mm.depth_scale, depth_bias_m=mm.depth_bias_m,
                   depth_dropout_blob=mm.depth_dropout_blob,
                   obs_latency_steps=mm.obs_latency_steps)
+    # Observation delay is mjlab's, not ours: delay_min_lag == delay_max_lag
+    # is a constant lag on this term's output, which is what the WM0 ring
+    # buffer did by hand.  See src/piper_push/latency.py for why the buffer
+    # was removed and tests/test_latency.py for the sequence they agree on.
+    lag = max(int(mm.obs_latency_steps), 0)
     grp.terms["scene"] = ObservationTermCfg(
-      func=PerturbedCameraScene, params=params, noise=term.noise)
+      func=PerturbedCameraScene, params=params, noise=term.noise,
+      delay_min_lag=lag, delay_max_lag=lag)
 
   # -- the arm's command path ------------------------------------------------
   arm = env_cfg.actions["arm"]
