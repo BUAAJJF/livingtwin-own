@@ -241,7 +241,95 @@ def section(stage: str, as_json: bool) -> dict:
     (RESULTS / f"{stage}_summary.json").write_text(json.dumps(out, indent=1))
     _csv(RESULTS / f"{stage}_points.csv", rows)
     print(f"\n  -> results/sim2real_sweep/{stage}_summary.json and _points.csv")
+    dose_response(stage, out)
   return out
+
+
+def dose_response(stage: str, out: dict) -> None:
+  """One small multiple per axis: throughput against level, with repeat spread.
+
+  Hand-rolled SVG rather than matplotlib.  The figure is a dozen line charts
+  and adding a plotting dependency to an environment that has to stay in step
+  with mujoco-warp is a poor trade for that.  The CSV remains the source of
+  truth; this is for seeing the shape of a dose-response at a glance, which is
+  what separates "a real effect" from "one level that happened to be low".
+  """
+  rows = out.get("points") or []
+  if not rows:
+    return
+  by_axis: dict[str, list[dict]] = defaultdict(list)
+  for r in rows:
+    if not math.isnan(r["value"]):
+      by_axis[r["axis"]].append(r)
+  if not by_axis:
+    return
+  nom = out["nominal"]["throughput_per_min"]["mean"]
+  nom_sd = out["nominal"]["throughput_per_min"]["sd"]
+
+  axes = sorted(by_axis, key=lambda a: min(
+    (r["effect_throughput"]["rel"] for r in by_axis[a]), default=0.0))
+  cols = 4
+  rowsn = (len(axes) + cols - 1) // cols
+  W, H = 260, 190
+  pad_l, pad_b, pad_t, pad_r = 46, 34, 26, 12
+  sw, sh = W * cols, H * rowsn
+
+  parts = [
+    f'<svg xmlns="http://www.w3.org/2000/svg" width="{sw}" height="{sh}" '
+    f'viewBox="0 0 {sw} {sh}" font-family="ui-sans-serif,system-ui,sans-serif">',
+    f'<rect width="{sw}" height="{sh}" fill="#fbfbfa"/>',
+  ]
+  for i, axis in enumerate(axes):
+    ox, oy = (i % cols) * W, (i // cols) * H
+    pts = sorted(by_axis[axis], key=lambda r: r["value"])
+    xs = [r["value"] for r in pts]
+    ys = [r["throughput_per_min_mean"] for r in pts]
+    x0, x1 = min(xs + [0.0]), max(xs + [0.0])
+    if x1 - x0 < 1e-12:
+      x1 = x0 + 1.0
+    y0, y1 = 0.0, max(ys + [nom]) * 1.12
+
+    def px(v): return ox + pad_l + (v - x0) / (x1 - x0) * (W - pad_l - pad_r)
+    def py(v): return oy + H - pad_b - (v - y0) / (y1 - y0) * (H - pad_b - pad_t)
+
+    parts.append(f'<line x1="{ox + pad_l}" y1="{oy + H - pad_b}" '
+                 f'x2="{ox + W - pad_r}" y2="{oy + H - pad_b}" stroke="#444"/>')
+    parts.append(f'<line x1="{ox + pad_l}" y1="{oy + pad_t}" '
+                 f'x2="{ox + pad_l}" y2="{oy + H - pad_b}" stroke="#444"/>')
+    # The unperturbed level, with its own repeat spread as a band.
+    if not math.isnan(nom_sd):
+      parts.append(f'<rect x="{ox + pad_l}" y="{py(nom + nom_sd):.1f}" '
+                   f'width="{W - pad_l - pad_r}" '
+                   f'height="{max(py(nom - nom_sd) - py(nom + nom_sd), 1):.1f}" '
+                   f'fill="#b4453c" fill-opacity="0.12"/>')
+    parts.append(f'<line x1="{ox + pad_l}" y1="{py(nom):.1f}" '
+                 f'x2="{ox + W - pad_r}" y2="{py(nom):.1f}" '
+                 f'stroke="#b4453c" stroke-dasharray="4 3"/>')
+
+    d = " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in zip(xs, ys))
+    parts.append(f'<polyline points="{d}" fill="none" stroke="#2f6f8f" '
+                 f'stroke-width="2"/>')
+    for r, x, y in zip(pts, xs, ys):
+      lo, hi = r["throughput_per_min_ci"]
+      if not math.isnan(lo):
+        parts.append(f'<line x1="{px(x):.1f}" y1="{py(lo):.1f}" '
+                     f'x2="{px(x):.1f}" y2="{py(hi):.1f}" '
+                     f'stroke="#2f6f8f" stroke-opacity="0.5" stroke-width="2"/>')
+      parts.append(f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="3.2" '
+                   f'fill="#2f6f8f"/>')
+    parts.append(f'<text x="{ox + pad_l}" y="{oy + 16}" font-size="11" '
+                 f'fill="#222">{axis}</text>')
+    for v in (x0, x1):
+      parts.append(f'<text x="{px(v):.1f}" y="{oy + H - pad_b + 13}" '
+                   f'font-size="9" fill="#666" text-anchor="middle">{v:g}</text>')
+    parts.append(f'<text x="{ox + pad_l - 5}" y="{py(nom):.1f}" font-size="9" '
+                 f'fill="#b4453c" text-anchor="end">{nom:.0f}</text>')
+    parts.append(f'<text x="{ox + pad_l - 5}" y="{oy + H - pad_b}" '
+                 f'font-size="9" fill="#666" text-anchor="end">0</text>')
+  parts.append("</svg>")
+  path = RESULTS / f"{stage}_dose_response.svg"
+  path.write_text("\n".join(parts))
+  print(f"  -> results/sim2real_sweep/{path.name}  (objects/min vs level)")
 
 
 def _csv(path: Path, rows: list[dict]) -> None:
