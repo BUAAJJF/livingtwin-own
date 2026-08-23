@@ -222,6 +222,91 @@ def windows(s: SessionSet, length: int, burn_in: int, stride: int,
   return out
 
 
+def gather(s: "SessionSet", idx: list[tuple[int, int]], length: int,
+           keys=("enc", "proprio", "action", "servo"),
+           device=None) -> dict[str, torch.Tensor]:
+  """Stack the windows named by ``idx`` into ``(length, B, C)`` tensors.
+
+  ``assert_deployable`` runs on the requested keys, so a batch containing the
+  label cannot be assembled at all -- the guard is at the point of use rather
+  than in a docstring.
+  """
+  assert_deployable(keys)
+  t0 = torch.tensor([a for a, _ in idx])
+  bs = torch.tensor([b for _, b in idx])
+  # (length, B) index grids, so the gather is one advanced-indexing op per
+  # channel rather than a Python loop over tens of thousands of windows.
+  ts = t0.unsqueeze(0) + torch.arange(length).unsqueeze(1)
+  out = {}
+  for k in keys:
+    x = getattr(s, k)
+    v = x[ts, bs.unsqueeze(0).expand_as(ts)]
+    if v.dtype == torch.half:
+      v = v.float()
+    if device is not None:
+      v = v.to(device)
+    out[k] = v
+  return out
+
+
+def shapes_of(s: "SessionSet", idx: list[tuple[int, int]], at: int) -> torch.Tensor:
+  """Shape class in the hand at offset ``at`` of each window.  Metadata only."""
+  t0 = torch.tensor([a for a, _ in idx]) + at
+  bs = torch.tensor([b for _, b in idx])
+  return s.shape[t0, bs]
+
+
+# ---------------------------------------------------------------------------
+# Splits
+# ---------------------------------------------------------------------------
+
+
+def load_split(root, split: str) -> list[tuple["SessionSet", str]]:
+  """Every file of one split, in a fixed order.
+
+  The split is a property of the file, decided when the data was generated:
+  different seed, different environments, and for the held-out splits
+  different object shape classes.  Nothing downstream re-partitions a tensor.
+  """
+  root = Path(root)
+  out = [(SessionSet.load(f), f.name)
+         for f in sorted(root.glob(f"{split}__lag*__seed*.pt"))]
+  if not out:
+    raise FileNotFoundError(f"no {split} files under {root}")
+  return out
+
+
+def make_index(sessions, stride: int, length: int, burn_in: int):
+  """``(session_id, t0, env)`` for every usable window, and its lag."""
+  idx, lags = [], []
+  for si, (s, _) in enumerate(sessions):
+    w = windows(s, length=length - burn_in, burn_in=burn_in, stride=stride)
+    idx.extend((si, t0, b) for t0, b in w)
+    lags.extend([s.lag] * len(w))
+  return idx, torch.tensor(lags)
+
+
+def batch_from(sessions, idx, sel, length: int, device,
+               keys=("enc", "proprio", "action", "servo")) -> dict:
+  """One batch, assembled per source session and concatenated on the batch
+  axis.  ``_lag`` rides along as the conditioning value, which is an input to
+  the model and never a feature."""
+  parts: dict[str, list] = {}
+  order = []
+  for si in sorted({idx[i][0] for i in sel}):
+    rows = [idx[i] for i in sel if idx[i][0] == si]
+    order.extend(rows)
+    g = gather(sessions[si][0], [(t0, b) for _, t0, b in rows], length,
+               keys=keys, device=device)
+    for k, v in g.items():
+      parts.setdefault(k, []).append(v)
+  out = {k: torch.cat(v, dim=1) for k, v in parts.items()}
+  out["_lag"] = torch.tensor([sessions[si][0].lag for si, _, _ in order],
+                             device=device)
+  out["_rows"] = order
+  return out
+
+
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
