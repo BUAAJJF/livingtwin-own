@@ -165,6 +165,16 @@ def main() -> int:
     # a shell trip ends the episode, and an instance cut short by the end of an
     # episode is censored rather than failed.
     trips = torch.zeros((), device=dev)
+    # Accumulated per step, not read at the end: these are per-episode counters
+    # that the reset zeroes, so a single read at the end returns whatever the
+    # last partial episode happened to hold and then gets divided by the whole
+    # rollout's duration.  It read 186.8 tables an arm-hour against a
+    # throughput of 38.4 objects a minute, which cannot both be true.
+    clears_total = torch.zeros((), device=dev)
+    strays_total = torch.zeros((), device=dev)
+    prev_clears = torch.zeros(n, device=dev)
+    prev_strays = torch.zeros(n, device=dev)
+    has_cleanup = "table_clears" in pick.metrics
     sim_seconds = 0.0
 
     with torch.inference_mode():
@@ -244,6 +254,13 @@ def main() -> int:
             # on the table is a failure; one cut short by the horizon never had
             # the chance, so it is censored rather than counted.
             trips += u.termination_manager.get_term("over_speed").sum()
+            if has_cleanup:
+                # clamp(min=0) because a reset drops the counter to zero, and a
+                # negative delta is that reset rather than un-cleared tables.
+                clears_total += (pick.table_clears - prev_clears).clamp(min=0).sum()
+                strays_total += (pick.objects_strayed - prev_strays).clamp(min=0).sum()
+                prev_clears = pick.table_clears.clone()
+                prev_strays = pick.objects_strayed.clone()
             if a.reshape_on_place and just_placed.any():
                 _reshape(just_placed.nonzero(as_tuple=False).flatten())
 
@@ -302,9 +319,9 @@ def main() -> int:
     # the target, so everything above measures the same thing it always did;
     # these two are the questions that only exist once there is a table rather
     # than an object.
-    if "table_clears" in pick.metrics:
-        clears = float(pick.table_clears.sum())
-        strayed = float(pick.objects_strayed.sum())
+    if has_cleanup:
+        clears = float(clears_total)
+        strayed = float(strays_total)
         hours = sim_seconds / 3600.0
         print(f"  tables cleared         {clears / max(hours, 1e-9):5.1f} per arm-hour"
               f"   ({pick.num_objects} objects each)")
