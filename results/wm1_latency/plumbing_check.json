@@ -1,0 +1,33 @@
+{
+ "prior": {
+  "lags": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "probs": [
+   0.4,
+   0.0,
+   0.0,
+   0.3,
+   0.3
+  ],
+  "argmax": 0,
+  "mean_lag_steps": 2.0999999999999996,
+  "mean_lag_ms": 41.99999999999999,
+  "entropy_bits": 1.5709505944546684
+ },
+ "num_envs": 24,
+ "comparable_steps": 36,
+ "exact": 24,
+ "assignment": [
+  7,
+  0,
+  0,
+  8,
+  9
+ ],
+ "failures": []
+}

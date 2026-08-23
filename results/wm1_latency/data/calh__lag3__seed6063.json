@@ -1,0 +1,25 @@
+{
+ "steps": 15000,
+ "n_envs": 16,
+ "arm_seconds": 4800.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 3,
+ "episode_boundaries": 134,
+ "shape_class_counts": [
+  0,
+  0,
+  0,
+  136094,
+  103906
+ ],
+ "bytes": 191520000,
+ "file": "calh__lag3__seed6063.pt",
+ "split": "calh",
+ "shapes": "holdout",
+ "seed": 6063
+}

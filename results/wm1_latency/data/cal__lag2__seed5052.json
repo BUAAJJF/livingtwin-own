@@ -1,0 +1,25 @@
+{
+ "steps": 15000,
+ "n_envs": 16,
+ "arm_seconds": 4800.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 2,
+ "episode_boundaries": 132,
+ "shape_class_counts": [
+  106865,
+  76747,
+  56388,
+  0,
+  0
+ ],
+ "bytes": 191520000,
+ "file": "cal__lag2__seed5052.pt",
+ "split": "cal",
+ "shapes": "train",
+ "seed": 5052
+}

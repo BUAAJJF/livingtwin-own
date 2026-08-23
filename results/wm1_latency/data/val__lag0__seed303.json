@@ -1,0 +1,25 @@
+{
+ "steps": 1500,
+ "n_envs": 64,
+ "arm_seconds": 1920.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 0,
+ "episode_boundaries": 6,
+ "shape_class_counts": [
+  41539,
+  31742,
+  22719,
+  0,
+  0
+ ],
+ "bytes": 76608000,
+ "file": "val__lag0__seed303.pt",
+ "split": "val",
+ "shapes": "train",
+ "seed": 303
+}

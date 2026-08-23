@@ -1,0 +1,25 @@
+{
+ "steps": 1500,
+ "n_envs": 64,
+ "arm_seconds": 1920.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 4,
+ "episode_boundaries": 26,
+ "shape_class_counts": [
+  0,
+  0,
+  0,
+  53085,
+  42915
+ ],
+ "bytes": 76608000,
+ "file": "valh__lag4__seed408.pt",
+ "split": "valh",
+ "shapes": "holdout",
+ "seed": 408
+}

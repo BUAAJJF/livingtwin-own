@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Bring the tracked result files back from the training server.
+#
+#   scripts/pull_results.sh [subdir]
+#
+# Excludes what .gitignore excludes -- the raw per-run sweep JSONs and the
+# multi-gigabyte session tensors -- so that what lands here is exactly what
+# gets committed.
+set -Eeuo pipefail
+SUB=${1:-wm1_latency}
+cd "$(dirname "$0")/.."
+rsync -az --info=stats1 \
+  --exclude '*.pt' --exclude 's1/' --exclude 's2/' --exclude 's3/' \
+  -e "ssh -o ClearAllForwardings=yes" \
+  "shen-teacher:/home/yunfan/work/piper-push/LivingTwin/results/$SUB/" \
+  "results/$SUB/"

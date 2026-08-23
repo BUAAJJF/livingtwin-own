@@ -14,3 +14,6 @@ results/sim2real_sweep/s3/
 # WM1 session logs: ~4 GB of fp16 rollout tensors.  The manifest, the
 # per-file descriptions and everything derived from them are tracked.
 results/wm1_latency/data/*.pt
+# The equivalence and adaptation evaluation logs are mjlab's warp module
+# chatter; the JSONs beside them carry every number and the provenance.
+results/wm1_latency/**/*.log
