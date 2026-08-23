@@ -17,6 +17,11 @@ from __future__ import annotations
 NAME = "odin1"
 
 
+def available() -> list[dict]:
+  """Nothing to find until the backend exists."""
+  return []
+
+
 def add_args(ap) -> None:
   pass
 

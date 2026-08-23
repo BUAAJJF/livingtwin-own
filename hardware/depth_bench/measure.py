@@ -76,7 +76,7 @@ def annotate(cap: Capture, board, spec) -> np.ndarray:
       cv2.polylines(img, [pts], True, c, 2)
       cv2.putText(img, name, tuple(pts[0] + np.array([4, -6])),
                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1, cv2.LINE_AA)
-  cv2.putText(vis, f"{np.linalg.norm(pose['tvec']) * 1000:.0f} mm  "
+  cv2.putText(vis, f"{pose['plane_distance_m'] * 1000:.0f} mm  "
                    f"tilt {pose['tilt_deg']:.0f} deg  "
                    f"{pose['n_corners']} corners  "
                    f"reproj {pose['reproj_rms_px']:.2f} px",
@@ -131,7 +131,7 @@ def main() -> None:
     print(f"preview -> {outdir/'view.png'}")
     try:
       pose = M.detect_pose(cap.gray, cap.K, cap.dist, board)
-      print(f"  sheet at {np.linalg.norm(pose['tvec']) * 1000:.0f} mm, "
+      print(f"  sheet at {pose['plane_distance_m'] * 1000:.0f} mm, "
             f"tilt {pose['tilt_deg']:.1f} deg, {pose['n_corners']} corners, "
             f"reproj {pose['reproj_rms_px']:.2f} px")
     except RuntimeError as e:

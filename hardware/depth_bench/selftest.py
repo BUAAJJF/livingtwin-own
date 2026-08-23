@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Check the measurement against a depth image whose answer is known.
+
+The bench's whole claim is that it recovers a sensor's bias, noise and dropout
+from a picture of a sheet of paper.  That claim is testable without a sensor:
+render the printed target onto a plane at a pose we choose, add a bias and a
+noise we choose, delete pixels at rates we choose, and see whether the numbers
+come back.
+
+This is not a formality.  The board frame's handedness, whether depth is Z or
+range, and whether the region rectangles land on the patches or beside them are
+all silent failures -- each one produces confident, plausible, wrong numbers on
+real data.  Here they produce a failed assertion.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import metrics as M
+from capture import Capture
+
+W, H = 848, 480
+K = np.array([[430.0, 0, 424.0], [0, 430.0, 240.0], [0, 0, 1.0]])
+DIST = np.zeros(5)
+
+TRUE_BIAS_M = 0.0032
+TRUE_SIGMA_M = 0.0011
+TRUE_DROP = {"charuco": 0.03, "white": 0.55, "black": 0.30}
+
+
+def render(spec, distance=0.45, tilt_deg=8.0, seed=0):
+  """A synthetic capture of the printed sheet at a known pose."""
+  page = cv2.imread(str(HERE / "targets" / "target_a4.png"), cv2.IMREAD_GRAYSCALE)
+  ppm = spec["px_per_mm"] * 1000.0  # pixels per metre of paper
+
+  rvec = np.array([np.radians(tilt_deg), np.radians(tilt_deg * 0.4), 0.03])
+  R, _ = cv2.Rodrigues(rvec)
+  centre = np.array([0.0825, 0.1385, 0.0])  # sheet centre in the board frame
+  tvec = (np.array([0.0, 0.0, distance]) - R @ centre).reshape(3, 1)
+  pose = {"rvec": rvec, "tvec": tvec, "R": R,
+          "normal": R[:, 2] / np.linalg.norm(R[:, 2])}
+
+  gt = M.plane_depth(K, pose, (H, W))
+
+  # Camera ray -> plane point -> board coordinates -> paper pixel.
+  u, v = np.meshgrid(np.arange(W, dtype=float), np.arange(H, dtype=float))
+  d = np.stack([(u - K[0, 2]) / K[0, 0], (v - K[1, 2]) / K[1, 1], np.ones_like(u)], -1)
+  p_cam = d * gt[..., None]
+  p_board = np.einsum("ij,hwj->hwi", R.T, p_cam - tvec.reshape(1, 1, 3))
+  px = (p_board[..., 0] + 0.0225) * ppm  # board origin sits 22.5 mm into the page
+  py = (p_board[..., 1] + 0.0100) * ppm  # ... and 10 mm down
+  # Anti-alias before sampling.  The page is 20 px/mm and lands on roughly one
+  # image pixel per millimetre, so nearest-neighbour sampling aliases the marker
+  # edges, which biases ChArUco corner refinement, which tilts the ground-truth
+  # plane, which shows up as a bias that differs between the left and right
+  # patches.  That is a rendering artefact and it would mask a real one.
+  scale = min(1.0, 2.0 * (K[0, 0] / distance) / ppm)  # 2x the sampling density
+  small = cv2.resize(page, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+  gray = np.full((H, W), 60, np.uint8)  # off-sheet: a dim background
+  sampled = cv2.remap(small, (px * scale).astype(np.float32),
+                      (py * scale).astype(np.float32),
+                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                      borderValue=60)
+  inside = (px >= 0) & (px < page.shape[1]) & (py >= 0) & (py < page.shape[0])
+  gray[inside] = sampled[inside]
+
+  rng = np.random.default_rng(seed)
+  n = 24
+  depth = np.where(np.isfinite(gt), gt + TRUE_BIAS_M, 0.0)[None].repeat(n, 0)
+  depth += rng.normal(0.0, TRUE_SIGMA_M, depth.shape)
+
+  for name, rate in TRUE_DROP.items():
+    mask = M.region_mask(K, DIST, pose, spec["regions"][name], (H, W))
+    hit = rng.random(depth.shape) < rate
+    depth[hit & mask[None]] = 0.0
+  depth[~np.isfinite(gt)[None].repeat(n, 0)] = 0.0
+
+  return Capture(depth=depth.astype(np.float32), gray=gray, K=K, dist=DIST,
+                 meta={"backend": "synthetic", "n_frames": n}), pose
+
+
+def main() -> None:
+  board, spec = M.load_target(HERE / "targets" / "target_a4.json")
+  cap, truth = render(spec)
+
+  res = M.evaluate(cap, board, spec)
+  print(f"pose: {res['pose']['distance_m'] * 1000:.1f} mm "
+        f"(true {abs(float(truth['normal'] @ truth['tvec'].ravel())) * 1000:.1f}), "
+        f"tilt {res['pose']['tilt_deg']:.2f} deg, "
+        f"{res['pose']['n_corners']} corners, "
+        f"reproj {res['pose']['reproj_rms_px']:.3f} px")
+
+  fails = []
+
+  def check(name, got, want, tol, unit=""):
+    ok = abs(got - want) <= tol
+    print(f"  {'ok ' if ok else 'FAIL'} {name:34s} {got:9.4f} vs {want:9.4f} "
+          f"(tol {tol:g}){unit}")
+    if not ok:
+      fails.append(name)
+
+  true_dist = abs(float(truth["normal"] @ truth["tvec"].ravel()))
+  unc = res["pose"]["plane_uncertainty_m"]
+  check("pose distance (m)", res["pose"]["distance_m"], true_dist, 2e-3)
+  check("reprojection rms (px)", res["pose"]["reproj_rms_px"], 0.0, 1.0)
+
+  # The reported uncertainty has to actually cover the error it is there to
+  # describe, or it is decoration.  It is an estimate, so it is allowed to be
+  # up to 2x optimistic and no more.
+  pose_err = abs(res["pose"]["distance_m"] - true_dist)
+  print(f"  plane uncertainty {unc * 1000:.2f} mm, actual pose error "
+        f"{pose_err * 1000:.2f} mm")
+  if pose_err > 2 * unc:
+    fails.append("plane_uncertainty underestimates the pose error")
+
+  for name, rate in TRUE_DROP.items():
+    m = res["regions"][name]
+    print(f" region {name} ({m['n_pixels']} px, "
+          f"{m['temporal_n_pixels']} usable for temporal):")
+    check(f"{name} fill", m["fill"], 1.0 - rate, 0.03)
+    # Bias is only knowable to the accuracy of the reference plane.  Quoting a
+    # tighter tolerance here would make the test pass on a broken pose and fail
+    # on a working one.
+    check(f"{name} bias (m)", m["bias_m"], TRUE_BIAS_M, max(3e-4, 2 * unc))
+    check(f"{name} spatial rms (m)", m["spatial_rms_m"], TRUE_SIGMA_M, 2e-4)
+    check(f"{name} temporal std (m)", m["temporal_std_m"], TRUE_SIGMA_M, 3e-4)
+
+  cv2.imwrite(str(HERE / "results" / "selftest_view.png"),
+              __import__("measure").annotate(cap, board, spec))
+  print(f"\n-> {HERE / 'results' / 'selftest_view.png'}")
+  if fails:
+    raise SystemExit(f"\n{len(fails)} check(s) failed: {', '.join(fails)}")
+  print("\nall checks passed")
+
+
+if __name__ == "__main__":
+  main()

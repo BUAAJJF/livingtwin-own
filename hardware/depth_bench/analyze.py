@@ -103,7 +103,6 @@ def report(backend: str, runs: list[dict]) -> dict:
     print(row)
   print("      (bias / rms / p95 in mm, against the ChArUco plane)")
 
-  z = np.array([r["pose"]["distance_m"] for r in runs])
   summary = {"backend": backend, "n_captures": len(runs), "capture": cap,
              "sim_range_m": SIM_RANGE_M, "regions": {}}
 
@@ -111,6 +110,11 @@ def report(backend: str, runs: list[dict]) -> dict:
         f"{SIM_RANGE_M:.2f} m)")
   f_px, b_m = cap.get("fx_px"), cap.get("stereo_baseline_m")
   for name in REGIONS:
+    # Against the region's own mean depth, not the sheet's: the patches sit
+    # 100 mm apart on the paper and at an oblique angle that is a real fraction
+    # of the range being fitted.
+    z = np.array([r["regions"].get(name, {}).get("range_m", np.nan)
+                  for r in runs], dtype=float)
     s = np.array([r["regions"].get(name, {}).get("spatial_rms_m", np.nan)
                   for r in runs], dtype=float)
     t = np.array([r["regions"].get(name, {}).get("temporal_std_m", np.nan)

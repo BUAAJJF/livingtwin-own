@@ -24,3 +24,8 @@ results/wm1_latency/**/*.log
 # is recomputable from what is committed.
 results/wm1_latency/adapt/*__r*.json
 results/wm1_latency/equivalence/*__r*.json
+# Depth bench raw frame stacks: ~50 MB per capture.  Kept on disk so the
+# captures can be re-reduced when the metric definitions move, but the JSONs
+# and figures beside them are what the comparison is made from.
+hardware/depth_bench/results/**/frames.npz
+hardware/depth_bench/.venv-odin1/

@@ -22,6 +22,33 @@ export MUJOCO_GL=${MUJOCO_GL:-disable}
 PREFIX="$(micromamba env list | awk '$1=="mjlab" {print $NF}')"
 [ -n "$PREFIX" ] && export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
+# Fragmentation: rsl_rl's recurrent update pads whole trajectories, so one
+# allocation late in an iteration is several gigabytes on top of a heap that
+# is already full of smaller blocks.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+
+# This box is shared.  Another project can take five of the eight cards
+# between one wave and the next, and a 512-environment run needs most of a
+# card, so "start and hope" means a CUDA OOM twenty seconds in and a shard
+# that exits with its remaining jobs unrun.  Wait for the memory instead.
+MIN_FREE_MIB=${MIN_FREE_MIB:-70000}
+wait_for_gpu() {
+  local waited=0
+  while true; do
+    local free
+    free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits \
+           -i "$GPU" 2>/dev/null | tr -d ' ')
+    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    [ "$free" -ge "$MIN_FREE_MIB" ] && { [ "$waited" -gt 0 ] && \
+      echo "=== cuda:$GPU free after ${waited}s (${free} MiB)"; return 0; }
+    if [ "$waited" -eq 0 ]; then
+      echo "=== cuda:$GPU has ${free} MiB free, need ${MIN_FREE_MIB}; waiting"
+    fi
+    sleep 60
+    waited=$((waited + 60))
+  done
+}
+
 BASE=logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt
 TASK=Mjlab-Pick-Place-PiperX-Vision
 OUT=results/wm1_latency/adapt
@@ -66,6 +93,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
 
   if [ ! -e "$OUT/$TAG.ckpt" ]; then
     echo $$ > "$LOCK"
+    wait_for_gpu
     micromamba run -n mjlab python scripts/finetune.py \
       --task "$TASK" --resume "$BASE" \
       --num-envs 512 --iterations "$ITERS" \
@@ -105,6 +133,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
   for SEED_E in 20260823 31415926 27182818; do
     # target: the hidden domain, 60 ms of observation delay
     if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
+      wait_for_gpu
       micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         --obs-latency-steps 3 \
@@ -113,6 +142,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
     fi
     # retention: back in the domain the policy was deployed from
     if [ ! -e "$OUT/${TAG}_retention__r$r.json" ]; then
+      wait_for_gpu
       micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \

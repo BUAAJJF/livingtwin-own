@@ -21,6 +21,7 @@ and we would end up measuring the integer grid instead of the camera.
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pyrealsense2 as rs
 
@@ -47,6 +48,23 @@ def add_args(ap) -> None:
   ap.add_argument("--serial", default=None)
 
 
+def available() -> list[dict]:
+  """Every RealSense on the bus, so the live viewer can find them itself."""
+  out = []
+  for dev in rs.context().query_devices():
+    try:
+      out.append({
+        "backend": NAME,
+        "serial": dev.get_info(rs.camera_info.serial_number),
+        "model": dev.get_info(rs.camera_info.name),
+        "firmware": dev.get_info(rs.camera_info.firmware_version),
+        "usb": dev.get_info(rs.camera_info.usb_type_descriptor),
+      })
+    except Exception:
+      continue
+  return out
+
+
 def _post(args):
   """The stock filter chain, in the order librealsense documents.
 
@@ -54,75 +72,58 @@ def _post(args):
   deployed pipeline actually consumes, and until that pipeline is decided the
   honest baseline is the unfiltered sensor.
   """
-  if not args.filters:
+  if not getattr(args, "filters", False):
     return []
-  spatial = rs.spatial_filter()
-  temporal = rs.temporal_filter()
-  return [rs.disparity_transform(True), spatial, temporal,
-          rs.disparity_transform(False)]
+  return [rs.disparity_transform(True), rs.spatial_filter(),
+          rs.temporal_filter(), rs.disparity_transform(False)]
 
 
-def grab(args, n_frames: int, warmup: int = 30) -> Capture:
-  ctx = rs.context()
-  devices = list(ctx.query_devices())
-  if not devices:
-    raise SystemExit("no RealSense device found; check the USB 3 cable")
+class Stream:
+  """A running camera.
 
-  cfg = rs.config()
-  if args.serial:
-    cfg.enable_device(args.serial)
-  cfg.enable_stream(rs.stream.depth, args.width, args.height, rs.format.z16, args.fps)
-  cfg.enable_stream(rs.stream.color, args.width, args.height, rs.format.bgr8,
-                    args.fps)
+  Both the one-shot ``grab`` and the live viewer go through this, so there is
+  exactly one place that decides resolution, preset, depth units and alignment.
+  Two code paths configuring the same camera differently is how a live preview
+  ends up flattering a sensor that the measurement then contradicts.
+  """
 
-  pipe = rs.pipeline()
-  profile = pipe.start(cfg)
-  try:
+  def __init__(self, args, serial: str | None = None):
+    serial = serial or getattr(args, "serial", None)
+    if not rs.context().query_devices().size():
+      raise RuntimeError("no RealSense device found; check the USB 3 cable")
+
+    cfg = rs.config()
+    if serial:
+      cfg.enable_device(serial)
+    cfg.enable_stream(rs.stream.depth, args.width, args.height, rs.format.z16,
+                      args.fps)
+    cfg.enable_stream(rs.stream.color, args.width, args.height, rs.format.bgr8,
+                      args.fps)
+
+    self._pipe = rs.pipeline()
+    profile = self._pipe.start(cfg)
     dev = profile.get_device()
     sensor = dev.first_depth_sensor()
     if sensor.supports(rs.option.visual_preset):
       sensor.set_option(rs.option.visual_preset, float(PRESETS[args.preset]))
     if sensor.supports(rs.option.depth_units):
       sensor.set_option(rs.option.depth_units, args.depth_units)
-    depth_scale = sensor.get_depth_scale()
+    self._scale = sensor.get_depth_scale()
 
     # Colour is resampled into the depth grid, never the other way round: the
     # depth samples are the measurement and must not be interpolated.
-    align = rs.align(rs.stream.depth)
-    filters = _post(args)
+    self._align = rs.align(rs.stream.depth)
+    self._filters = _post(args)
 
-    baseline = (sensor.get_option(rs.option.stereo_baseline) / 1000.0
-                if sensor.supports(rs.option.stereo_baseline) else None)
-
-    dprof = profile.get_stream(rs.stream.depth).as_video_stream_profile()
-    intr = dprof.get_intrinsics()
-    K = np.array([[intr.fx, 0.0, intr.ppx],
-                  [0.0, intr.fy, intr.ppy],
-                  [0.0, 0.0, 1.0]], dtype=np.float64)
-    dist = np.array(intr.coeffs, dtype=np.float64)
-
-    for _ in range(warmup):  # auto-exposure needs time or the first frames lie
-      pipe.wait_for_frames()
-
-    depths, gray = [], None
-    for _ in range(n_frames):
-      frames = align.process(pipe.wait_for_frames())
-      d = frames.get_depth_frame()
-      for f in filters:
-        d = f.process(d)
-      depths.append(np.asanyarray(d.as_depth_frame().get_data()).astype(np.float32)
-                    * depth_scale)
-      c = frames.get_color_frame()
-      if c:
-        import cv2
-
-        gray = cv2.cvtColor(np.asanyarray(c.get_data()), cv2.COLOR_BGR2GRAY)
-
-    if gray is None:
-      raise SystemExit("no colour frame arrived; cannot locate the target")
+    intr = profile.get_stream(rs.stream.depth).as_video_stream_profile() \
+      .get_intrinsics()
+    self.K = np.array([[intr.fx, 0.0, intr.ppx],
+                       [0.0, intr.fy, intr.ppy],
+                       [0.0, 0.0, 1.0]], dtype=np.float64)
+    self.dist = np.array(intr.coeffs, dtype=np.float64)
 
     di = dev.get_info
-    meta = {
+    self.meta = {
       "backend": NAME,
       "model": di(rs.camera_info.name),
       "serial": di(rs.camera_info.serial_number),
@@ -132,13 +133,45 @@ def grab(args, n_frames: int, warmup: int = 30) -> Capture:
       "resolution": [args.width, args.height],
       "fps": args.fps,
       "preset": args.preset,
-      "depth_units_m": depth_scale,
-      "filters": bool(args.filters),
+      "depth_units_m": self._scale,
+      "filters": bool(getattr(args, "filters", False)),
       "emitter": "none (D405 is passive stereo)",
-      "stereo_baseline_m": baseline,
+      "stereo_baseline_m": (sensor.get_option(rs.option.stereo_baseline) / 1000.0
+                            if sensor.supports(rs.option.stereo_baseline) else None),
       "fx_px": float(intr.fx),
-      "n_frames": n_frames,
     }
-    return Capture(depth=np.stack(depths), gray=gray, K=K, dist=dist, meta=meta)
+
+  def read(self) -> tuple[np.ndarray, np.ndarray]:
+    """One aligned pair: depth in metres (0 = invalid) and greyscale."""
+    frames = self._align.process(self._pipe.wait_for_frames())
+    d = frames.get_depth_frame()
+    for f in self._filters:
+      d = f.process(d)
+    depth = (np.asanyarray(d.as_depth_frame().get_data()).astype(np.float32)
+             * self._scale)
+    c = frames.get_color_frame()
+    if not c:
+      raise RuntimeError("no colour frame; cannot locate the target")
+    gray = cv2.cvtColor(np.asanyarray(c.get_data()), cv2.COLOR_BGR2GRAY)
+    return depth, gray
+
+  def close(self) -> None:
+    try:
+      self._pipe.stop()
+    except Exception:
+      pass
+
+
+def grab(args, n_frames: int, warmup: int = 30) -> Capture:
+  s = Stream(args)
+  try:
+    for _ in range(warmup):  # auto-exposure needs time or the first frames lie
+      s.read()
+    depths, gray = [], None
+    for _ in range(n_frames):
+      d, gray = s.read()
+      depths.append(d)
+    meta = dict(s.meta, n_frames=n_frames)
+    return Capture(depth=np.stack(depths), gray=gray, K=s.K, dist=s.dist, meta=meta)
   finally:
-    pipe.stop()
+    s.close()

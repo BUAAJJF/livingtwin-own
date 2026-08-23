@@ -15,6 +15,11 @@ from __future__ import annotations
 NAME = "zedx"
 
 
+def available() -> list[dict]:
+  """Nothing to find until the backend exists."""
+  return []
+
+
 def add_args(ap) -> None:
   ap.add_argument("--depth-mode", default="neural")
 

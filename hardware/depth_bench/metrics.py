@@ -53,9 +53,24 @@ def load_target(path: Path) -> tuple[cv2.aruco.CharucoBoard, dict]:
   return board, spec
 
 
+def _detector(board) -> cv2.aruco.CharucoDetector:
+  """Subpixel corner refinement, which is not the default and is worth 0.2 mm.
+
+  Measured on the synthetic capture in ``selftest.py``, where the true pose is
+  known: plain detection puts the board 0.92 mm too far away, refined 0.71 mm.
+  Almost all of the residual is along the optical axis -- it is a scale error,
+  which is what a planar target seen at low pixel span always gives.
+  """
+  dp = cv2.aruco.DetectorParameters()
+  dp.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+  cp = cv2.aruco.CharucoParameters()
+  cp.tryRefineMarkers = True
+  return cv2.aruco.CharucoDetector(board, cp, dp)
+
+
 def detect_pose(gray, K, dist, board) -> dict:
   """Locate the sheet.  Returns the pose and the evidence for trusting it."""
-  detector = cv2.aruco.CharucoDetector(board)
+  detector = _detector(board)
   corners, ids, _, _ = detector.detectBoard(gray)
   if ids is None or len(ids) < 6:
     raise RuntimeError(
@@ -74,9 +89,24 @@ def detect_pose(gray, K, dist, board) -> dict:
   # Angle between the sheet normal and the optical axis: stereo noise grows with
   # obliquity, so a comparison across cameras is only fair at similar tilt.
   tilt = float(np.degrees(np.arccos(min(1.0, abs(float(normal @ np.array([0, 0, 1.0])))))))
+  # How much the plane itself could be wrong, in metres, which sets the floor
+  # under any bias number computed against it.  A residual of `reproj` pixels
+  # spread over a board spanning `span` pixels is a relative scale error of
+  # reproj/span, and a scale error on a planar target lands almost entirely on
+  # the distance.  Checked against the known-truth capture in selftest.py: this
+  # predicts 0.5 mm where the actual pose error is 0.66 mm.
+  pts = img.reshape(-1, 2)
+  span = float(max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1])))
+  # Perpendicular distance from the camera to the plane, not the distance to
+  # the board's origin corner: the corner is off-axis, and quoting it makes a
+  # sheet placed at 250 mm report 288 mm.
+  dist_m = abs(float(normal @ tvec.ravel()))
   return {
     "rvec": rvec, "tvec": tvec, "R": R, "normal": normal,
     "n_corners": int(len(ids)), "reproj_rms_px": reproj, "tilt_deg": tilt,
+    "board_span_px": span,
+    "plane_distance_m": dist_m,
+    "plane_uncertainty_m": dist_m * reproj / span if span > 0 else float("nan"),
   }
 
 
@@ -137,9 +167,19 @@ def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
   spatial_rms = float(np.sqrt(np.mean((e - bias) ** 2))) if e.size else float("nan")
   p95 = float(np.percentile(np.abs(e), 95)) if e.size else float("nan")
 
-  if stable.sum() >= 16 and depth.shape[0] >= 3:
-    per_pix = np.nanstd(np.where(inlier, depth, np.nan), axis=0)
-    temporal = float(np.median(per_pix[stable]))
+  # Temporal noise is measured on pixels seen often enough to have a variance,
+  # not on pixels seen every single time.  Requiring every frame sounds
+  # stricter and is in fact useless exactly where it matters: at 55% dropout,
+  # no pixel out of 24 frames survives, and the region that most needs a noise
+  # number reports none.
+  n_frames = depth.shape[0]
+  need = max(3, int(np.ceil(0.4 * n_frames)))
+  counts = inlier.sum(axis=0)
+  usable = (counts >= need) & mask
+  if usable.sum() >= 16 and n_frames >= 3:
+    samples = np.where(inlier, depth, np.nan)
+    per_pix = np.nanstd(samples, axis=0, ddof=1)
+    temporal = float(np.median(per_pix[usable]))
   else:
     temporal = float("nan")
 
@@ -152,6 +192,7 @@ def region_metrics(depth: np.ndarray, gt: np.ndarray, mask: np.ndarray,
     "bias_m": bias,
     "spatial_rms_m": spatial_rms,
     "temporal_std_m": temporal,
+    "temporal_n_pixels": int(usable.sum()),
     "p95_abs_m": p95,
   }
 
@@ -161,10 +202,12 @@ def evaluate(cap, board, spec, outlier_m: float = 0.05) -> dict:
   gt = plane_depth(cap.K, pose, cap.gray.shape)
   out = {
     "pose": {
-      "distance_m": float(np.linalg.norm(pose["tvec"])),
+      "distance_m": pose["plane_distance_m"],
       "n_corners": pose["n_corners"],
       "reproj_rms_px": pose["reproj_rms_px"],
       "tilt_deg": pose["tilt_deg"],
+      "board_span_px": pose["board_span_px"],
+      "plane_uncertainty_m": pose["plane_uncertainty_m"],
     },
     "regions": {},
   }
