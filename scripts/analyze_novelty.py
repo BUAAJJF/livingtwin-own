@@ -52,14 +52,22 @@ def load(section: str) -> dict[str, dict]:
 
 
 class _Rng:
-  """A tiny LCG, so a resample does not depend on numpy or on global state."""
+  """Mersenne Twister, seeded locally so a resample never touches global state.
+
+  Not a hand-rolled LCG.  The first version here was one, and `s % n` took the
+  LOW bits of a power-of-two-modulus LCG -- those cycle with period n, so with
+  512 environments every "random" resample drew each index exactly once, the
+  totals were identical every time, and every confidence interval came out as
+  a point.  A degenerate interval looks like a very precise measurement, which
+  is the worst way for this to fail.
+  """
 
   def __init__(self, seed: int):
-    self.s = seed & 0xFFFFFFFF
+    import random
+    self._r = random.Random(seed)
 
   def randint(self, n: int) -> int:
-    self.s = (1103515245 * self.s + 12345) & 0x7FFFFFFF
-    return self.s % n
+    return self._r.randrange(n)
 
 
 def bootstrap(per_env: dict[str, list], seconds_per_env: float,
@@ -103,6 +111,10 @@ def bootstrap(per_env: dict[str, list], seconds_per_env: float,
   draws.sort()
   lo = draws[int(0.025 * n_boot)]
   hi = draws[min(int(0.975 * n_boot), n_boot - 1)]
+  if hi - lo < 1e-9 and n > 1:
+    raise RuntimeError(
+      f"bootstrap for {stat!r} returned a degenerate interval over {n} "
+      "environments -- the resampler is not resampling")
   return point, lo, hi
 
 
