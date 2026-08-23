@@ -396,12 +396,27 @@ decomposition is the point:
 | fitted combination (DA) | 1.000 |
 
 DA's fitted weights are state 0.00, latent 0.17, action 0.83 — and those
-numbers are *not* importance scores. The three components are not on a common
-scale: the latent NLL spans a hundred nats between candidates where the action
-score spans a fraction of one, so a weight of 0.17 on the latent still
-dominates the sum. The ablations are the honest decomposition, and they say
-the identification comes from predicting the policy's **perceptual latent**,
-not from the action the policy would have taken given that latent.
+numbers are *not* importance scores. The three components are nowhere near a
+common scale. Measured on the 160 test sessions, the spread between the
+cheapest and the most expensive candidate, summed over the 120 windows of a
+60 s budget:
+
+| component | median spread across candidates | range |
+|---|---|---|
+| `S_latent` | **11 942** | 3 189 – 22 867 |
+| `S_state` | 119 | 56 – 204 |
+| `S_action` | 1.3 | 0.5 – 3.4 |
+
+So the fitted combination contributes `0.17 × 11 942 ≈ 2 030` from the latent
+against `0.83 × 1.3 ≈ 1.1` from the action: the latent outweighs the action
+term by roughly **1 900 to 1** in the sum those weights produce. The weight
+vector is what the simplex grid happened to land on among the many that give an
+identical posterior once identification is saturated; it says nothing about
+which component matters.
+
+The ablations are the honest decomposition, and they say the identification
+comes from predicting the policy's **perceptual latent**, not from the action
+the policy would have taken given that latent.
 
 That is a partial result for the decision-aware framing, and it should be
 stated as one. Scoring a candidate domain *in the policy's own representation*
