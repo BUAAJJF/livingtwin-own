@@ -498,25 +498,53 @@ The slew ceiling is the only filter that works, so it is the only one worth
 resolving finely. Single object, distilled policy, against the `none`
 baseline of 46.7 obj/min at 22.7 trips/arm-h:
 
-| slew scale | obj/min | Δ throughput | trips/arm-h | Δ trips |
+| filter | obj/min | Δ throughput | trips/arm-h | Δ trips |
 |---|---:|---:|---:|---:|
 | 1.00 (as deployed) | 46.7 | — | 22.7 | — |
-| **0.95** | **47.0** | **+0.6%** | **15.2** | **−33.0%** |
-| **0.92** | **47.0** | **+0.6%** | **12.2** | **−46.3%** |
-| 0.90 | 45.6 | −2.4% | 9.1 | −59.9% |
-| 0.85 | 44.6 | −4.5% | 4.2 | −81.5% |
-| 0.70 | 36.4 | −22.1% | 2.8 | −87.7% |
+| slew 0.95 | 47.0 | +0.6% | 15.2 | −33.0% |
+| slew 0.92 | 47.0 | +0.6% | 12.2 | −46.3% |
+| **slew 0.90 + cubic** | **46.2** | **−1.1%** | **8.2** | **−63.9%** |
+| slew 0.90 | 45.6 | −2.4% | 9.1 | −59.9% |
+| slew 0.88 | 44.8 | −4.1% | 8.3 | −63.4% |
+| slew 0.90 + accel 120 | 44.4 | −4.9% | 12.0 | −47.1% |
+| slew 0.85 | 44.6 | −4.5% | 4.2 | −81.5% |
+| slew 0.70 | 36.4 | −22.1% | 2.8 | −87.7% |
 
-**No point reaches −80% trips at ≤ 2% throughput.** −80% arrives only at 0.85,
-which costs 4.5%; the ≤ 2% budget buys about −50%. The Safety Gate's numeric
-threshold is therefore genuinely unreachable with this filter, not merely
-unsampled.
+and the same in clutter, against 39.4 obj/min at 13.3 trips/arm-h:
 
-Two things worth taking out of the table anyway:
+| filter | Δ throughput | Δ trips |
+|---|---:|---:|
+| slew 0.95 | −0.3% | −54.9% |
+| **slew 0.88** | **−1.3%** | **−69.9%** |
+| slew 0.90 | −1.3% | −63.9% |
+| slew 0.92 | −2.0% | −68.4% |
+| slew 0.90 + cubic | −2.0% | −66.2% |
+| slew 0.90 + accel 120 | −3.3% | −68.4% |
+| slew 0.85 | −3.3% | −85.7% |
+
+**No point on either scale reaches −80% trips at ≤ 2% throughput.** The best
+inside that budget is −64% (single object) and −70% (clutter); −80% arrives
+only at slew 0.85, costing 3–5%. The gate's threshold is genuinely unreachable
+here, not merely unsampled.
+
+Throughput differences of 1–2% within these tables are inside the run-to-run
+noise floor (§7.6) and should not be ranked against one another; the trip
+reductions, at 33–88%, are far outside it.
+
+One nuance worth keeping. **Cubic interpolation hurts on its own (+12.9%
+trips, §4.2) but helps underneath a tighter slew ceiling:** `slew 0.90 + cubic`
+beats `slew 0.90` alone on *both* axes (46.2 against 45.6, 8.2 against 9.1).
+Once the slew ceiling has removed the large velocity steps, smoothing what
+remains no longer invites the policy to compensate for lag, and the smoothing
+becomes close to free. The acceleration limiter has no such regime — `slew 0.90
++ accel 120` is worse than `slew 0.90` alone on both axes at both scales.
+
+Two more things worth taking out of the table:
 
 * **Tightening the slew ceiling from 0.62 to 0.57 of the trip speed
   (`slew_scale = 0.92`) is free.** It cuts the shell rate almost in half
-  *and* reads +0.6% throughput. That is not a paradox: a shell trip terminates
+  *and* reads +0.6% throughput, and the clutter policy agrees (−55% trips at
+  −0.3% throughput for 0.95). That is not a paradox: a shell trip terminates
   the episode, so trips that do not happen are resets that are not paid for.
   This is a one-line change to `COMMAND_DERATE` and it should be made
   regardless of anything else in this document.
@@ -524,14 +552,9 @@ Two things worth taking out of the table anyway:
   points for 5 points of throughput; below 0.85 throughput collapses for
   almost nothing. If a deployment wants the safety, 0.85 is where to buy it.
 
-The combinations (`slew 0.90 + accel 120`, `slew 0.90 + cubic`) and the
-three-object versions of the same sweep were still executing when the VPN
-dropped for the second time; the jobs survive (`setsid nohup` inside `tmux`)
-and land in `results/novelty_validation/`, read by
-`scripts/analyze_novelty.py --section safety`. Given §4.2 and §4.3 — where
-both accel limiting and cubic interpolation *raised* the trip rate at every
-setting on both scales — the combinations are expected to be worse than the
-slew ceiling alone, and nothing in §10.1 turns on them.
+All of it is in `results/novelty_validation/`, read by
+`scripts/analyze_novelty.py --section safety`, with the figure at
+`safety_pareto.svg`.
 
 ### 4.5 Safety Gate
 
