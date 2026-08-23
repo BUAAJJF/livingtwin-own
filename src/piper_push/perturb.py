@@ -352,8 +352,10 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
         "asset_cfg": SceneEntityCfg("robot", actuator_names=("joint[1-6]",)),
         "operation": "scale",
         "distribution": "uniform",
-        "stiffness_range": (1.0, 1.0),
-        "damping_range": (mm.servo_damping_scale, mm.servo_damping_scale),
+        # A degenerate range, because this is a fixed session error and not a
+        # randomisation: every environment gets the same damping multiplier.
+        "kp_range": (1.0, 1.0),
+        "kd_range": (mm.servo_damping_scale, mm.servo_damping_scale),
       },
     )
 
