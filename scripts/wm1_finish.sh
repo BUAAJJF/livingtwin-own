@@ -14,8 +14,13 @@ PREFIX="$(micromamba env list | awk '$1=="mjlab" {print $NF}')"
 PY="${PREFIX:+$PREFIX/bin/}python"
 R=results/wm1_latency
 
-$PY scripts/analyze_wm1.py --dirs "$R/adapt" "$R/equivalence" \
-  --baseline equivalence/zeroshot --json "$R/analysis.json"
+# Digest first, and analyse the digest rather than the originals, so that the
+# committed artefacts are self-consistent: a fresh clone has runs/ and not the
+# 75 MB of raw evaluations, and recomputing the analysis there gives the same
+# numbers as here rather than nothing at all.
+$PY scripts/wm1_digest.py
+$PY scripts/analyze_wm1.py --dirs "$R/runs" \
+  --baseline runs/zeroshot --json "$R/analysis.json"
 $PY scripts/wm1_timings.py --json "$R/timings.json"
 $PY scripts/wm1_gate.py --json "$R/gate.json"
 echo

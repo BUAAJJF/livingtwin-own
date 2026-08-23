@@ -17,3 +17,10 @@ results/wm1_latency/data/*.pt
 # The equivalence and adaptation evaluation logs are mjlab's warp module
 # chatter; the JSONs beside them carry every number and the provenance.
 results/wm1_latency/**/*.log
+# Raw evaluation JSONs are ~700 kB each and there are well over a hundred.
+# scripts/wm1_digest.py slims each to the fields the analysis reads -- including
+# the per-environment placement vector the bootstrap resamples -- into
+# results/wm1_latency/runs/, which IS tracked, so every interval in the report
+# is recomputable from what is committed.
+results/wm1_latency/adapt/*__r*.json
+results/wm1_latency/equivalence/*__r*.json
