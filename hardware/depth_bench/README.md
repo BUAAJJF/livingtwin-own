@@ -43,7 +43,48 @@ plane, and the plane is the entire reference.
 
 Regenerate with `python targets/make_board.py`.
 
-## Protocol
+## Two ways to collect
+
+### Live, both cameras at once — `live.py`
+
+```bash
+python live.py            # then open http://127.0.0.1:8770
+```
+
+Press start, carry the cameras around the printed target together, press stop.
+Shots are taken automatically and the comparison is built when you stop.
+
+This is the one to use when the question is *which camera*, because of what it
+does with the confounds:
+
+* **A shot is a pair.** Every camera is snapshotted at the same instant on the
+  same scene, so the pair shares the lamp, the table, the paper and the
+  operator, and differs only in the sensor. Characterising one camera, then
+  unplugging it and characterising the next, lets all of that drift between
+  them and charges the difference to the camera.
+* **The trigger is novelty, not a timer.** A shot fires only when the viewpoint
+  is far from *every* shot already taken — more than `--d-dist` metres or
+  `--d-angle` degrees away. A timer rewards standing still and fills the
+  session with one viewpoint measured fifty times, which looks like a lot of
+  data and constrains nothing. Novelty spreads the captures over distance and
+  angle without anyone planning them.
+* **Nothing is captured while anything moves.** Motion blur and rolling-shutter
+  smear are not sensor noise, but they are indistinguishable from it once
+  they are in the numbers. A shot requires the whole 24-frame ring buffer to
+  have been still, so every measured frame predates the trigger and none of
+  them contains the approach.
+
+The page shows, per camera, the live view with the three regions drawn on it,
+the target's distance and tilt, and a meter for how close the current viewpoint
+is to firing. `--save-raw` also writes the frame stacks (~40 MB per camera per
+shot). Results land in `results/live/<timestamp>/`.
+
+If the page will not load, check for an HTTP proxy: this machine has
+`http_proxy=127.0.0.1:7890` set, which intercepts `127.0.0.1:8770` unless
+localhost is in the bypass list.
+
+### One careful capture — `measure.py`
+
 
 ```bash
 python measure.py --backend d405 --preview              # frame it, then look at view.png
@@ -105,12 +146,23 @@ you care about.
 python selftest.py
 ```
 
-Renders the printed target onto a plane at a chosen pose, injects a known bias,
-a known noise and known per-region dropout, and asserts they come back. This is
-not a formality: the board frame's handedness, whether depth is Z or range, and
-whether the region rectangles land on the patches or beside them are all silent
-failures that otherwise produce confident, plausible, wrong numbers. It also
-checks that `plane_uncertainty_m` actually covers the pose error it describes.
+Two stages, both without hardware.
+
+The first renders the printed target onto a plane at a chosen pose, injects a
+known bias, a known noise and known per-region dropout, and asserts they come
+back. This is not a formality: the board frame's handedness, whether depth is Z
+or range, and whether the region rectangles land on the patches or beside them
+are all silent failures that otherwise produce confident, plausible, wrong
+numbers. It also checks that `plane_uncertainty_m` actually covers the pose
+error it describes.
+
+The second drives `live.py`'s session logic with **two** synthetic cameras of
+deliberately different quality: it checks that four viewpoints produce four
+shots, that repeating a viewpoint produces none, and that the report ranks the
+quieter camera as quieter. The second camera does not exist yet — the ZED X is
+away and the Odin 1 has no backend — so without this the paired-comparison
+path, which is the entire point of the live viewer, would first run on the day
+the hardware arrives.
 
 ## Adding a camera
 

@@ -37,8 +37,12 @@ TRUE_SIGMA_M = 0.0011
 TRUE_DROP = {"charuco": 0.03, "white": 0.55, "black": 0.30}
 
 
-def render(spec, distance=0.45, tilt_deg=8.0, seed=0):
+def render(spec, distance=0.45, tilt_deg=8.0, seed=0,
+           bias=None, sigma=None, drop=None):
   """A synthetic capture of the printed sheet at a known pose."""
+  bias = TRUE_BIAS_M if bias is None else bias
+  sigma = TRUE_SIGMA_M if sigma is None else sigma
+  drop = TRUE_DROP if drop is None else drop
   page = cv2.imread(str(HERE / "targets" / "target_a4.png"), cv2.IMREAD_GRAYSCALE)
   ppm = spec["px_per_mm"] * 1000.0  # pixels per metre of paper
 
@@ -75,10 +79,10 @@ def render(spec, distance=0.45, tilt_deg=8.0, seed=0):
 
   rng = np.random.default_rng(seed)
   n = 24
-  depth = np.where(np.isfinite(gt), gt + TRUE_BIAS_M, 0.0)[None].repeat(n, 0)
-  depth += rng.normal(0.0, TRUE_SIGMA_M, depth.shape)
+  depth = np.where(np.isfinite(gt), gt + bias, 0.0)[None].repeat(n, 0)
+  depth += rng.normal(0.0, sigma, depth.shape)
 
-  for name, rate in TRUE_DROP.items():
+  for name, rate in drop.items():
     mask = M.region_mask(K, DIST, pose, spec["regions"][name], (H, W))
     hit = rng.random(depth.shape) < rate
     depth[hit & mask[None]] = 0.0
@@ -145,9 +149,6 @@ def main() -> None:
   print("\nall checks passed")
 
 
-if __name__ == "__main__":
-  main()
-
 
 # --------------------------------------------------------------------------
 # the live session
@@ -184,10 +185,9 @@ def check_live_session() -> list[str]:
       self._cap = None
 
     def place(self, distance, tilt, seed):
-      S.TRUE_SIGMA_M = self.a * distance**2
-      S.TRUE_BIAS_M = 0.0015
-      S.TRUE_DROP = dict(self.drop)
-      self._cap, _ = S.render(spec, distance=distance, tilt_deg=tilt, seed=seed)
+      self._cap, _ = render(spec, distance=distance, tilt_deg=tilt, seed=seed,
+                            bias=0.0015, sigma=self.a * distance**2,
+                            drop=self.drop)
       self._cap.meta.update({"model": self.name, "fx_px": 430.0,
                              "stereo_baseline_m": 0.018})
       with self.lock:
@@ -267,3 +267,6 @@ def check_live_session() -> list[str]:
   else:
     print(f"  live: figure -> {outdir / 'comparison.png'}")
   return fails
+
+if __name__ == "__main__":
+  main()

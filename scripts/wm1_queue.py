@@ -48,6 +48,31 @@ def gpu_free_mib() -> dict[int, int]:
   return free
 
 
+def busy_elsewhere(tags) -> set[str]:
+  """Tags some other process is already working on.
+
+  Not only training.  Three trainings were orphaned when their pinned shards
+  were stopped -- the shell was killed, the training was not -- and a queue
+  that checks only for a finished checkpoint starts a second copy of one on
+  another card.  It did, once.  Restarting this queue creates the same hazard
+  a second way: its previous children keep running, and between finishing a
+  training and finishing its evaluations there is no `finetune.py` to find.
+
+  So the test is whether the tag appears anywhere in the command line of a
+  running training or evaluation, which covers both -- `--run-name wm1_<tag>`
+  and `--label <tag>_target__r0`.
+  """
+  try:
+    out = subprocess.run(["ps", "-eo", "cmd"], capture_output=True,
+                         text=True, timeout=30).stdout
+  except Exception:
+    return set()
+  lines = [ln for ln in out.splitlines()
+           if "scripts/finetune.py" in ln or "scripts/accept_s1.py" in ln
+           or "scripts/wm1_adapt.sh" in ln]
+  return {t for t in tags if any(t in ln for ln in lines)}
+
+
 def is_done(tag: str) -> bool:
   if not (ADAPT / f"{tag}.ckpt").exists():
     return False
@@ -85,8 +110,10 @@ def main() -> int:
             flush=True)
       del running[gpu]
 
+    mine = {t for _, t, _ in running.values()}
+    busy = mine | busy_elsewhere({j["tag"] for j in jobs} - mine)
     pending = [j for j in jobs if not is_done(j["tag"])
-               and j["tag"] not in {t for _, t, _ in running.values()}]
+               and j["tag"] not in busy]
     if not pending and not running:
       print(f"  all {len(jobs)} jobs done in "
             f"{(time.time() - t0) / 60:.1f} min", flush=True)

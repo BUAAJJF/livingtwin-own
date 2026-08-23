@@ -1,0 +1,117 @@
+{
+  "index": 1,
+  "t": 2.120380401611328,
+  "manual": false,
+  "cameras": {
+    "GOOD": {
+      "pose": {
+        "distance_m": 0.43808269448268145,
+        "n_corners": 16,
+        "reproj_rms_px": 0.13923077285289764,
+        "tilt_deg": 13.12680772469544,
+        "board_span_px": 100.27621459960938,
+        "plane_uncertainty_m": 0.0006082658023126173
+      },
+      "regions": {
+        "charuco": {
+          "n_pixels": 17106,
+          "range_m": 0.4374898501498729,
+          "fill": 0.9800630383101446,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.6198994504852099,
+          "bias_m": 0.001805439187267388,
+          "spatial_rms_m": 0.0008244181407707279,
+          "temporal_std_m": 0.000798880762886256,
+          "temporal_n_pixels": 17106,
+          "p95_abs_m": 0.0031605539156116967
+        },
+        "white": {
+          "n_pixels": 1620,
+          "range_m": 0.46673590642103324,
+          "fill": 0.9040380658436215,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.09567901234567901,
+          "bias_m": 0.0013576272715155047,
+          "spatial_rms_m": 0.0008142602816631903,
+          "temporal_std_m": 0.0007996715139597654,
+          "temporal_n_pixels": 1620,
+          "p95_abs_m": 0.002693548704337789
+        },
+        "black": {
+          "n_pixels": 1703,
+          "range_m": 0.4601561534133819,
+          "fill": 0.9211195928753181,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.12331180270111568,
+          "bias_m": 0.0016312562859029933,
+          "spatial_rms_m": 0.0008117571886523384,
+          "temporal_std_m": 0.0007978336652740836,
+          "temporal_n_pixels": 1703,
+          "p95_abs_m": 0.0029727108479388835
+        }
+      },
+      "capture": {
+        "backend": "synthetic",
+        "n_frames": 24,
+        "model": "GOOD",
+        "fx_px": 430.0,
+        "stereo_baseline_m": 0.018
+      }
+    },
+    "POOR": {
+      "pose": {
+        "distance_m": 0.43808269448268145,
+        "n_corners": 16,
+        "reproj_rms_px": 0.13923077285289764,
+        "tilt_deg": 13.12680772469544,
+        "board_span_px": 100.27621459960938,
+        "plane_uncertainty_m": 0.0006082658023126173
+      },
+      "regions": {
+        "charuco": {
+          "n_pixels": 17106,
+          "range_m": 0.4374898501498729,
+          "fill": 0.9500345882536342,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.2919443470127441,
+          "bias_m": 0.0018066385243148964,
+          "spatial_rms_m": 0.00243496648821821,
+          "temporal_std_m": 0.002392984926700592,
+          "temporal_n_pixels": 17106,
+          "p95_abs_m": 0.0058295650052780645
+        },
+        "white": {
+          "n_pixels": 1620,
+          "range_m": 0.46673590642103324,
+          "fill": 0.3114197530864197,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.012345679012345678,
+          "bias_m": 0.0014037726550426288,
+          "spatial_rms_m": 0.0024471058517670096,
+          "temporal_std_m": 0.002358571160584688,
+          "temporal_n_pixels": 273,
+          "p95_abs_m": 0.005456809364311125
+        },
+        "black": {
+          "n_pixels": 1703,
+          "range_m": 0.4601561534133819,
+          "fill": 0.6000929731845762,
+          "gross_outlier_frac": 0.0,
+          "stable_fill": 0.0,
+          "bias_m": 0.001624968994996201,
+          "spatial_rms_m": 0.002434019696864131,
+          "temporal_std_m": 0.0023676161654293537,
+          "temporal_n_pixels": 1666,
+          "p95_abs_m": 0.005705092970282106
+        }
+      },
+      "capture": {
+        "backend": "synthetic",
+        "n_frames": 24,
+        "model": "POOR",
+        "fx_px": 430.0,
+        "stereo_baseline_m": 0.018
+      }
+    }
+  }
+}
