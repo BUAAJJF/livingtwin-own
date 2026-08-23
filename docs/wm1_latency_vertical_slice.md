@@ -646,6 +646,19 @@ but WM0's reported ±0.22 on 2.29 trips/hour was an understatement of that
 metric's spread, and this phase reports the safety criterion against two
 threshold sets because of it.
 
+**One "oracle" was the unadapted policy, and its exit status was clean.** The
+adaptation runner picked its evaluation checkpoint with `ls -1v | tail -1` over
+every timestamped directory matching the run's tag. A duplicate of the seed-42
+oracle — started by an overlapping plan before the run lock existed, killed
+after it had written its first checkpoint — left a directory whose name sorts
+*after* the real one and whose newest file is `model_1500.pt`, which is where
+fine-tuning starts. The run reported 42.80 objects/min in the target domain and
+56.13 in the nominal one, which are the zero-shot and nominal figures to two
+decimal places, because it was the zero-shot policy. It was caught by reading
+those two numbers rather than by anything in the pipeline. The checkpoint is
+now selected by parsed iteration number and asserted against the requested
+budget, the affected evaluations are in `quarantine/`, and the run was redone.
+
 **I nearly published that regression.** Without the overdispersion correction
 the same comparison is p = 0.036. The repeats disagree by 20% more in standard
 deviation than Poisson allows, so the quasi-Poisson interval is the correct
