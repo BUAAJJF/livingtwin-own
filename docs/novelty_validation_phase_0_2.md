@@ -970,12 +970,20 @@ conditions hold.
 | 2 | effect consistent in direction across ≥ 2 **training** seeds | **NOT TESTED** | §7.3: only the memoryless teacher has a second training seed; neither vision student does |
 | 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
 | 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
-| 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **PASS** | §5.2 and the transfer evaluations: the EP-All-trained student reads 47.3 honest, and the identical network fine-tuned under OBJ-All reads 55.8 |
+| 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **FAIL** | §5.5: 1100 EP-All fine-tuning iterations take the student from 47.3 to **54.3** on the honest test and cut shell trips from 22.6 to 7.5. It transfers well. Switching to the honest cadence adds a further +2.9% and −72% trips, so the right cadence is *better* — but "does not transfer" is not what the data says |
 
-Two of five pass, one is untested, and **the two that fail are precisely the
-two that test the proposed mechanism**. Condition 1 establishes that the
-*effect* is real and larger than `docs/results.md` records. Conditions 3 and 4
-say the *explanation* offered for it is wrong.
+**One of five passes, one is untested, three fail** — and the three failures
+are precisely the conditions that test the proposed *mechanism*. Condition 1
+establishes that the *effect* is real and larger than `docs/results.md`
+records. Conditions 3, 4 and 5 say the explanation offered for it is wrong in
+all three of the ways the gate knew to check.
+
+Condition 5 deserves its own note because the project's own results file
+asserts the opposite (§5.5): it reports that fine-tuning under EP-All "buys
+nothing", by comparing 53.0 against 53.3 — **two numbers both measured in the
+EP-All environment**. Scored honestly the same training is worth +11%. The
+gate condition was written from a finding that was itself an artefact of the
+leak it was trying to detect.
 
 **Verdict: do not implement the two-timescale network, the world model, or
 posterior system identification this round.**
@@ -994,11 +1002,18 @@ What survives, and survives strongly, is the benchmark-hygiene half:
 > Holding a parameter constant for longer than deployment would inflates a
 > recurrent policy's measured throughput by 11.8% and depresses its measured
 > constraint-violation rate, while moving a memoryless policy on the same task
-> by 1.5%. Two thirds of that inflation is removed by training in the correctly
-> paced environment, with no architectural change.
+> by 1.5%. Roughly 85% of that is attributable to the **shape** cadence alone.
+> Two thirds of the inflation is removed by training in the correctly paced
+> environment, with no architectural change.
 
-That is a real, measured, reproducible claim about how manipulation benchmarks
-are built. It is not, on this evidence, a claim that needs a new network.
+And a corollary with teeth, because it has already happened twice in this
+project's own records: **a leaked benchmark does not only inflate scores, it
+inverts conclusions.** Two of the four "isolated findings" in
+`docs/results.md` are artefacts of measuring both terms of a comparison inside
+the leak — the distilled baseline (§3.3) and the "fine-tuning in the wrong
+environment buys nothing" result (§5.5), which is worth +11% when scored
+honestly. That is a sharper argument for cadence hygiene than any throughput
+number, and it needs no new network to make.
 
 ## 11. Next minimal experiment
 
