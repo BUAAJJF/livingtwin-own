@@ -764,22 +764,33 @@ percentage points — see §6.3 for why raw lift is not usable here. 71 500
 hidden states from 256 environments over 3000 steps; `n_eff` is the number of
 *independent* (environment, label) facts in the held-out set.
 
-| policy (trained under) | eval cadence | cur shape | **prev shape** | cur mass | **prev mass** | n_eff |
-|---|---|---:|---:|---:|---:|---:|
-| distilled (EP-All) | OBJ-All | +7.1 | **+1.6** | +9.1 | **−0.4** | 320 / 256 |
-| fine-tuned (OBJ-All) | EP-All | +11.6 | +11.6 † | +13.6 | +13.6 † | 113 / 115 |
+| policy (trained under) | eval cadence | memory | cur shape | **prev shape** | cur mass | **prev mass** | n_eff |
+|---|---|---|---:|---:|---:|---:|---:|
+| distilled (EP-All) | OBJ-All | kept | +7.1 | **+2.5** | +11.4 | **+2.1** | 319 |
+| distilled (EP-All) | OBJ-All | **zeroed each object** | +7.5 | **−0.5** | +9.7 | **−1.1** | 318 |
+| distilled (EP-All) | EP-All | kept | +9.9 | +9.9 † | +13.0 | +13.0 † | 125 |
+| distilled (EP-All) | EP-All | zeroed | +6.8 | +6.8 † | +10.1 | +10.1 † | 156 |
+| fine-tuned (OBJ-All) | EP-All | kept | +11.6 | +11.6 † | +13.6 | +13.6 † | 113 |
 
 † Under EP-All the previous object *is* the current object, so those columns
-are the same measurement written twice. They say nothing about carry-over and
-are shown only to make the tautology explicit. Note also the `n_eff` collapse:
-the EP-All rows rest on about a third as many independent labels.
+are the same measurement written twice. They say nothing about carry-over.
+Note also the `n_eff` collapse: the EP-All rows rest on roughly a third as
+many independent labels as the honest ones.
 
-**Under the honest cadence, the recurrent state carries essentially nothing
-about the previous object.** Previous shape decodes at +1.6 pp and previous
-mass at **−0.4 pp** — below chance. Meanwhile the *current* object decodes at
-+7.1 pp (shape) and +9.1 pp (mass), which is the memory doing precisely the
-job it exists for: mass is the one parameter a camera cannot see and must be
-inferred from contact.
+The **zeroed** row is the negative control, and it is what makes the rest
+interpretable. With the state cleared at every object boundary, previous-object
+information is absent *by construction*, and the probe duly reads **−0.5 and
+−1.1 pp** — so the pipeline's floor is calibrated and slightly below chance.
+
+Against that floor, the memory-kept policy reads **+2.5 and +2.1 pp** for the
+previous object. With ~319 independent labels the standard error on balanced
+accuracy is about 2.2 pp, so those are roughly **1σ — not significantly above
+the control**. Meanwhile the *current* object decodes at +7.1 and +11.4 pp, 3–5×
+larger, which is the memory doing precisely the job it exists for: mass is the
+one parameter a camera cannot see and must be inferred from contact.
+
+**Under the honest cadence, previous-object information is at most marginal
+and is dominated 3–5× by current-object information.**
 
 The same measurement on raw lift over the majority-class baseline, for
 completeness and because it is what a less careful version of this section
@@ -826,33 +837,30 @@ all.
 Divergence at the moment of the swap, and how it decays over the following
 25 control steps (0.5 s) while both branches see the same observations:
 
-| policy | eval cadence | memory | k=0 | k=3 | k=8 | k=18 | k=25 |
-|---|---|---|---:|---:|---:|---:|---:|
-| distilled | OBJ-All | kept | 0.69 | 0.26 | 0.14 | 0.09 | 0.06 |
-| distilled | EP-All | kept | 0.67 | 0.26 | 0.14 | 0.09 | 0.06 |
-| fine-tuned | OBJ-All | kept | 0.74 | 0.30 | 0.16 | 0.09 | 0.06 |
-| fine-tuned | EP-All | kept | 0.74 | 0.27 | 0.15 | 0.10 | 0.06 |
-| distilled | OBJ-All | zeroed each object | **0.77** | — † | — † | — † | — † |
-
-† The zeroed condition's curve collapses to exactly 0.000 from k=1 and the
-cause is not established; the k=0 value is unaffected (the branches are
-constructed at that step) and is the one the gate needs. The decay for this
-row should be treated as **not measured**, not as zero.
+| policy | eval cadence | memory | k=0 | k=25 (0.5 s) |
+|---|---|---|---:|---:|
+| distilled | OBJ-All | kept | 0.69 | 0.056 |
+| distilled | EP-All | kept | 0.67 | 0.062 |
+| distilled | OBJ-All | **zeroed each object** | **0.72** | 0.046 |
+| distilled | EP-All | zeroed each object | **0.75** | 0.035 |
+| fine-tuned | OBJ-All | kept | 0.74 | 0.061 |
+| fine-tuned | EP-All | kept | 0.74 | 0.059 |
 
 Two readings:
 
 **The memory matters enormously in the instant, and its horizon is about half
 a second.** Swapping it moves the action by ~70% of the policy's entire
 across-environment output spread; two thirds of that is gone within three
-control steps and it is down to 6% by 0.5 s. A single object cycle is about
+control steps and it is down to 4–6% by 0.5 s, in every one of the six
+conditions. A single object cycle is about
 1.0 s. **The memory's influence therefore decays well inside one object's
 lifetime**, which is an independent, mechanistic confirmation of §6.2: there is
 no channel by which a fact about the previous object could still be steering
 the current one.
 
-**Zeroing per object does not reduce swap sensitivity — it slightly raises
-it** (0.77 against 0.69). This is Gate A condition 4, and it fails. It fails
-for an intelligible reason: if the state is cleared at every object boundary,
+**Zeroing per object does not reduce swap sensitivity — it raises it**
+(0.72–0.75 against 0.67–0.69, in both cadences). This is Gate A condition 4,
+and it fails. It fails for an intelligible reason: if the state is cleared at every object boundary,
 then whatever it holds is *by construction* within-object information, and
 swapping it therefore perturbs exactly the belief the policy is currently
 relying on. Combined with §5.2 — clearing the state costs 21–25% of throughput
