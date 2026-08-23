@@ -403,11 +403,27 @@ command actually looks like, pooled over the six arm joints:
 | commanded \|jerk\| (rad/s³) | 156 | 12 188 | 19 531 | 24 347 | 24 350 |
 
 Two facts follow. The **median** commanded velocity is already at the slew
-ceiling — the policy is saturated against the rate limiter about 61% of the
-time. And the acceleration and jerk maxima are exactly the structural bounds
-that ceiling implies (`2 × 0.62 × trip / dt`, and that again over `dt`), which
-is what a bang-bang command looks like. The policy uses every unit of
-authority it has, so any filter that binds costs throughput.
+ceiling, and the instrumentation puts a number on it: **89% of all
+(environment, joint, step) commands are clipped by the rate limiter with no
+filter applied at all**. And the acceleration and jerk maxima are exactly the
+structural bounds that ceiling implies (`2 × 0.62 × trip / dt`, and that again
+over `dt`), which is what a bang-bang command looks like. The policy uses
+every unit of authority it has, so any filter that binds costs throughput.
+
+Where the trips happen, by phase, unfiltered:
+
+| policy | reach | close | carry | release |
+|---|---:|---:|---:|---:|
+| S2 distilled | 48% | 1% | 4% | **46%** |
+| S3 fine-tuned | **88%** | 4% | 5% | 2% |
+
+This refines the note in `docs/results.md` that "91% of trips happen in
+free-space reach, none during the close or the carry". That holds for the
+fine-tuned policy in clutter (88%), but for the distilled single-object policy
+the trips split evenly between reaching *and* the moment after release — the
+arm accelerating away from the bin with an empty gripper. Both are free-space
+moves with nothing in the hand, so the mechanism is the same; the phase label
+is not.
 
 ### 4.2 Result — single object, distilled policy
 
