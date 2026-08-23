@@ -258,6 +258,61 @@ def criterion_5(analysis: dict | None, formal: dict | None,
   return out
 
 
+def rederived_thresholds(analysis: dict | None, formal: dict | None) -> dict:
+  """The same three thresholds, from anchors measured in *this* phase.
+
+  G2, G3 and G4 are inherited from Phase WM0 and are what the verdict is
+  decided on, because they were fixed before any of these runs existed.  But
+  this phase re-measured the nominal and zero-shot domains and re-ran the
+  oracle, on one machine, one code path and one week -- and the trip rate, a
+  count metric with about twenty events in a nominal run, did not reproduce
+  WM0's as closely as throughput did.  So the same arithmetic is repeated on
+  this phase's own anchors and reported beside the inherited one.  If the two
+  disagree about a criterion, that disagreement is the result, not a reason to
+  pick whichever is kinder.
+  """
+  out = {"available": False}
+  if not analysis:
+    return out
+  def grp(name):
+    for k, g in analysis.get("groups", {}).items():
+      if k.endswith(name):
+        return g
+    return None
+
+  nom, zero = grp("/nominal"), grp("/zeroshot")
+  oracle_t = oracle_r = None
+  if formal:
+    for job in formal["jobs"]:
+      if "ORACLE" in job["methods"]:
+        cfg = re.sub(r"_s\d+$", "", job["tag"])
+        oracle_t, oracle_r = _group(analysis, cfg, "target"), _group(
+          analysis, cfg, "retention")
+        break
+  if not (nom and zero and oracle_t):
+    out["missing"] = [n for n, v in (("nominal", nom), ("zeroshot", zero),
+                                     ("oracle", oracle_t)) if not v]
+    return out
+  jn = nom["throughput"]["bootstrap"]["mean"]
+  jz = zero["throughput"]["bootstrap"]["mean"]
+  jo = oracle_t["throughput"]["bootstrap"]["mean"]
+  tz = zero["trips"]["rate"]
+  to = oracle_t["trips"]["rate"]
+  out.update({
+    "available": True,
+    "J_nominal": jn, "J_zero_shot": jz, "J_oracle": jo,
+    "trips_nominal": nom["trips"]["rate"], "trips_zero": tz, "trips_oracle": to,
+    "n_repeats": {"nominal": nom["n_repeats"], "zeroshot": zero["n_repeats"],
+                  "oracle": oracle_t["n_repeats"]},
+    "g2": jz + RECOVERY_TARGET * (jo - jz),
+    "g3": tz - RECOVERY_TARGET * (tz - to),
+    "g4": 0.95 * jn,
+    "oracle_retention": (oracle_r["throughput"]["bootstrap"]["mean"]
+                         if oracle_r else None),
+  })
+  return out
+
+
 def criterion_6(post: dict | None, train: dict | None, clf: dict | None,
                 formal: dict | None, timings: dict | None) -> dict:
   """Wall-clock, split into what counts against a one-hour online budget and
@@ -305,6 +360,7 @@ def main() -> int:
 
   c1 = criterion_1(post)
   c234 = criteria_2_3_4(analysis, formal)
+  rederived = rederived_thresholds(analysis, formal)
   c5 = criterion_5(analysis, formal, post)
   c6 = criterion_6(post, train, clf, formal, timings)
 
@@ -366,6 +422,25 @@ def main() -> int:
     verdict = "YELLOW"
     why = "mixed; see the per-criterion table"
 
+  if rederived.get("available"):
+    print()
+    print("  the same thresholds from this phase's own anchors:")
+    print(f"    J_nominal {rederived['J_nominal']:.2f}  "
+          f"J_zero {rederived['J_zero_shot']:.2f}  "
+          f"J_oracle {rederived['J_oracle']:.2f}")
+    print(f"    G2 >= {rederived['g2']:.2f} (inherited {G2_THRESHOLD:.2f})   "
+          f"G3 <= {rederived['g3']:.2f} (inherited {G3_THRESHOLD:.2f})   "
+          f"G4 >= {rederived['g4']:.2f} (inherited {G4_THRESHOLD:.2f})")
+    for r in c234.get("runs", []):
+      if DA_METHOD not in r["methods"]:
+        continue
+      agree = (
+        (r["target_throughput"] >= rederived["g2"]) == r["g2_point"]
+        and (r["target_trips"] <= rederived["g3"]) == r["g3_point"]
+        and (r["retention_throughput"] >= rederived["g4"]) == r["g4_point"])
+      print(f"    {r['tag']}: re-derived verdict "
+            f"{'agrees with' if agree else 'DISAGREES WITH'} the inherited one")
+
   print()
   print(f"  VERDICT: {verdict}")
   print(f"  {why}")
@@ -382,6 +457,7 @@ def main() -> int:
       "g1_margin": G1_MARGIN, "recovery_target": RECOVERY_TARGET,
     },
     "re_measured_anchors": equiv,
+    "rederived_thresholds": rederived,
     "criteria": {n: {"pass": ok, "checked": ck} for n, ok, ck in checks},
     "g1": c1, "g234": c234, "g5": c5, "g6": c6,
   }

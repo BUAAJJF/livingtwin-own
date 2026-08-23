@@ -287,8 +287,19 @@ def load(dirs: list[Path], pool_seeds: bool = True) -> dict[str, list[dict]]:
   return dict(groups)
 
 
+def _seconds_per_env(r: dict) -> list[float]:
+  """Every environment runs the whole rollout, so this is one number.
+
+  It is stored as a scalar; the bootstrap resamples environments and needs the
+  denominator per environment, so it is expanded here rather than the
+  resampler being taught about two shapes."""
+  secs = r["per_env_seconds"]
+  n = len(r["per_env"]["placed"])
+  return list(secs) if isinstance(secs, list) else [float(secs)] * n
+
+
 def summarise(runs: list[dict]) -> dict:
-  reps = [(r["per_env"]["placed"], r["per_env_seconds"]) for r in runs]
+  reps = [(r["per_env"]["placed"], _seconds_per_env(r)) for r in runs]
   thr = [r["metrics"]["throughput_per_min"] for r in runs]
   counts = [r["metrics"]["trips_total"] for r in runs]
   hours = [r["config"]["arm_hours"] for r in runs]
