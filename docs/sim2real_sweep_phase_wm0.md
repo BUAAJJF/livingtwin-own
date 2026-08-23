@@ -280,7 +280,62 @@ Deliberately **not** carried forward, and why:
 
 ## 7. Reward-free identifiability
 
-*(pending)*
+The calibration idea only works if a session's mismatch leaves a signature in
+what the robot can actually record. This measures whether it does — and, more
+importantly, whether the signature *generalises* past the objects it was
+measured on.
+
+### 7.1 What the probe may and may not see
+
+The frozen policy runs its ordinary rollout; nothing about the task changes.
+From each rollout, overlapping 1-second windows (50 control steps, stride 25)
+are cut and summarised per channel by mean, standard deviation, min, max, last
+value, and mean absolute first difference.
+
+**Inputs**, in three sets of increasing privilege — all of which a real robot
+could log:
+
+| set | contents |
+|---|---|
+| `proprio_servo` | joint positions, joint velocities, gripper position, gripper servo error, issued action |
+| `encoded_proprio` | the policy's convolutional encoding of the depth image, concatenated with proprioception, before the recurrent layer |
+| `actor_latent` | the GRU output, the action, and proprioception |
+
+**Excluded from every set**, because none is available before the fact on
+hardware:
+
+* reward, return, success, or placement labels;
+* contact flags, object pose, object mass, table friction — anything
+  privileged;
+* the perturbation value itself, which is the label being predicted.
+
+**Phase and step index are recorded and never fed in.** Knowing "this window
+is a grasp" is not available in advance on hardware, and a probe leaning on it
+would be reading the task schedule rather than the plant.
+
+### 7.2 Leakage controls
+
+In order of how badly each would flatter the result if omitted:
+
+1. **Whole environments go to one side of the split.** Windows overlap and
+   neighbouring windows are near-copies; a random split over windows would
+   report autocorrelation as accuracy. This is the same error the Phase 0–2
+   hidden-state probe was built to avoid.
+2. **Held-out object shapes** (`--holdout-shape`): the test set is restricted
+   to shape classes absent from training, so the probe cannot succeed by
+   memorising what the calibration objects looked like. A real session is not
+   a re-run of the calibration objects.
+3. **Permutation control**: the identical pipeline on shuffled labels. That is
+   the floor a real signal has to clear, and it is reported next to every
+   result.
+4. **Chance is the majority-class rate**, not `1/K`.
+
+A **nearest-centroid** classifier is reported beside the logistic regression.
+It has no capacity to overfit, so a large gap between the two says the
+signature is present but not linearly separable — which is a different
+engineering problem from the signature being absent.
+
+*(results pending)*
 
 ## 8. Oracle ceiling and recoverability
 
