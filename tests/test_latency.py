@@ -248,3 +248,81 @@ def test_args_round_trip():
   assert latency.prior_from_args(p.parse_args(["--latency-lag", "3"])).argmax == 3
   q = latency.prior_from_args(p.parse_args(["--latency-probs", "0,0,1,3,0"]))
   assert q.mass(3) == pytest.approx(0.75)
+
+
+# ---------------------------------------------------------------------------
+# The term as the manager actually calls it
+# ---------------------------------------------------------------------------
+#
+# Added because the first in-simulator run died on ``__call__() got an
+# unexpected keyword argument 'latency_probs'``: the observation manager hands
+# every entry of ``params`` to the func as a keyword, including the two this
+# class puts there for its own use.  Config-level assertions could not see it.
+
+
+class _Env:
+  def __init__(self, n=4):
+    depth = torch.ones(n, 16, 16, 1)
+    sensor = type("S", (), {})()
+    sensor.data = type("D", (), {"depth": depth})()
+    self.scene = {"cam": sensor}
+    self.num_envs = n
+    self.device = "cpu"
+    self.observation_manager = None
+
+
+class _Cfg:
+  def __init__(self, params):
+    self.params = params
+
+
+def _scene_term(probs, n=4):
+  params = {"sensor_name": "cam", "command_name": "pick",
+            "latency_probs": probs, "latency_seed": 3}
+  env = _Env(n)
+  t = latency.LatencyScene(_Cfg(params), env)
+  t._inner._inner = lambda e, s, c, *a, **k: e.scene[s].data.depth.reshape(n, -1)
+  return t, env, params
+
+
+def test_the_term_survives_being_called_the_way_the_manager_calls_it():
+  t, env, params = _scene_term((0.0, 0.0, 0.0, 1.0, 0.0))
+  out = t(env, **params)
+  assert out.shape[0] == env.num_envs
+
+
+def test_lags_come_from_the_prior_and_hold_across_an_episode():
+  t, env, params = _scene_term((0.0, 0.0, 0.5, 0.5, 0.0), n=64)
+  first = t.lags.clone()
+  assert set(first.tolist()) <= {2, 3}
+  for _ in range(20):
+    t(env, **params)
+  assert torch.equal(t.lags, first), "the lag is a plant property, not jitter"
+
+
+def test_reset_redraws_only_the_environments_that_reset():
+  t, env, params = _scene_term((0.0, 0.0, 0.5, 0.5, 0.0), n=64)
+  before = t.lags.clone()
+  ids = torch.arange(0, 32)
+  t.reset(ids)
+  assert torch.equal(t.lags[32:], before[32:])
+
+
+def test_a_point_prior_gives_every_environment_the_same_lag():
+  t, _, _ = _scene_term((0.0, 0.0, 0.0, 1.0, 0.0), n=64)
+  assert torch.equal(t.lags, torch.full((64,), 3))
+
+
+def test_a_mixture_hits_the_asked_for_proportions():
+  """What alpha-mixing depends on: half the simulator at lag 0, half at lag 3."""
+  t, _, _ = _scene_term((0.5, 0.0, 0.0, 0.5, 0.0), n=4096)
+  frac = (t.lags == 3).float().mean().item()
+  assert frac == pytest.approx(0.5, abs=0.03)
+
+
+def test_the_term_finds_no_buffer_before_the_manager_builds_one():
+  """_prepare_terms calls every term once to measure its shape, before any
+  delay buffer exists.  Blowing up there would make the config unloadable."""
+  t, env, params = _scene_term((0.0, 0.0, 0.0, 1.0, 0.0))
+  assert t._find_buffer() is None
+  t(env, **params)

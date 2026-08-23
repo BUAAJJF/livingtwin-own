@@ -228,6 +228,11 @@ class LatencyScene:
     return None
 
   def __call__(self, env, *args, **kwargs) -> torch.Tensor:
+    # The manager hands every entry of ``params`` to the func as a keyword, so
+    # the two this class added have to come back off before the camera term,
+    # which knows nothing about them, is called.
+    kwargs.pop("latency_probs", None)
+    kwargs.pop("latency_seed", None)
     obs = self._inner(env, *args, **kwargs)
     if self._buffer is None:
       self._buffer = self._find_buffer()
