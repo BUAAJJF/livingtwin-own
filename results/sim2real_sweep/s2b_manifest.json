@@ -1,0 +1,39 @@
+{
+ "stage": "s2",
+ "task": "Mjlab-Pick-Place-PiperX-Vision",
+ "checkpoint": "logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt",
+ "protocol": {
+  "num_envs": 512,
+  "steps": 2400,
+  "repeats": 3
+ },
+ "seeds": [
+  20260823,
+  31415926,
+  27182818
+ ],
+ "n_runs": 15,
+ "axes": {
+  "action_latency_steps": {
+   "levels": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "nominal": 0.0,
+   "unit": "control steps",
+   "group": "robot",
+   "trained_range": null,
+   "outside_training": [
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training"
+   ],
+   "hardware": "command transport: USB-CAN hop, driver queue, 200 Hz inner loop"
+  }
+ }
+}

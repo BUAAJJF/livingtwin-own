@@ -1,0 +1,60 @@
+{
+ "axis": "servo_damping_scale",
+ "levels": [
+  1.0,
+  0.75,
+  1.5
+ ],
+ "n_classes": 3,
+ "config": {
+  "num_envs": 96,
+  "steps": 600,
+  "window": 50,
+  "stride": 25,
+  "holdout_shape": false,
+  "seed": 555000,
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt"
+ },
+ "n_windows": 5760,
+ "n_train": 4320,
+ "n_test": 1440,
+ "sets": {
+  "proprio_servo": {
+   "accuracy": 0.9965277910232544,
+   "nearest_centroid": 0.9645833373069763,
+   "balanced_accuracy": 0.9965277711550394,
+   "majority_chance": 0.3333333432674408,
+   "uniform_chance": 0.3333333333333333,
+   "lift_over_majority": 0.6631944477558136,
+   "n_train": 4320,
+   "n_test": 1440,
+   "shuffled_control": 0.32777777314186096,
+   "dim": 126
+  },
+  "encoded_proprio": {
+   "accuracy": 0.9951388835906982,
+   "nearest_centroid": 0.6583333611488342,
+   "balanced_accuracy": 0.9951388835906982,
+   "majority_chance": 0.3333333432674408,
+   "uniform_chance": 0.3333333333333333,
+   "lift_over_majority": 0.6618055403232574,
+   "n_train": 4320,
+   "n_test": 1440,
+   "shuffled_control": 0.34236112236976624,
+   "dim": 600
+  },
+  "actor_latent": {
+   "accuracy": 0.9888888597488403,
+   "nearest_centroid": 0.7916666865348816,
+   "balanced_accuracy": 0.9888888796170553,
+   "majority_chance": 0.3333333432674408,
+   "uniform_chance": 0.3333333333333333,
+   "lift_over_majority": 0.6555555164813995,
+   "n_train": 4320,
+   "n_test": 1440,
+   "shuffled_control": 0.34375,
+   "dim": 1656
+  }
+ },
+ "best_lift_over_chance": 0.6631944477558136
+}

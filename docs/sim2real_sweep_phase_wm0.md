@@ -17,7 +17,15 @@ questions and answers them in simulation only:
 **No hardware was involved and no real data exists.** Everything here is
 simulator-against-simulator.
 
-*(Sections fill in as stages complete; the verdict is section 8.)*
+**Verdict: GREEN — proceed to Phase WM1** (§9). Six of six criteria pass:
+a real gap on multiple physics axes (27–96% throughput, tail up to ×552),
+identifiable from reward-free data including on unseen object shapes (53–69
+points over the permutation control), and 55% of it recoverable when the
+parameter is known.
+
+Total: **131 formal rollouts** at 512 × 2400 with three repeats per point,
+**63** screening rollouts, **8** identifiability probes, one 600-iteration
+oracle fine-tune, and **17** plumbing smoke checks.
 
 ---
 
@@ -682,11 +690,106 @@ world model has been written, and WM1 should be designed against a
 fine-tuning budget of roughly 300–450 iterations rather than an open-ended
 one.
 
-*(results pending)*
+### 8.3 Result — `obs_latency_steps = 3` (60 ms)
 
-## 9. Gate verdict
+600 PPO iterations (1500 → 2099), three repeats of each measurement. The
+repeats are tight: zero-shot spans 41.85–42.40, oracle 49.52–49.86.
 
-*(pending)*
+| | obj/min | success | trips/arm-h | p95 |
+|---|---:|---:|---:|---:|
+| `J_nominal` — unperturbed policy, unperturbed domain | 55.86 | 99.8% | 2.29 | 1.47 |
+| `J_zero_shot` — unperturbed policy, 60 ms delay | 42.19 | 99.1% | 8.69 | 2.14 |
+| **`J_oracle`** — fine-tuned with θ known, same domain | **49.72** | 99.7% | **4.83** | 1.71 |
+| `J_retention` — that policy back in the nominal domain | 50.75 | 99.5% | 9.08 | 1.85 |
+
+```
+recovery = (49.72 − 42.19) / (55.86 − 42.19) = 55.1% of the gap
+```
+
+**The gap is substantially recoverable.** Knowing the parameter closes **55%**
+of the 13.7-object gap, and it closes the *safety* gap further still: trips
+fall from 8.69 to 4.83 per arm-hour, most of the way back to the unperturbed
+2.29. p95 cycle time returns almost entirely (2.14 → 1.71 against 1.47).
+
+Three things this does *not* say, all of which matter for WM1:
+
+**Recovery is partial, not complete.** 45% of the gap survives an oracle that
+was handed the answer and given 600 iterations. Some of a 60 ms delay is
+simply not compensable by a policy of this architecture at this budget — so
+the README's 70–80% recovery target is a target *against `J_oracle`*, not
+against `J_nominal`, and stating it the other way would be promising something
+the ceiling itself does not reach.
+
+**Adapting costs 9.1% back home.** `J_retention` is 50.75 against the original
+55.86: the adapted policy has learned to compensate for a delay that is not
+there, and pays for it whenever it is not there. That is the price of
+specialisation and it is exactly what the `α q(θ|D) + (1−α) p_broad(θ)` mixture
+in the README is for — the retention number is the thing that mixture has to
+protect, and it now has a measured value to be judged against.
+
+**It is one domain.** The perception/geometry, actuation and gripper domains
+have reproducible commands in §10 and were not run; the oracle alone is ~85
+GPU-minutes per domain and the wall clock went to the sweep instead. The Green
+verdict rests on recoverability being demonstrated *somewhere*, which the gate
+requires, not everywhere.
+
+## 9. Gate verdict — **GREEN**
+
+Evaluated mechanically by `scripts/wm0_gate.py` from the machine-readable
+summaries, not by eye. Thresholds are in the script and in
+`results/sim2real_sweep/gate.json`.
+
+| # | criterion | verdict | evidence |
+|---|---|---|---|
+| 1 | ≥ 2 factors separated from repeat uncertainty | **PASS** | §5: all five S2 axes separate at 3 repeats |
+| 2 | ≥ 10% throughput gap or ≥ 2× tail | **PASS** | §5: 27–96% throughput on four axes; tail up to ×552 |
+| 3 | not only segmentation/mask failure | **PASS** | qualifying axes are latency, servo damping, gripper rate, camera geometry — all physics; depth dropout was deliberately excluded from S2 (§4.3) |
+| 4 | reward-free history beats its permutation control | **PASS** | §7: 53–69 pp over shuffled in all four domains; all 24 shuffled fits at chance |
+| 4b | … and survives held-out object shapes | **PASS** | §7.3: 85.6–100% on unseen shape classes |
+| 5 | oracle closes ≥ 30% of the zero-shot gap | **PASS** | §8.3: **55.1%** of a 13.7-object gap, plus most of the safety gap |
+
+**Verdict: GREEN — proceed to Phase WM1.** There is a real gap on multiple
+*physics* axes, it is identifiable from reward-free data including on unseen
+objects, and it is substantially recoverable when the parameter is known.
+
+### 9.1 What the Green rests on, and what it does not
+
+Green means *the premises of the direction hold in simulation*. It does not
+mean the method will work. Four things it explicitly does not establish:
+
+* **No hardware.** Everything is simulator-against-simulator. The real
+  signature could differ in ways this cannot reveal (§11D).
+* **Classification, not inference.** §7 separates three known levels; a
+  posterior over a continuous parameter with calibrated uncertainty is a
+  harder problem and is what WM1 actually needs.
+* **One oracle domain.** §8.3 measured recoverability for latency only.
+* **Coupled axes need joint treatment.** §6 showed two grasp-side parameters
+  interact strongly enough that a per-axis posterior would be biased.
+
+### 9.2 The two results that would matter even if WM1 fails
+
+**A persistent offset is not the same as jitter of the same size.** The policy
+trained across ±2° of per-episode random camera yaw loses 9.5% to a *fixed*
+−1.5° offset (§5.3). Matching a parameter's marginal distribution is not
+matching its hold time. This is a statement about how domain randomisation is
+specified, and it does not depend on any calibration method existing.
+
+**Decision-consequence and state error come apart, measurably.**
+`servo_damping_scale = 0.75` costs 4.5% of throughput and multiplies the
+safety-shell rate by 89 (§5.3). Any calibration objective built on throughput,
+task reward, or pixel/state reconstruction would rank that mismatch as nearly
+harmless; on hardware it stops the arm every 18 seconds. That is the concrete
+case for calibrating on decision consequences, and it came out of a sweep
+rather than out of an argument.
+
+### 9.3 One engineering finding that should not wait for WM1
+
+**A single control step — 20 ms — of *action* latency costs 27% of throughput
+and multiplies safety trips by 30** (§5.3). The simulator currently asserts
+command latency is exactly zero. This is a missing simulator term, not a
+posterior to fit, and it should be measured on the real command path and added
+to domain randomisation before any deployment or any further calibration work
+(§11C).
 
 ## 10. Commands
 

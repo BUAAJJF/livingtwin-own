@@ -6,3 +6,8 @@ logs/
 outputs/
 wandb/
 docs/*.mp4
+# WM0 sweep raw per-run JSONs are large (69 MB); the summaries, manifests,
+# CSVs and figures are tracked and are what the report is generated from.
+results/sim2real_sweep/s1/
+results/sim2real_sweep/s2/
+results/sim2real_sweep/s3/

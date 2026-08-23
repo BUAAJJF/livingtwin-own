@@ -1,0 +1,61 @@
+{
+ "stage": "s3",
+ "task": "Mjlab-Pick-Place-PiperX-Vision",
+ "checkpoint": "logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt",
+ "protocol": {
+  "num_envs": 512,
+  "steps": 2400,
+  "repeats": 3
+ },
+ "seeds": [
+  20260823,
+  31415926,
+  27182818
+ ],
+ "n_runs": 27,
+ "axes": {
+  "gripper_rate_scale": {
+   "levels": [
+    1.0,
+    0.35,
+    0.5,
+    0.7,
+    1.5
+   ],
+   "nominal": 1.0,
+   "unit": "x",
+   "group": "gripper",
+   "trained_range": null,
+   "outside_training": [
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training",
+    "not-modelled-in-training"
+   ],
+   "hardware": "closure speed against the 0.10 m/s the simulator assumes -- a number robot.py flags as NOT measured and required before deployment"
+  },
+  "pad_friction_scale": {
+   "levels": [
+    1.0,
+    0.6,
+    0.8,
+    1.2
+   ],
+   "nominal": 1.0,
+   "unit": "x",
+   "group": "gripper",
+   "trained_range": [
+    0.6470588235294118,
+    1.352941176470588
+   ],
+   "outside_training": [
+    "inside",
+    "outside-by-0.07x-range",
+    "inside",
+    "inside"
+   ],
+   "hardware": "finger-pad wear, dust or a rubber change.  Scales the trained [0.55, 1.15] band about its midpoint"
+  }
+ }
+}

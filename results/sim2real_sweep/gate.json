@@ -1,0 +1,324 @@
+{
+ "verdict": "GREEN",
+ "why": "a real gap on multiple physics axes, identifiable from reward-free data, and recoverable when the parameter is known",
+ "thresholds": {
+  "throughput_gap": 0.1,
+  "tail_factor": 2.0,
+  "ident_margin": 0.1,
+  "recovery_min": 0.3
+ },
+ "criteria": {
+  "1  >=2 factors separated from repeat uncertainty": {
+   "pass": true,
+   "checked": true
+  },
+  "2  gap >=10% throughput or >=2x tail": {
+   "pass": true,
+   "checked": true
+  },
+  "3  not only segmentation/mask failure": {
+   "pass": true,
+   "checked": true
+  },
+  "4  reward-free history beats its permutation control": {
+   "pass": true,
+   "checked": true
+  },
+  "4b   ... and survives held-out object shapes": {
+   "pass": true,
+   "checked": true
+  },
+  "5  oracle closes >=30% of the zero-shot gap": {
+   "pass": true,
+   "checked": true
+  }
+ },
+ "gap": {
+  "qualifying": [
+   {
+    "axis": "action_latency_steps",
+    "value": 1.0,
+    "throughput_rel": -0.2700123536398237,
+    "trips_rel": 29.234041567345304,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "action_latency_steps",
+    "value": 2.0,
+    "throughput_rel": -0.6949814331210069,
+    "trips_rel": 163.97872084311828,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "action_latency_steps",
+    "value": 3.0,
+    "throughput_rel": -0.8829630706906214,
+    "trips_rel": 367.02125997193184,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "action_latency_steps",
+    "value": 4.0,
+    "throughput_rel": -0.9558598582753692,
+    "trips_rel": 550.0850859454589,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "cam_yaw_deg",
+    "value": -4.0,
+    "throughput_rel": -0.9460849295154206,
+    "trips_rel": 0.5957445703301911,
+    "via": "throughput",
+    "perception_only": false
+   },
+   {
+    "axis": "cam_yaw_deg",
+    "value": 1.5,
+    "throughput_rel": -0.05964019913048567,
+    "trips_rel": 1.2340424677220145,
+    "via": "+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "cam_yaw_deg",
+    "value": 4.0,
+    "throughput_rel": -0.8391871144296035,
+    "trips_rel": 10.29787183497674,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "gripper_rate_scale",
+    "value": 0.35,
+    "throughput_rel": -0.6802534625552329,
+    "trips_rel": 1.2553191312528307,
+    "via": "throughput",
+    "perception_only": false
+   },
+   {
+    "axis": "gripper_rate_scale",
+    "value": 0.5,
+    "throughput_rel": -0.4597712652102469,
+    "trips_rel": 1.7872339880295607,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "gripper_rate_scale",
+    "value": 0.7,
+    "throughput_rel": -0.20489472091706604,
+    "trips_rel": 0.6808509820443415,
+    "via": "throughput",
+    "perception_only": false
+   },
+   {
+    "axis": "obs_latency_steps",
+    "value": 2.0,
+    "throughput_rel": -0.1381455509745441,
+    "trips_rel": 1.5319147875169836,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "obs_latency_steps",
+    "value": 3.0,
+    "throughput_rel": -0.24712651487893972,
+    "trips_rel": 3.4893615297150986,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "obs_latency_steps",
+    "value": 4.0,
+    "throughput_rel": -0.3300459035152346,
+    "trips_rel": 3.638297689612583,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "servo_damping_scale",
+    "value": 0.5,
+    "throughput_rel": -0.9279044360841003,
+    "trips_rel": 2704.9786069108345,
+    "via": "throughput+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "servo_damping_scale",
+    "value": 0.75,
+    "throughput_rel": -0.04517444721997121,
+    "trips_rel": 88.0212748627774,
+    "via": "+tail",
+    "perception_only": false
+   },
+   {
+    "axis": "servo_damping_scale",
+    "value": 2.0,
+    "throughput_rel": -0.14733777161169392,
+    "trips_rel": 0.4680850047037758,
+    "via": "throughput",
+    "perception_only": false
+   }
+  ],
+  "checked": true,
+  "n_axes": 5,
+  "axes": [
+   "action_latency_steps",
+   "cam_yaw_deg",
+   "gripper_rate_scale",
+   "obs_latency_steps",
+   "servo_damping_scale"
+  ],
+  "physics_axes": [
+   "action_latency_steps",
+   "cam_yaw_deg",
+   "gripper_rate_scale",
+   "obs_latency_steps",
+   "servo_damping_scale"
+  ],
+  "c1_two_or_more_separated": true,
+  "c2_size": true,
+  "c3_not_only_segmentation": true
+ },
+ "identifiability": {
+  "checked": true,
+  "domains": [
+   {
+    "file": "cam_yaw.json",
+    "axis": "cam_yaw_deg",
+    "holdout_shape": false,
+    "best_set": "encoded_proprio",
+    "accuracy": 0.9930555820465088,
+    "balanced_accuracy": 0.993055542310079,
+    "majority_chance": 0.3333333432674408,
+    "shuffled_control": 0.30069443583488464,
+    "over_control": 0.6923611462116241,
+    "over_chance": 0.659722238779068,
+    "passes": true
+   },
+   {
+    "file": "cam_yaw_holdout.json",
+    "axis": "cam_yaw_deg",
+    "holdout_shape": true,
+    "best_set": "encoded_proprio",
+    "accuracy": 0.9740932583808899,
+    "balanced_accuracy": 0.9694189627965292,
+    "majority_chance": 0.34196892380714417,
+    "shuffled_control": 0.33419689536094666,
+    "over_control": 0.6398963630199432,
+    "over_chance": 0.6321243345737457,
+    "passes": true
+   },
+   {
+    "file": "gripper_rate.json",
+    "axis": "gripper_rate_scale",
+    "holdout_shape": false,
+    "best_set": "actor_latent",
+    "accuracy": 0.8902778029441833,
+    "balanced_accuracy": 0.8902777830759684,
+    "majority_chance": 0.3333333432674408,
+    "shuffled_control": 0.3576388955116272,
+    "over_control": 0.5326389074325562,
+    "over_chance": 0.5569444596767426,
+    "passes": true
+   },
+   {
+    "file": "gripper_rate_holdout.json",
+    "axis": "gripper_rate_scale",
+    "holdout_shape": true,
+    "best_set": "actor_latent",
+    "accuracy": 0.9576837420463562,
+    "balanced_accuracy": 0.9546657999356588,
+    "majority_chance": 0.2828507721424103,
+    "shuffled_control": 0.3006681501865387,
+    "over_control": 0.6570155918598175,
+    "over_chance": 0.6748329699039459,
+    "passes": true
+   },
+   {
+    "file": "obs_latency.json",
+    "axis": "obs_latency_steps",
+    "holdout_shape": false,
+    "best_set": "actor_latent",
+    "accuracy": 0.8652777671813965,
+    "balanced_accuracy": 0.8652777870496114,
+    "majority_chance": 0.3333333432674408,
+    "shuffled_control": 0.30763888359069824,
+    "over_control": 0.5576388835906982,
+    "over_chance": 0.5319444239139557,
+    "passes": true
+   },
+   {
+    "file": "obs_latency_holdout.json",
+    "axis": "obs_latency_steps",
+    "holdout_shape": true,
+    "best_set": "actor_latent",
+    "accuracy": 0.8561320900917053,
+    "balanced_accuracy": 0.8533377250035604,
+    "majority_chance": 0.349056601524353,
+    "shuffled_control": 0.3207547068595886,
+    "over_control": 0.5353773832321167,
+    "over_chance": 0.5070754885673523,
+    "passes": true
+   },
+   {
+    "file": "servo_damping.json",
+    "axis": "servo_damping_scale",
+    "holdout_shape": false,
+    "best_set": "proprio_servo",
+    "accuracy": 0.9965277910232544,
+    "balanced_accuracy": 0.9965277711550394,
+    "majority_chance": 0.3333333432674408,
+    "shuffled_control": 0.32777777314186096,
+    "over_control": 0.6687500178813934,
+    "over_chance": 0.6631944477558136,
+    "passes": true
+   },
+   {
+    "file": "servo_damping_holdout.json",
+    "axis": "servo_damping_scale",
+    "holdout_shape": true,
+    "best_set": "proprio_servo",
+    "accuracy": 1.0,
+    "balanced_accuracy": 1.0,
+    "majority_chance": 0.3529411852359772,
+    "shuffled_control": 0.3435294032096863,
+    "over_control": 0.6564705967903137,
+    "over_chance": 0.6470588147640228,
+    "passes": true
+   }
+  ],
+  "n_pass": 8,
+  "n_pass_heldout": 4,
+  "c4_identifiable": true,
+  "c4_generalises": true
+ },
+ "oracle": {
+  "checked": true,
+  "j_nominal": 55.86344528198242,
+  "domains": [
+   {
+    "tag": "obslat3",
+    "n": [
+     3,
+     3,
+     3
+    ],
+    "zero_shot": 42.188313802083336,
+    "oracle": 49.724124908447266,
+    "retention": 50.752766927083336,
+    "gap_to_nominal": 13.675131479899086,
+    "absolute_gain": 7.53581110636393,
+    "relative_gain_over_zero_shot": 0.17862318796898202,
+    "recovery_fraction_of_gap": 0.5510594993138259,
+    "retention_rel": -0.09148519804143601,
+    "recovers": true
+   }
+  ],
+  "c5_recoverable": true
+ }
+}
