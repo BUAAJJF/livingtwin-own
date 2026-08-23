@@ -13,21 +13,34 @@ This round runs phases 0–2 only and stops at Gate A. No two-timescale network,
 no world model, no BFM/TeCH, no hardware.
 
 **Headline.** The effect is real and larger than the project's own results
-file records; the mechanism proposed for it is not supported. A benchmark that
-holds object parameters constant within an episode inflates a recurrent
-policy's measured throughput by **11.8%** and a memoryless one's by **1.5%**,
-and two thirds of that inflation goes away by training in the correctly paced
-environment with no architectural change (§5.2). But the recurrent state does
-**not** carry previous-object information under the honest cadence — the probe
-reads at or below its own floor (§6.2). **Cadence Gate A: FAIL. Safety Gate:
-FAIL on the threshold, with the conclusion it was written to produce
-(§10).** Do not build the two-timescale network this round.
+file records; the mechanism proposed for it is not.
 
-Status: sections 1–3 and 5–11 complete. A tranche of confirmatory runs
-(the finer safety frontier, the three-object filter sweep, per-quantity
-cadence, a second training seed, and a run-to-run determinism check) was still
-executing when the VPN dropped for the second time; §4.4 lists exactly what is
-missing and what it would and would not change. Nothing in §10 depends on it.
+A benchmark that holds object parameters constant within an episode inflates a
+recurrent policy's measured throughput by **11.8%**, while moving a memoryless
+policy on the same task by an amount indistinguishable from zero. About 85% of
+that localises to the **shape** cadence alone, and two thirds of it goes away
+by training in the correctly paced environment with no architectural change
+(§5.2, §5.4). But the recurrent state does **not** carry previous-object
+information under the honest cadence (§6.2), its influence on the action decays
+within half an object cycle (§6.4), and clearing it per object does not reduce
+that influence — so the proposed "history as implicit privileged observation"
+mechanism fails all three of the tests the gate specified.
+
+**Cadence Gate A: FAIL** (1 of 5 conditions passes, 1 untested, 3 fail).
+**Safety Gate: FAIL** on the threshold, with the conclusion it was written to
+produce. Do not build the two-timescale network this round; §11 says what to
+do instead.
+
+Two by-products worth reading on their own: **the simulator is not
+reproducible run-to-run** — five identical commands span 2.9% — which sets a
+noise floor that several numbers in this project sit under (§7.5–7.6); and
+**two of the four "isolated findings" in `docs/results.md` are artefacts of
+measuring both terms of a comparison inside the leak** (§3.3, §5.5).
+
+Status: all eleven sections complete. Three confirmatory evaluations (two
+filter combinations in clutter, the second-seed teacher pair) and three of six
+probe re-runs were still executing at the time of writing; §4.4 and §5.6 say
+which, and none of them bears on §10.
 
 ---
 
@@ -918,24 +931,74 @@ identical at their defaults (the slew clamp is the same expression with
 `slew_scale = 1.0` folded in, and every added branch is skipped), so this is
 either a real regression or MuJoCo-Warp's documented non-determinism.
 
-### 7.5 The determinism check
+### 7.5 The determinism check — **the simulator is not reproducible**
 
-Three runs of the *identical* command — same checkpoint, same seed 20260823,
-same 512 × 2400, same code — were queued to settle it
-(`results/novelty_validation/determinism/`). They were still in flight when
-the connection dropped; see §4.4.
+Five runs of the *identical* command: same checkpoint, same seed 20260823,
+same 512 × 2400 protocol.
 
-This matters beyond one number. **If a repeat of the same command moves by 3%,
-then the ±0.8% bootstrap interval understates the real uncertainty by about
-four times**, and the 2% reproduction tolerance in §3 is tighter than the
-simulator can support. The two conclusions this document rests on survive
-either answer — the §3 distilled gap is 10% and the §5 cadence effect is
-11.8%, both several times a 3% run-to-run spread — but every *small*
-difference quoted anywhere here (the +1.5% memoryless baseline, the 0.3–0.8%
-seed spread, the −1.1% for `accel 180`) would have to be re-read as noise.
+| run | obj/min | trips/arm-h |
+|---|---:|---:|
+| Phase 0.2 batch | 48.1 | 26.1 |
+| `det_a` | 47.8 | 26.4 |
+| `det_c` | 47.4 | 24.3 |
+| `det_b` | 46.8 | 27.7 |
+| Phase 1 unfiltered | 46.7 | 22.7 |
 
-That is the honest statement of what is and is not established, and it is why
-§11A puts a second training seed ahead of any new architecture.
+Mean 47.4, sample standard deviation **0.61 (1.3%)**, full range **2.9%**.
+
+So the 48.1-against-46.7 discrepancy that prompted this was not a regression
+from the action-path edits: **MuJoCo-Warp is not reproducible run to run**, as
+mjlab's own note says ([mujoco_warp#562]), and a seed fixes the scene sequence
+but not the arithmetic. A single measurement therefore carries roughly **±2.6%
+at 95% from run-to-run variation alone**, on top of the ±1.5% bootstrap
+sampling interval.
+
+### 7.6 The noise floor, and what survives it
+
+Combining the two independent components gives a working rule: **a difference
+between two single runs smaller than about 3% should not be interpreted.**
+Applied honestly to everything in this document:
+
+**Comfortably above the floor** — these are the load-bearing results:
+
+| result | size | × floor |
+|---|---:|---:|
+| §3 s2 distilled fails to reproduce | −9.7%, −10.5% at two seeds | ~3× |
+| §5.2 EP-All inflation, distilled policy | +11.8% | ~4× |
+| §5.2 the same with memory zeroed | +7.1% | ~2× |
+| §5.4 shape cadence, distilled policy | +10.4% of throughput | ~3× |
+| §5.5 fine-tuning transfer, EP-All | +14.8% | ~5× |
+| §4 every slew result | −33% to −88% trips | ≫ |
+| §4 accel and low-pass raising trips | +42% to +333% | ≫ |
+| §6 all probe and swap results | — | different measurement, not throughput |
+
+**At or inside the floor** — stated in the sections above and re-stated here so
+they are not quoted as findings:
+
+* **The memoryless control's +1.5%** (§5.2). This is *within* run-to-run noise
+  and is consistent with **zero**. That strengthens rather than weakens the
+  contrast — the honest reading is "+11.8% for the recurrent policy against
+  nothing measurable for the memoryless one" — but +1.5% is not itself a
+  measurement.
+* **The fine-tuned policy's +3.6%** (§5.2) sits just at the floor.
+* **Mass and friction cadence** (§5.4): 3.8% and 1.7% for the distilled
+  policy, under 1% for the fine-tuned one. Only the *shape* row clears the
+  floor. The localisation conclusion rests on shape being large, not on mass
+  and friction being precisely small.
+* **The +2.9% from switching cadence for 400 iterations** (§5.5). Its
+  *throughput* half is inside the floor; its safety half (7.5 → 2.1 trips per
+  arm-hour) is not, and that is what the claim should rest on.
+* **§3's s3_distilled −3.3%** is barely above the floor and should be read as
+  inconclusive rather than as a failure to reproduce.
+* **The 0.3–0.8% rollout-seed spread** (§7.2) is smaller than the run-to-run
+  spread of the *same* seed, which is the correct and slightly absurd
+  conclusion: changing the seed matters less than re-running.
+
+This also means the **2% tolerance the reproduction was judged against is
+tighter than the simulator supports**. Six of nine runs passed it anyway; the
+three that failed did so by 3–10×, which is why §3's conclusion holds.
+
+[mujoco_warp#562]: https://github.com/google-deepmind/mujoco_warp/issues/562
 
 [mujoco_warp#562]: https://github.com/google-deepmind/mujoco_warp/issues/562
 
@@ -1110,7 +1173,7 @@ conditions hold.
 
 | # | condition | verdict | evidence |
 |---|---|---|---|
-| 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy against +1.5% for the memoryless control; §5.3: teacher shell rate 4.7 → 2.6 |
+| 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy — about 4× the run-to-run noise floor (§7.6) — against nothing measurable for the memoryless control; §5.3: teacher shell rate 4.7 → 2.6 |
 | 2 | effect consistent in direction across ≥ 2 **training** seeds | **NOT TESTED** | §7.3: only the memoryless teacher has a second training seed; neither vision student does |
 | 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
 | 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
@@ -1169,6 +1232,14 @@ total. Everything in §5.2 rests on one distillation run and one fine-tuning
 run, and it is the load-bearing claim of the whole direction. Until this
 exists, "training in the honest environment removes two thirds of the exploit"
 is one observation, not a result. **Do this before anything else.**
+
+**A′. And repeat every evaluation at least three times.** §7.5 found the
+simulator is not reproducible: five identical commands span 2.9%, which is
+comparable to the entire effect for the fine-tuned policy and larger than
+several differences this project has previously reported as findings. Every
+future number here should be a median of ≥ 3 repeats with the spread quoted,
+and the cost is small — an evaluation is five minutes. This is cheaper than A
+and should be adopted at the same time.
 
 **B. Re-measure the published table, and publish the cadence with it.**
 §3 shows the distilled rows of `docs/results.md` were measured under EP-All
