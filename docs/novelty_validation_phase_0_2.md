@@ -524,7 +524,72 @@ the same way.
 
 ## 7. Seeds and confidence intervals
 
-*(pending.)*
+Three sources of variation, kept separate because they have very different
+sizes and only one of them is cheap to reduce.
+
+### 7.1 Rollout sampling uncertainty
+
+Every interval quoted is a 2000-draw bootstrap **resampling environments**,
+not control steps. Two consecutive steps in one environment are about as
+independent as two consecutive frames of a video; two environments share only
+the policy and the parameter distribution. Ratios are recomputed from
+resampled totals rather than averaged over per-arm ratios, so an arm that
+placed nothing contributes its zero instead of a `0/0`.
+
+At 512 environments × 2400 steps the 95% interval on throughput is about
+**±0.8 objects/min**, i.e. ±1.5% relative.
+
+> The first implementation of this was wrong in a way worth recording. It used
+> a hand-rolled LCG and took `s % n` — the low bits of a power-of-two-modulus
+> generator, which cycle with period `n`. With 512 environments every
+> "resample" therefore drew each index exactly once, every resampled total
+> equalled the true total, and every interval collapsed to a point. It printed
+> `[48.1, 48.1]` and read as an extraordinarily precise measurement. It is now
+> a seeded Mersenne Twister, with a guard that raises on a degenerate interval.
+
+### 7.2 Rollout seed
+
+Three policies were scored at a second rollout seed (31415926 against
+20260823):
+
+| policy | seed A | seed B | spread |
+|---|---:|---:|---:|
+| s2 teacher | 59.0 | 59.2 | 0.3% |
+| s2 distilled | 48.1 | 47.7 | 0.8% |
+| s2 fine-tuned | 56.2 | 56.0 | 0.4% |
+
+So the seed-to-seed spread is **0.3–0.8%**, comfortably inside the bootstrap
+interval, and an order of magnitude smaller than the 10% baseline discrepancy
+in §3 or the 11.8% cadence effect in §5.
+
+MuJoCo-Warp is not bit-deterministic ([mujoco_warp#562]), so a seed fixes the
+scene sequence and not the last bit of the physics; §7.4 measures what that is
+worth directly.
+
+### 7.3 Training seed — **the gap in this round**
+
+Gate A condition 2 asks for the cadence effect to be consistent in direction
+across **training** seeds. Only one pair of training seeds exists in this
+repository: the state teacher was trained twice (`h_full` and `h_full_s2`,
+`--agent.seed 17`), and both are evaluated under both cadences in §5.4.
+
+There is **no** second training seed for either vision student. Producing one
+means re-running distillation and fine-tuning, roughly two GPU-hours per seed,
+which is outside this round. **Condition 2 is therefore only tested on the
+memoryless control**, and that is stated as a limitation rather than papered
+over: the 11.8%-versus-1.5% contrast in §5.2 rests on one distillation run and
+one fine-tuning run.
+
+### 7.4 Run-to-run reproducibility
+
+The same checkpoint, seed and protocol read 48.1 in the Phase 0.2 batch and
+46.7 as the unfiltered Phase 1 baseline — a 3% gap, larger than the seed-to-
+seed spread. The action-path edits between those commits are arithmetically
+identical at their defaults, so this is either a real regression or
+MuJoCo-Warp's documented non-determinism. §7.5 reports a three-way repeat of
+the identical command that settles it.
+
+[mujoco_warp#562]: https://github.com/google-deepmind/mujoco_warp/issues/562
 
 ## 8. Commands
 
@@ -624,4 +689,42 @@ network capacity, `COMMAND_DERATE`, or anything else in the training path.
 
 ## 11. Next minimal experiment
 
-*(pending.)*
+Ordered by how much each would change what gets built, not by cost.
+
+**A. The one missing control: a second training seed for the vision student.**
+Two distillation runs and two fine-tunes under each cadence, ~4 GPU-hours
+total. Everything in §5.2 rests on one distillation run and one fine-tuning
+run, and it is the load-bearing claim of the whole direction. Until this
+exists, "training in the honest environment removes two thirds of the exploit"
+is one observation, not a result. **Do this before anything else.**
+
+**B. Re-measure the published table, and publish the cadence with it.**
+§3 shows the distilled rows of `docs/results.md` were measured under EP-All
+while the header claims otherwise. Every number in that file should be
+regenerated with `--cadence` recorded in the output — which the JSON now does
+automatically. Cheap, and it removes a live error from the record.
+
+**C. Test the mechanism the probes actually point at, not the one proposed.**
+§6 finds no previous-object information in the recurrent state under the
+honest cadence, so "stale carry-over" is not what is happening. What the
+probes are consistent with is *evidence accumulation about a quantity that
+should have changed*: mass is the parameter a camera cannot see, must be
+inferred from contact, and benefits most from an object that never changes.
+The minimal test is a cadence sweep on **mass alone** at several hold times —
+one object, two, four, a whole episode — and reading the throughput gain
+against hold length. A curve there is the paper; a step at "episode" is a
+benchmark bug.
+
+**D. Only if A and C both come back positive: two-timescale memory.** Gate A
+does not authorise it, and §6 argues the specific design implied by the
+original hypothesis — a memory that forgets the previous object — targets
+something that is not there. If C shows accumulation over hold length, the
+useful architecture is one whose integration window is *learned* or *reset by
+an observable event*, not one hand-tuned to the object boundary.
+
+**Not worth doing next:** anything about the safety shell as an algorithmic
+contribution. §4 shows a one-scalar filter removes 81.5% of the trips, which
+is enough to make it an engineering choice rather than a research question.
+The part of §4 that remains interesting — command smoothing making a
+closed-loop policy *less* safe — is a two-paragraph observation, not a
+programme.
