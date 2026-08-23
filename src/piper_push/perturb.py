@@ -196,6 +196,14 @@ class PerturbedCameraScene:
     self._scale = float(p.get("depth_scale", 1.0))
     self._bias = float(p.get("depth_bias_m", 0.0))
     self._blob = float(p.get("depth_dropout_blob", 0.0))
+      # NOTE: mjlab already provides this -- ObservationTermCfg.delay_min_lag /
+    # delay_max_lag, "use min=max for constant delay".  Found after the WM0
+    # sweep was already running.  The two are equivalent here (both delay the
+    # final term output by a constant number of steps; the camera group has
+    # enable_corruption=False so mjlab's noise stage is a no-op), so the
+    # results stand, but WM1 should switch to the native fields and delete
+    # this buffer: better tested, and it supports a sampled lag range rather
+    # than only a constant, which is what a real pipeline does.
     self._latency = max(int(p.get("obs_latency_steps", 0)), 0)
     self._buf: list[torch.Tensor] = []
     self._env = env

@@ -150,6 +150,28 @@ and produced an empty job list — a sweep that printed "0 jobs" and exited
 successfully. The planner now writes its own file and the runner refuses an
 empty one.
 
+### 3.1 One axis reimplements something mjlab already has
+
+`obs_latency_steps` is implemented here as a ring buffer inside a class-based
+observation term. **mjlab already provides observation delay**:
+`ObservationTermCfg.delay_min_lag` / `delay_max_lag`, whose own documentation
+says "use min=max for constant delay". This was found after the sweep was
+already running.
+
+The results stand, because the two apply delay at the same point on the same
+tensor: mjlab's pipeline is compute → noise → clip → scale → delay → history,
+and the camera group has `enable_corruption=False` so the noise stage is a
+no-op — both therefore delay the final term output by a constant number of
+steps. The custom buffer is verified by S0 and by the reset test, and
+switching mid-sweep would have invalidated the runs in flight for no gain.
+
+**WM1 should use the native fields and delete the custom buffer.** It is
+better tested, it supports a *sampled* lag range rather than only a constant
+(which is what a real pipeline does), and one fewer stateful object in the
+observation path is worth having. Recorded here rather than quietly fixed
+because "we wrote our own delay" is exactly the kind of detail that decides
+whether a later result is comparable to anyone else's.
+
 ---
 
 ## 4. Stage S1 — screening
