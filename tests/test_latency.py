@@ -326,3 +326,25 @@ def test_the_term_finds_no_buffer_before_the_manager_builds_one():
   t, env, params = _scene_term((0.0, 0.0, 0.0, 1.0, 0.0))
   assert t._find_buffer() is None
   t(env, **params)
+
+
+def test_every_score_vector_has_one_entry_per_candidate():
+  """The five estimators' scores all reach the same five-way posterior.
+
+  B1a was written with its own max_lag and returned seven entries; that is a
+  crash at the far end of a scoring pass rather than an obvious mistake at the
+  near end, and it cost a run.
+  """
+  from piper_push import wm_infer
+
+  n = len(latency.LAGS)
+  v = wm_infer.SessionView(
+    enc=torch.randn(400, 100), hidden=torch.randn(400, 256),
+    proprio=torch.randn(400, 13), action=torch.randn(400, 7),
+    servo=torch.randn(400, 1), done=torch.zeros(400, dtype=torch.bool),
+    arm_seconds=8.0)
+  assert len(wm_infer.xcorr_action_joint(v)) == n
+  assert len(wm_infer.xcorr_latent_proprio(v, enc_split=36)) == n
+  # And a score vector of the wrong length is rejected, not broadcast.
+  with pytest.raises(ValueError, match="expected 5"):
+    wm_infer.posterior([0.0] * 7, 1.0)

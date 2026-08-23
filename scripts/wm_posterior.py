@@ -245,7 +245,7 @@ def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
       rows.append({"file": name, "env": env, "lag": s.lag,
                    "n_windows": int(comp["state"].shape[0]),
                    "comp": comp})
-    print(f"    {name}: {s.n_envs} sessions  "
+    print(f"    {name}: {min(s.n_envs, limit_envs or s.n_envs)} sessions  "
           f"({time.time() - t0:.0f} s)", flush=True)
   cache.parent.mkdir(parents=True, exist_ok=True)
   torch.save(rows, cache)

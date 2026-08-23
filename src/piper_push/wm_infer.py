@@ -118,16 +118,21 @@ class SessionView:
 # ---------------------------------------------------------------------------
 
 
-def xcorr_action_joint(v: SessionView, max_lag: int = 6) -> list[float]:
+def xcorr_action_joint(v: SessionView, candidates=latency.LAGS) -> list[float]:
   """Correlation between the commanded step and the joint's response, by shift.
 
-  Returned as a cost (negative correlation) over shifts ``0..max_lag`` so that
-  it can be read the same way as every other score in this module.
+  One entry per candidate domain, not per shift up to some maximum: the score
+  vectors of every method in this module are indexed by the same candidate set,
+  and a seven-long vector reaching a five-way posterior fails late and loudly
+  rather than early and quietly.
+
+  Returned as a cost (negative correlation) so that it reads the same way as
+  every other score here.
   """
   a = v.action[:, :6]
   dq = v.proprio[1:, :6] - v.proprio[:-1, :6]
   out = []
-  for lag in range(max_lag + 1):
+  for lag in candidates:
     if lag >= len(dq):
       out.append(0.0)
       continue
