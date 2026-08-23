@@ -292,7 +292,94 @@ Deliberately **not** carried forward, and why:
 
 ## 10. Commands
 
-*(pending)*
+Every run was launched on `shen-teacher` inside `tmux` with `setsid nohup`, so
+a dropped VPN cannot take a run with it — it has happened twice in this
+project. Two environment settings are required for any non-interactive
+invocation and are baked into `scripts/run_sim2real_sweep.sh`:
+
+```bash
+export MUJOCO_GL=disable                       # mujoco initialises a GL backend it never uses
+export LD_LIBRARY_PATH=$MAMBA_ROOT/envs/mjlab/lib:$LD_LIBRARY_PATH
+```
+
+The second is not optional: the env ships `libicui18n.so.78`, which needs
+`CXXABI_1.3.15`, and the system `libstdc++` does not have it. It breaks only
+non-interactive runs, inside mjlab's own import of `mediapy → IPython →
+sqlite3`.
+
+**S0 — plumbing (smoke):**
+
+```bash
+python scripts/check_perturb.py --device cuda:0 --num-envs 32 --steps 40 \
+  --json results/sim2real_sweep/plumbing_check.json
+```
+
+**S1 — screening**, 17 axes × 4 levels, 256 × 1200, one repeat:
+
+```bash
+python scripts/sweep_plan.py s1 \
+  --out s1.jobs --manifest results/sim2real_sweep/s1_manifest.json
+OUT=results/sim2real_sweep/s1 NUM_ENVS=256 STEPS=1200 \
+  scripts/run_sim2real_sweep.sh "0 1 2 3 4 5 6 7" s1.jobs
+```
+
+**S2 — formal**, 512 × 2400, three repeats (seeds 20260823 / 31415926 /
+27182818):
+
+```bash
+python scripts/sweep_plan.py s2 \
+  --axes cam_yaw_deg,obs_latency_steps,servo_damping_scale,gripper_rate_scale \
+  --out s2.jobs --manifest results/sim2real_sweep/s2_manifest.json
+OUT=results/sim2real_sweep/s2 NUM_ENVS=512 STEPS=2400 \
+  scripts/run_sim2real_sweep.sh "0 1 2 3 4 5 6 7" s2.jobs
+
+# the fifth axis, added after screening finished
+python scripts/sweep_plan.py s2 --axes action_latency_steps \
+  --out s2b.jobs --manifest results/sim2real_sweep/s2b_manifest.json
+grep -v '^nominal__' s2b.jobs > s2b_only.jobs     # nominal already measured
+OUT=results/sim2real_sweep/s2 NUM_ENVS=512 STEPS=2400 \
+  scripts/run_sim2real_sweep.sh "0 1 2 3 4 5 6 7" s2b_only.jobs
+```
+
+**S3 — interaction**, 3 × 3 on the two grasp-side axes:
+
+```bash
+python scripts/sweep_plan.py s3 \
+  --pair gripper_rate_scale:pad_friction_scale --pair-levels "1,0.7,0.5;1,0.8,0.6" \
+  --out s3.jobs --manifest results/sim2real_sweep/s3_manifest.json
+OUT=results/sim2real_sweep/s3 NUM_ENVS=512 STEPS=2400 \
+  scripts/run_sim2real_sweep.sh "0 1 2 3 4 5 6 7" s3.jobs
+```
+
+**Identifiability:**
+
+```bash
+python scripts/identifiability.py --axis obs_latency_steps --levels 0,2,4 \
+  --num-envs 96 --steps 600 --device cuda:0 \
+  --json results/sim2real_sweep/ident/obs_latency.json
+# and the same with --holdout-shape for the generalisation split
+```
+
+**Oracle ceiling** — one domain in full, and the exact commands for the others:
+
+```bash
+# perception / timing  (run in full)
+scripts/oracle_ceiling.sh obs_latency_steps 3 obslat3 0 2100
+
+# perception / geometry
+scripts/oracle_ceiling.sh cam_yaw_deg -1.5 camyaw15 1 2100
+# actuation
+scripts/oracle_ceiling.sh servo_damping_scale 0.75 damp075 2 2100
+# gripper / contact
+scripts/oracle_ceiling.sh gripper_rate_scale 0.5 griprate05 3 2100
+```
+
+**Analysis** — every table and figure in this document, from the JSONs only:
+
+```bash
+python scripts/analyze_sweep.py --stage s1 --stage s2 --stage s3 --json
+python -m pytest tests -q
+```
 
 ## 11. Next minimal experiment
 
