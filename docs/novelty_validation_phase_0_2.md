@@ -716,9 +716,24 @@ environment that inflates them.
 ### 5.6 A second training seed
 
 `h_full_s2` — the state teacher trained with `--agent.seed 17`
-(`sweep.sh:81`) — was evaluated under both cadences. It is the only pair of
-training seeds in the repository, and it covers the memoryless control only;
-neither vision student has a second seed (§7.3, §11A).
+(`sweep.sh:81`) — is the only second training seed in the repository. Both
+seeds, under both cadences:
+
+| teacher | OBJ-All | EP-All | Δ |
+|---|---:|---:|---:|
+| seed 1 (`h_full`) | 59.3 | 60.2 | +1.5% |
+| seed 17 (`h_full_s2`) | 59.1 | 59.8 | +1.2% |
+
+Consistent in direction and consistent in size — and **both inside the 3%
+noise floor** (§7.6), so the correct reading is that the memoryless control
+shows no cadence effect at either seed. That is what makes it a control: it
+bounds how much of the recurrent policy's +11.8% could be task difficulty
+rather than memory, and the answer is "nothing measurable".
+
+The same pair produced §5.3's withdrawal, which is the more instructive
+result: the *throughput* effect replicated across seeds and the *safety*
+effect reversed. Neither vision student has a second training seed, and that
+remains the largest gap in this round (§7.3, §11A).
 
 ## 6. Hidden-state probes and history swap
 
@@ -928,15 +943,21 @@ worth directly.
 
 Gate A condition 2 asks for the cadence effect to be consistent in direction
 across **training** seeds. Only one pair of training seeds exists in this
-repository: the state teacher was trained twice (`h_full` and `h_full_s2`,
-`--agent.seed 17`), and both are evaluated under both cadences in §5.4.
+repository: the state teacher, trained twice (`h_full` and `h_full_s2`,
+`--agent.seed 17`). Both are evaluated under both cadences in §5.6.
+
+What that pair showed is worth more than its size suggests. The **throughput**
+effect replicated (+1.5% and +1.2%, both inside the noise floor, both the same
+sign). The **safety** effect *reversed* — and had been written up as a finding
+on the strength of the first seed alone, until the second arrived (§5.3).
 
 There is **no** second training seed for either vision student. Producing one
 means re-running distillation and fine-tuning, roughly two GPU-hours per seed,
-which is outside this round. **Condition 2 is therefore only tested on the
-memoryless control**, and that is stated as a limitation rather than papered
-over: the 11.8%-versus-1.5% contrast in §5.2 rests on one distillation run and
-one fine-tuning run.
+which is outside this round. **Condition 2 is therefore tested only on the
+memoryless control**, and the 11.8%-versus-nothing contrast in §5.2 rests on
+one distillation run and one fine-tuning run. Given that the one seed pair
+available overturned one of this document's own claims, that is not a small
+caveat, and it is why §11A puts it first.
 
 ### 7.4 Run-to-run reproducibility
 
@@ -1190,7 +1211,7 @@ conditions hold.
 | # | condition | verdict | evidence |
 |---|---|---|---|
 | 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy — about 4× the run-to-run noise floor (§7.6) — against nothing measurable for the memoryless control. Passes on the throughput half only; §5.3 withdraws the safety half, which reverses sign across training seeds |
-| 2 | effect consistent in direction across ≥ 2 **training** seeds | **NOT TESTED** | §7.3: only the memoryless teacher has a second training seed; neither vision student does |
+| 2 | effect consistent in direction across ≥ 2 **training** seeds | **PARTIAL** | §5.6: the memoryless teacher has two seeds and its throughput effect replicates (+1.5%, +1.2%, both inside the noise floor) while its *safety* effect reverses. Neither vision student has a second seed, so the condition is untested on the only policies that show the effect |
 | 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
 | 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
 | 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **FAIL** | §5.5: 1100 EP-All fine-tuning iterations take the student from 47.3 to **54.3** on the honest test and cut shell trips from 22.6 to 7.5. It transfers well. Switching to the honest cadence adds a further +2.9% and −72% trips, so the right cadence is *better* — but "does not transfer" is not what the data says |
