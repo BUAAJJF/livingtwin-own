@@ -83,8 +83,10 @@ class SessionView:
         v = v.float()
       return v.to(device) if device is not None else v
 
+    done = s.done[:n, env]
     return cls(take(s.enc), take(s.hidden), take(s.proprio), take(s.action),
-               take(s.servo), s.done[:n, env], arm_seconds)
+               take(s.servo),
+               done.to(device) if device is not None else done, arm_seconds)
 
   @property
   def steps(self) -> int:

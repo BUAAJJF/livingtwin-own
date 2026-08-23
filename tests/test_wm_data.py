@@ -210,3 +210,26 @@ def test_zero_hidden_follows_the_policys_weights(policy):
   h = wm_data.zero_hidden(policy, N)
   assert h.device == next(policy.rnn.rnn.parameters()).device
   assert h.shape == (policy.rnn.rnn.num_layers, N, policy.rnn.rnn.hidden_size)
+
+
+def test_session_view_puts_every_channel_on_one_device():
+  """The done flag included.
+
+  It is the only channel that is not a float, so it is the one a helper that
+  converts floats can silently leave behind -- and the done-only control
+  classifier then gets a CPU tensor and a GPU model.
+  """
+  from piper_push import wm_data as wd
+  from piper_push import wm_infer
+
+  s = wd.SessionSet(
+    enc=torch.zeros(20, 3, 5, dtype=torch.half),
+    hidden=torch.zeros(20, 3, 4, dtype=torch.half),
+    proprio=torch.zeros(20, 3, 13), action=torch.zeros(20, 3, 7),
+    servo=torch.zeros(20, 3, 1), done=torch.zeros(20, 3, dtype=torch.bool),
+    shape=torch.zeros(20, 3, dtype=torch.uint8), lag=3)
+  v = wm_infer.SessionView.from_session(s, 1, 0.2, device="cpu")
+  devices = {v.enc.device, v.hidden.device, v.proprio.device,
+             v.action.device, v.servo.device, v.done.device}
+  assert len(devices) == 1
+  assert v.enc.dtype == torch.float32       # promoted out of fp16 storage

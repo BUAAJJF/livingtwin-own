@@ -91,9 +91,10 @@ def session_scores(v: wm_infer.SessionView, ens, ens_ctrl, head, clfs,
         out[key].append(torch.zeros(len(sel), len(latency.LAGS)))
         continue
       feed = dict(b)
-      feed["done"] = v.done[
-        torch.tensor(sel).unsqueeze(0)
-        + torch.arange(LENGTH).unsqueeze(1)].float()
+      dev_ = v.done.device
+      ts = (torch.tensor(sel, device=dev_).unsqueeze(0)
+            + torch.arange(LENGTH, device=dev_).unsqueeze(1))
+      feed["done"] = v.done[ts].float()
       # Cost, not logit: the rest of the pipeline minimises.
       out[key].append((-torch.log_softmax(m(feed), dim=-1)).cpu())
   return {k: (torch.cat(v_) if v_ else torch.zeros(0, len(latency.LAGS)))
