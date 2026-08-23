@@ -11,9 +11,13 @@ same levels are used at screening and formal scale, every run's label encodes
 exactly what it was, and the report can print the plan next to the results
 without either being transcribed.
 
-    python scripts/sweep_plan.py s1 > s1.jobs
-    python scripts/sweep_plan.py s2 --axes depth_scale,obs_latency_steps
-    python scripts/sweep_plan.py s3 --pair depth_scale:obs_latency_steps
+    python scripts/sweep_plan.py s1 --out s1.jobs --manifest s1_manifest.json
+    python scripts/sweep_plan.py s2 --axes depth_scale,obs_latency_steps --out s2.jobs
+    python scripts/sweep_plan.py s3 --pair depth_scale:obs_latency_steps --out s3.jobs
+
+Use --out rather than shell redirection: `micromamba run` merges stdout and
+stderr, so `> s1.jobs` captures mjlab's entry-point import warnings and drops
+the plan, producing an empty job list and a sweep that finishes instantly.
 """
 
 from __future__ import annotations
@@ -137,6 +141,11 @@ def main() -> int:
   p.add_argument("--axes", default=None,
                  help="comma-separated subset; default is every axis")
   p.add_argument("--pair", default=None, help="s3 only: 'axis_a:axis_b'")
+  p.add_argument("--out", default=None,
+                 help="write the job list here.  Prefer this to shell "
+                      "redirection: `micromamba run` merges stdout and "
+                      "stderr, so `> jobs` captures mjlab's import warnings "
+                      "and loses the plan.")
   p.add_argument("--manifest", default=None,
                  help="also write the plan, with levels and provenance, here")
   a = p.parse_args()
@@ -149,7 +158,12 @@ def main() -> int:
     p.error("s3 needs --pair axis_a:axis_b")
 
   lines = emit(a.stage, axes, a.pair)
-  print("\n".join(lines))
+  if a.out:
+    with open(a.out, "w") as f:
+      f.write("\n".join(lines) + "\n")
+    print(f"wrote {len(lines)} jobs to {a.out}")
+  else:
+    print("\n".join(lines))
 
   if a.manifest:
     spec = STAGES[a.stage]
