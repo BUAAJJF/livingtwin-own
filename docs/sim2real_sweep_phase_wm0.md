@@ -294,7 +294,86 @@ Deliberately **not** carried forward, and why:
 
 ## 5. Stage S2 — formal sweep
 
-*(pending)*
+**Formal.** 512 environments × 2400 control steps, **three independent
+processes per point** (seeds 20260823 / 31415926 / 27182818). `sep` is whether
+the Welch interval on the difference from nominal excludes zero — that
+interval carries the uncertainty of *both* points, so it is a real test and
+not a comparison of point estimates.
+
+### 5.1 Reference
+
+| metric | mean | sd over repeats | 95% interval |
+|---|---:|---:|---|
+| throughput | **55.86** obj/min | 0.31 | [55.09, 56.63] |
+| success | 99.83% | 0.03 | [99.75, 99.90] |
+| post-grasp drop | 0.53% | 0.03 | [0.47, 0.60] |
+| p95 cycle time | 1.47 s | 0.012 | [1.44, 1.50] |
+| stuck time | 1.21% | 0.47 | [0.05, 2.37] |
+| safety trips | 2.29 /arm-h | 0.22 | [1.74, 2.85] |
+
+Two things worth noting. The nominal reproduces `docs/results.md`'s 55.8
+objects/min exactly, which is a useful independent check on the whole
+pipeline. And the repeat spread here is **0.55%** — much tighter than the 2.9%
+range the Phase 0–2 determinism check found over five runs. A range over five
+draws is a biased estimator of spread; the standard deviation over three
+repeats is the number to use, and it is small.
+
+### 5.2 Results
+
+| axis | level | n | obj/min | Δ | sep | trips/arm-h | Δ | sep | p95 | drop |
+|---|---:|---:|---:|---:|---|---:|---:|---|---:|---:|
+| `cam_yaw_deg` | −4° | 3 | 3.01 | **−94.6%** | yes | 3.66 | +60% | no | 4.10 | 6.30% |
+| | −1.5° | 3 | 50.55 | **−9.5%** | yes | 3.66 | +60% | yes | 1.82 | 0.76% |
+| | +1.5° | 3 | 52.53 | **−6.0%** | yes | 5.13 | +123% | yes | 1.61 | 0.59% |
+| | +4° | 3 | 8.98 | **−83.9%** | yes | 25.93 | **+1030%** | yes | 7.12 | 6.56% |
+| `obs_latency_steps` | 1 | 3 | 53.26 | −4.7% | yes | 2.73 | +19% | no | 1.57 | 0.41% |
+| | 2 | 3 | 48.15 | **−13.8%** | yes | 5.81 | +153% | yes | 1.82 | 0.67% |
+| | 3 | 3 | 42.06 | **−24.7%** | yes | 10.30 | **+349%** | yes | 2.12 | 1.13% |
+| | 4 | 3 | 37.43 | **−33.0%** | yes | 10.64 | **+364%** | yes | 2.46 | 1.52% |
+| `servo_damping_scale` | 0.50 | 3 | 4.03 | **−92.8%** | yes | 6210 | **×2712** | yes | 1.53 | 0.07% |
+| | 0.75 | 3 | 53.34 | −4.5% | yes | **204.3** | **×89** | yes | 1.65 | 0.48% |
+| | 1.50 | 3 | 52.72 | −5.6% | yes | 1.32 | −43% | no | 1.50 | 0.75% |
+| | 2.00 | 3 | 47.63 | **−14.7%** | yes | 3.37 | +47% | no | 1.64 | 1.08% |
+| `gripper_rate_scale` | 0.35 | 3 | 17.86 | **−68.0%** | yes | 5.18 | +126% | no | 5.86 | 1.80% |
+| | 0.50 | 3 | 30.18 | **−46.0%** | yes | 6.40 | +179% | yes | 3.40 | 1.33% |
+| | 0.70 | 2 † | 44.52 | **−20.3%** | yes | 3.96 | +72% | no | 2.10 | 0.65% |
+| | 1.50 | 3 | 55.03 | −1.5% | **no** | 4.54 | +98% | no | 1.59 | 1.21% |
+
+† one repeat of this point did not complete; it is reported at n=2 rather than
+dropped or silently averaged as if it were three.
+
+### 5.3 What S2 establishes
+
+**All four axes separate, and three of them by a very large margin.** The
+screening result was not an artefact of one repeat: `cam_yaw_deg`,
+`obs_latency_steps`, `servo_damping_scale` and `gripper_rate_scale` all
+produce throughput effects that clear their own uncertainty, at levels a real
+deployment could plausibly land on.
+
+**The persistent-versus-jitter result survives the formal protocol.** A
+*fixed* camera yaw of ±1.5° — inside the ±2° of *per-episode random* jitter
+the policy was trained across — costs **9.5%** and **6.0%**, both separated.
+This is the sharpest single result in Phase WM0 for the README's hypothesis:
+the marginal distribution was matched and the deployed performance still
+moved, because deployment holds the value fixed and training did not.
+
+**One axis is tail-only, and it is the strongest argument for
+decision-aware calibration in the whole sweep.** `servo_damping_scale` at
+0.75 costs **4.5%** of throughput — small, but separated — while taking the
+safety-shell rate from 2.29 to **204.3 per arm-hour, a factor of 89**. That is
+a trip every 18 seconds. A calibration objective built on throughput, task
+reward, or pixel reconstruction would rank this mismatch as almost harmless.
+On hardware it would stop the robot continuously.
+
+**Latency has the cleanest dose-response in the sweep** (−4.7 / −13.8 / −24.7
+/ −33.0% at 1–4 steps, every level separated), and it is a quantity the
+simulator currently asserts is exactly zero.
+
+**Not everything matters, and that is useful.** `gripper_rate_scale = 1.5` —
+a *faster* gripper than assumed — does not separate (−1.5%). `servo_damping
+= 1.5` costs 5.6% of throughput but *reduces* the trip rate 43%. A
+decision-aware method must learn to spend no real interaction on these, which
+is exactly what distinguishes it from matching every parameter equally well.
 
 ## 6. Stage S3 — interaction
 
