@@ -29,15 +29,21 @@ notice.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 from piper_push import latency
 
 SEEDS = (42, 20260824, 31415927)
-"""Training seeds.  The first is the one Phase WM0's single oracle run used, so
-that run is reusable rather than repeated; the other two are what turns it into
-three."""
+"""Training seeds.
+
+Phase WM0's single oracle run used seed 42 too, but it is re-run rather than
+reused: it went through the old ``--obs-latency-steps`` path and these go
+through ``--latency-probs``, which is behaviourally the same domain and a
+different consumption of the random stream.  Comparing a run from one code
+path against runs from the other, and calling the difference a method effect,
+is exactly the kind of thing that is invisible afterwards."""
 
 
 def load_posteriors(path: Path) -> dict[str, latency.LatencyPrior]:
@@ -49,7 +55,11 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--posteriors",
                  default="results/wm1_latency/posterior/posteriors_60s.json")
-  p.add_argument("--stage", choices=("screen", "formal"), required=True)
+  p.add_argument("--stage", choices=("screen", "anchor", "formal"),
+                 required=True,
+                 help="anchor: the two runs that do not depend on alpha -- the "
+                      "oracle and a refit conditioned on the source prior -- "
+                      "so they can share a wave with the alpha screening")
   p.add_argument("--alpha", type=float, default=None,
                  help="formal stage: the alpha chosen by screening")
   p.add_argument("--alphas", default="0.5,0.75,1.0",
@@ -73,6 +83,8 @@ def main() -> int:
     # Screening is about alpha, so it runs one method -- the decision-aware
     # one, which is the method the phase is about.
     want = ["DA"] if "DA" in post else want[:1]
+  elif a.stage == "anchor":
+    alphas, seeds, want = [], SEEDS, []
   else:
     if a.alpha is None:
       raise SystemExit("--alpha is required for the formal stage")
@@ -105,11 +117,17 @@ def main() -> int:
                               "prior": latency.P_SOURCE.to_json()})
   job["methods"].append("B0_prior_refit")
 
+  # The tag is a function of the distribution and the seed and nothing else,
+  # so a run that the alpha screening already did is not repeated by the formal
+  # stage under a different name -- and its evaluations are not repeated
+  # either.  The stage name is deliberately absent from it.
   out = []
-  for i, (_, job) in enumerate(sorted(jobs.items(), key=lambda kv: str(kv[0]))):
+  for _, job in sorted(jobs.items(), key=lambda kv: str(kv[0])):
+    h = hashlib.sha256(
+      ",".join(f"{x:.3f}" for x in job["probs"]).encode()).hexdigest()[:4]
     for seed in seeds:
       probs = ",".join(f"{x:.6f}" for x in job["probs"])
-      tag = f"{a.stage}{i}_a{job['alpha']:.2f}_s{seed}"
+      tag = f"q{h}_a{job['alpha']:.2f}_s{seed}"
       out.append({**job, "tag": tag, "seed": seed, "probs_arg": probs,
                   "iterations": a.iterations})
 
