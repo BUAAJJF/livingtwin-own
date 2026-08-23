@@ -209,7 +209,7 @@ def section_safety() -> None:
 def _safety_one(policy: str, runs: dict[str, dict]) -> list[dict]:
   base = runs.get("none")
   print(f"  {'filter':22s} {'obj/min':>8s} {'d thru':>7s} {'trips/h':>8s}"
-        f" {'d trips':>8s} {'CVaR95':>7s} {'CVaR99':>7s} {'clipped':>8s}")
+        f" {'d trips':>8s} {'CVaR95':>7s} {'CVaR99':>7s} {'slew-clip':>10s}")
   rows = []
   for name in sorted(runs):
     r = runs[name]
@@ -218,7 +218,12 @@ def _safety_one(policy: str, runs: dict[str, dict]) -> list[dict]:
     js = r["joint_speed"]
     c95, c99 = max(js["cvar95"]), max(js["cvar99"])
     sh = r["shaping"]
-    clip = sh["frac_clipped_slew"] + sh["frac_clipped_accel"] + sh["frac_moved_lowpass"]
+    # Reported per stage, not summed.  A command can be touched by more than
+    # one stage, so the sum exceeds 100% and reads as nonsense; and the
+    # interesting number is buried in it anyway -- the slew column is ~89% even
+    # with no filter, which says the policy is saturated against the rate
+    # limiter almost all the time.
+    clip = sh["frac_clipped_slew"]
     d_thr = d_trp = float("nan")
     if base is not None and name != "none":
       b_thr = base["metrics"]["throughput_per_min"]
@@ -226,14 +231,16 @@ def _safety_one(policy: str, runs: dict[str, dict]) -> list[dict]:
       d_thr = (thr - b_thr) / b_thr
       d_trp = (trp - b_trp) / max(b_trp, 1e-9)
     print(f"  {name:22s} {thr:8.1f} {100 * d_thr:+6.1f}% {trp:8.1f}"
-          f" {100 * d_trp:+7.1f}% {c95:7.3f} {c99:7.3f} {100 * clip:7.2f}%")
+          f" {100 * d_trp:+7.1f}% {c95:7.3f} {c99:7.3f} {100 * clip:9.1f}%")
     rows.append({
       "policy": policy,
       "filter": name, "throughput": thr, "thr_lo": tlo, "thr_hi": thi,
       "trips_per_arm_hour": trp, "trips_lo": plo, "trips_hi": phi,
       "delta_throughput": d_thr, "delta_trips": d_trp,
       "speed_cvar95": c95, "speed_cvar99": c99,
-      "frac_commands_modified": clip,
+      "frac_clipped_slew": sh["frac_clipped_slew"],
+      "frac_clipped_accel": sh["frac_clipped_accel"],
+      "frac_moved_lowpass": sh["frac_moved_lowpass"],
       "success": r["metrics"]["success"],
       "p95_s": r["metrics"]["p95_s"],
       "cmd_acc_cvar99": max(r["command"]["cmd_acc"]["cvar99"]),
