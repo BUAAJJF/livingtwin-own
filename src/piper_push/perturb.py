@@ -342,22 +342,20 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
 
   # -- servo damping ---------------------------------------------------------
   if "servo_damping_scale" in applied:
-    from mjlab.envs.mdp import dr
-    from mjlab.managers.event_manager import EventTermCfg
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
-    env_cfg.events["servo_damping"] = EventTermCfg(
-      func=dr.pd_gains,
-      mode="startup",
-      params={
-        "asset_cfg": SceneEntityCfg("robot", actuator_names=("joint[1-6]",)),
-        "operation": "scale",
-        "distribution": "uniform",
-        # A degenerate range, because this is a fixed session error and not a
-        # randomisation: every environment gets the same damping multiplier.
-        "kp_range": (1.0, 1.0),
-        "kd_range": (mm.servo_damping_scale, mm.servo_damping_scale),
-      },
-    )
+    # Scaled on the actuator config before the entity is built, not through
+    # dr.pd_gains.  Two reasons: this is a fixed plant difference rather than
+    # a randomisation, so a degenerate distribution would be a lie about what
+    # it is; and the arm's actuators are four *groups* (joint[1-3], joint4,
+    # joint5, joint6) plus the gripper, so SceneEntityCfg's joint-name
+    # matching returns six indices into a list of five and raises.
+    import dataclasses
+    robot = env_cfg.scene.entities["robot"]
+    scaled = []
+    for act in robot.actuators:
+      is_gripper = any("gripper" in e for e in act.target_names_expr)
+      scaled.append(act if is_gripper else dataclasses.replace(
+        act, damping=act.damping * mm.servo_damping_scale))
+    robot.actuators = tuple(scaled)
 
   # -- contact ---------------------------------------------------------------
   if "pad_friction_scale" in applied:

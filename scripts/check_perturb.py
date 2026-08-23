@@ -76,8 +76,9 @@ def _probe(task: str, n: int, steps: int, device: str,
   with torch.inference_mode():
     env.reset()
     cam_idx = env.scene.sensors["scene_cam"].camera_idx
-    cam_pos = torch.as_tensor(env.sim.model.cam_pos[:, cam_idx]).clone()
-    cam_quat = torch.as_tensor(env.sim.model.cam_quat[:, cam_idx]).clone()
+    cam_field = torch.as_tensor(env.sim.model.cam_pos)
+    cam_pos = cam_field[:, cam_idx].clone()
+    cam_quat = torch.as_tensor(env.sim.model.cam_quat)[:, cam_idx].clone()
     for i in range(steps):
       obs, *_ = env.step(plan[i].expand(n, dim).contiguous())
       if i == 2:
@@ -89,9 +90,12 @@ def _probe(task: str, n: int, steps: int, device: str,
 
   out = {
     "applied": applied,
-    # Per-environment spread of the camera pose: if an event wrote only into
-    # world 0 this is zero and every environment is looking through the same
-    # lens, which is the failure that produces a plausible-looking null.
+    # Whether the camera pose field was expanded per world at all.  In play
+    # mode the jitter is zero by design, so every environment legitimately
+    # gets the SAME pose -- a spread of zero is correct here and cannot be
+    # used as the test.  What would be wrong is the field never being
+    # expanded, which shows up as a leading axis of 1 instead of num_envs.
+    "cam_field_worlds": int(cam_field.shape[0]),
     "cam_pos_mean": cam_pos.mean(0).tolist(),
     "cam_pos_env_spread": float(cam_pos.std(0).mean()),
     "cam_quat_env_spread": float(cam_quat.std(0).mean()),
@@ -119,9 +123,9 @@ def main() -> int:
 
   base = _probe(a.task, a.num_envs, a.steps, a.device,
                 perturb.SessionMismatchCfg())
-  print(f"  {'axis':24s} {'obs Δ':>12s} {'joint Δ':>12s} {'cam spread':>11s}  verdict")
+  print(f"  {'axis':24s} {'obs Δ':>12s} {'joint Δ':>12s} {'worlds':>7s}  verdict")
   print(f"  {'(unperturbed)':24s} {'-':>12s} {'-':>12s}"
-        f" {base['cam_pos_env_spread']:11.5f}")
+        f" {base['cam_field_worlds']:7d}")
 
   report = {"baseline": base, "axes": {}}
   ok = True
@@ -141,13 +145,17 @@ def main() -> int:
     r.update(delta_obs_rel=rel_obs, delta_joint_rel=rel_q, reached=reached)
     report["axes"][name] = r
     print(f"  {name:24s} {rel_obs:12.2e} {rel_q:12.2e}"
-          f" {r['cam_pos_env_spread']:11.5f}  {'ok' if reached else 'NOT APPLIED'}")
+          f" {r['cam_field_worlds']:7d}  {'ok' if reached else 'NOT APPLIED'}")
 
-  # The camera pose must differ across environments in every condition; a
-  # collapsed spread means the per-world write did not happen.
+  # The camera pose field must carry one row per world.  If it does not, the
+  # write landed in world 0 and every environment shares one lens -- which
+  # averages the perturbation away and reads as "this axis does not matter".
   for name, r in report["axes"].items():
-    if perturb.AXES[name].group == "camera" and r["cam_pos_env_spread"] < 1e-6:
-      print(f"  ! {name}: camera pose identical in every environment")
+    if perturb.AXES[name].group != "camera":
+      continue
+    if r["cam_field_worlds"] != a.num_envs:
+      print(f"  ! {name}: cam_pos has {r['cam_field_worlds']} worlds, "
+            f"expected {a.num_envs} -- the per-world write did not happen")
       ok = False
 
   print()
