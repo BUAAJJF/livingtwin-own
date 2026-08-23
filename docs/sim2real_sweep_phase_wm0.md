@@ -154,7 +154,17 @@ empty one.
 
 ## 4. Stage S1 — screening
 
-*(in progress)*
+**Screening, not formal.** 256 environments × 1200 control steps, one repeat
+per level. Enough to rule an axis out; not enough to publish a number.
+
+Two limits on how far these may be read:
+
+* **One repeat**, so no effect here has an uncertainty and the `sep` column is
+  undefined. Anything carried forward is re-measured at S2 with three.
+* **Trip counts are tiny.** 256 × 1200 × 0.02 s is 1.7 arm-hours, so the
+  nominal's 1.17 trips/arm-hour is *two events*. Ratios like "+1700%" are
+  differences of single-digit counts and are used only to decide what to
+  measure properly, never as results.
 
 ## 5. Stage S2 — formal sweep
 
