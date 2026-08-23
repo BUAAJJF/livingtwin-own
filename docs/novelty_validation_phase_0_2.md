@@ -359,11 +359,164 @@ environment gives 22.3–26.1.
 
 ## 4. Safety wrapper Pareto
 
-*(Phase 1 — pending.)*
+### 4.1 What the baseline already is
+
+The audit (§1.6) changed this experiment. The deployed command path is **not**
+a raw policy output: it is slew-limited to `0.62 × trip` and linearly
+interpolated across the ten physics substeps, and `robot.py` already records a
+derate sweep against shell events under a zero policy (0.75 → 44, 0.68 → 26,
+0.62 → 5). So `none` below is that path, and the filters worth testing are the
+ones that are not already in it.
+
+The calibration run (seed 1001, disjoint from the scoring seed) shows what the
+command actually looks like, pooled over the six arm joints:
+
+| quantity | p50 | p90 | p99 | peak | structural bound |
+|---|---:|---:|---:|---:|---:|
+| commanded \|v\|/trip | 0.6 | 0.6 | 0.6 | 0.6 | 0.62 |
+| commanded \|a\| (rad/s²) | 1.6 | 195 | 244 | 243.5 | 243.5 |
+| commanded \|jerk\| (rad/s³) | 156 | 12 188 | 19 531 | 24 347 | 24 350 |
+
+Two facts follow. The **median** commanded velocity is already at the slew
+ceiling — the policy is saturated against the rate limiter about 61% of the
+time. And the acceleration and jerk maxima are exactly the structural bounds
+that ceiling implies (`2 × 0.62 × trip / dt`, and that again over `dt`), which
+is what a bang-bang command looks like. The policy uses every unit of
+authority it has, so any filter that binds costs throughput.
+
+### 4.2 Result — single object, distilled policy
+
+Scored on held-out seed 20260823, 512 × 2400. This policy is the interesting
+subject because it is the one with the safety problem, and because PPO
+fine-tuning is known to fix it: the question is whether a fixed filter can do
+what the fine-tune did.
+
+| filter | obj/min | Δ | trips/arm-h | Δ | success |
+|---|---:|---:|---:|---:|---:|
+| none (as deployed) | 46.7 | — | 22.7 | — | 99.0% |
+| slew × 0.85 | 44.6 | −4.5% | **4.2** | **−81.5%** | 98.7% |
+| slew × 0.70 | 36.4 | −22.1% | 2.8 | −87.7% | 97.6% |
+| accel ≤ 180 rad/s² | 46.2 | −1.1% | 24.2 | +6.6% | 99.1% |
+| accel ≤ 120 | 44.2 | −5.4% | 26.2 | +15.4% | 98.9% |
+| accel ≤ 80 | 38.1 | −18.4% | 42.3 | **+86.3%** | 98.5% |
+| low-pass 15 Hz | 45.3 | −3.0% | 32.2 | +41.9% | 99.1% |
+| low-pass 8 Hz | 40.6 | −13.1% | 55.1 | **+142.7%** | 98.9% |
+
+**Only the slew limiter helps. Acceleration limiting and low-pass filtering
+make the safety shell fire *more often*, and the harder they are applied the
+worse it gets** — the 8 Hz low-pass nearly triples the trip rate.
+
+That is counterintuitive under an open-loop reading and obvious under a
+closed-loop one. The shell fires on *measured* joint velocity. An acceleration
+limit or a low-pass inserts lag between what the policy asks for and what the
+servo is given; the policy is in the loop, sees itself not arriving, and
+commands harder to compensate. The filter smooths the command and the
+compensation un-smooths the plant. Only the slew ceiling helps because it is
+the one filter that bounds the very quantity the shell measures.
+
+### 4.3 Safety Gate
+
+**FAIL, narrowly, on the throughput criterion.** The gate asks for ≥ 80% of
+trips removed for ≤ 2% of throughput. `slew × 0.85` removes 81.5% of trips but
+costs 4.5%. No filter tested reached the pair. *(A finer sweep at 0.88/0.90/
+0.92/0.95 is in §4.4 to locate the frontier exactly.)*
+
+But the gate's *purpose* — deciding whether safety should be the paper's
+contribution — is answered more clearly than the threshold suggests, and in
+the direction the gate was written to detect:
+
+* A deterministic shell buys **most** of the safety. 81.5% of the trips are
+  reachable with one scalar and no retraining.
+* It buys it by **strictly trading throughput away**. Every filter here moves
+  down and left; none moves up.
+* PPO fine-tuning moved this policy from **46.7 obj/min @ 22.7 trips/h** to
+  **55.8 @ 2.3** — 19% *more* throughput and 90% fewer trips *at the same
+  time*. No filter can do that, because a filter can only remove authority.
+
+So: **safety alone is not the novelty** — a shell gets most of it. What a
+filter cannot reproduce is the joint improvement, and "imitation inherits
+speed but not caution, and RL restores caution without paying speed" remains a
+claim about learning, not about filtering.
 
 ## 5. Cadence experiment matrix
 
-*(Phase 2.1–2.2 — pending.)*
+### 5.1 Construction
+
+`redraw_on_place` selects which of `(shape, mass, friction)` is drawn afresh
+when an object is replaced. Every setting draws from the **same ranges** — the
+reset event's params are untouched — so only the hold time varies.
+`tests/test_cadence.py` asserts the marginals are identical across subsets, and
+`scripts/check_cadence.py` forces placements in simulation and confirms the
+plumbing:
+
+| cadence | shape changed | mass changed | friction changed |
+|---|---:|---:|---:|
+| `object` | 100% | 100% | 100% |
+| `episode` | 0% | 0% | 0% |
+| `shape` | 100% | 0% | 0% |
+| `mass` | 0% | 100% | 0% |
+| `friction` | 0% | 0% | 100% |
+
+`OBJ-All` = `object`, `EP-All` = `episode`. Both draw a fresh object at every
+episode reset; the difference is what happens at the ninth placement of the
+same episode.
+
+### 5.2 The core matrix
+
+Same checkpoint, same seed, same 512 × 2400 protocol; only the evaluation
+environment's cadence changes. **Positive Δ means the leaky environment reads
+better**, which is the effect under test.
+
+| policy | memory | OBJ-All | EP-All | Δ |
+|---|---|---:|---:|---:|
+| state teacher — *feedforward, no memory* | — | 59.3 | 60.2 | **+1.5%** |
+| vision student, distilled — *trained under EP-All* | kept | 47.3 | 52.9 | **+11.8%** |
+| vision student, distilled | zeroed each object | 35.4 | 37.9 | +7.1% |
+| vision student, fine-tuned — *trained under OBJ-All* | kept | 55.8 | 57.8 | **+3.6%** |
+| vision student, fine-tuned | zeroed each object | 44.0 | 45.4 | +3.2% |
+
+Three readings, in decreasing order of confidence:
+
+**1. The leaky environment inflates a memory-carrying policy about eight times
+as much as a memoryless one.** +11.8% against +1.5%, same task, same
+evaluation, same everything but the hold time. The 1.5% is the honest
+difficulty difference — a feedforward policy that is *handed* the shape has no
+way to exploit its constancy — and everything above it is attributable to the
+recurrent state.
+
+**2. Most of the exploit is learned, not architectural.** Both students are
+the same GRU network with the same weights shape. The one distilled under
+EP-All gains 11.8%; the same network after PPO fine-tuning under OBJ-All gains
+only 3.6%. Training in the honest environment removed roughly two thirds of
+the exploitable advantage. This is the single most useful number here: it says
+the artefact is fixable by fixing the benchmark, without changing the
+architecture.
+
+**3. The hidden-reset ablation is not a clean subtraction, and should not be
+read as one.** Zeroing the recurrent state at every object boundary costs the
+distilled policy 25% of its throughput (47.3 → 35.4) and the fine-tuned one
+21% (55.8 → 44.0). The memory is doing a great deal of legitimate work —
+principally tracking whether the gripper is holding anything, which is exactly
+the flag that was removed from the observation to make the task deployable —
+so clearing it per object removes the deployable function along with the
+artefact, and the resulting policy is far outside the distribution it was
+trained in. The residual gaps (+7.1% and +3.2%) are therefore *not* "the
+non-memory part of the effect".
+
+### 5.3 Safety reads better in the leaky environment too
+
+The same table in trips per arm-hour, where lower is better:
+
+| policy | OBJ-All | EP-All |
+|---|---:|---:|
+| state teacher | 4.7 | 2.6 |
+| distilled, memory kept | 22.6 | 20.7 |
+| fine-tuned, memory kept | 2.3 | 2.5 |
+
+The teacher's shell rate nearly halves under EP-All. A benchmark that holds
+object parameters constant within an episode under-reports the constraint
+violation rate as well as over-reporting throughput, and the two errors point
+the same way.
 
 ## 6. Hidden-state probes and history swap
 
