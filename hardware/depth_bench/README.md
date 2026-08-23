@@ -175,8 +175,118 @@ because the depth samples are the measurement.
 | backend | status |
 |---|---|
 | `d405` | working |
+| `odin1` | working, except `bias` — see below |
 | `zedx` | stub — unit has a hardware fault, retest in a week |
-| `odin1` | stub — lidar + camera, so its depth is sparse and on its own grid; the registered-grayscale contract is a rendering choice there, not a passthrough, and per-point timestamps across a sweep make "static scene" an assumption to check rather than one that is free |
+
+## The Odin 1, and what it cost the contract
+
+This sensor is why `Capture` carries a ray table instead of an intrinsics
+matrix, and the change was not optional. Four things had to be measured
+because the vendor does not document them, and one of them contradicts what is
+documented.
+
+**Its depth grid is not a pinhole projection.** Fitting `(fx, fy, cx, cy)` to
+its measured ray directions leaves a 17-pixel residual on a 256×192 grid. So
+the geometry is carried as a measured ray table: over 45 frames each pixel's
+direction varies by 1.4e-08, which is to say it is a device constant and
+measuring it is exact. It is cached in `capture/odin1_raytable.npz` and
+coverage only improves — a pixel resolved in any session keeps its direction.
+Pixels the sensor has never returned are filled from a degree-7 surface, good
+to about 0.6 px, so that a pixel returning nothing during a measurement can
+still be told whether it was aimed at the target. Without that, dropout on
+this sensor would not be measurable at all.
+
+**Raw depth is in millimetres.** The data sheet says `float32 x // X axis, in
+meters`, but that documents the SLAM cloud message and the raw DTOF stream is
+a different path. The check that settles it needs no documentation: the
+ChArUco distance is true metric, fixed by 33 mm printed squares, and puts the
+sheet at 721 mm where the lidar's own plane fit lands at 698.
+
+**The board is found in the colour image, not the depth image.** At 256×192
+over 120° a 25 mm marker is under two pixels across. The 1600×1296 colour
+camera is a `FishPoly` fisheye, so it is rectified to a pinhole first and the
+pose is carried into the lidar frame by `T_dg`.
+
+**The factory extrinsic is not usable as shipped, and `bias` is withheld until
+it is calibrated.** The vendor documents that `Tcl` maps lidar to camera and
+that the camera frame is OpenCV's, but never states the lidar frame's axis
+convention or whether the dTOF grid is rotated relative to the colour sensor.
+Both had to be found by searching the 24 signed axis permutations against the
+device, scored by the angle between the ChArUco plane's normal and a plane
+fitted to the lidar's own points — a test only the rotation can affect. One
+wins by 28°, and it says the dTOF grid is rotated 180° about the optical axis.
+Deriving this instead of measuring it gave a different answer that the device
+disagreed with by 86°.
+
+A single board pose cannot pin the continuous part, so:
+
+```bash
+python calibrate_odin1.py       # move the sheet, and change its TILT
+```
+
+Until that has run, `evaluate` compares this sensor against a plane fitted to
+its own points and reports no bias. `fill`, `spatial_rms` and `temporal_std`
+never cross the extrinsic and are unaffected; `bias` does, and a wrong bias is
+worse than no bias, because it is the number that decides whether a sensor is
+trusted. The calibration solves for rotation, translation **and a constant
+depth bias together**, and refuses to write a result whose tilt spread is
+under 25° — on fronto-parallel views a translation along the line of sight and
+a depth bias are the same residual, and a fit that cannot tell them apart will
+move the sensor's bias into the extrinsic and then measure a bias of zero.
+
+## Two things about the Odin 1's colour camera
+
+**Its exposure is locked, not automatic.** Under mains lighting an auto-exposing
+10 Hz rolling shutter beats against the 100 Hz flicker and lays moving
+horizontal bands across the frame. That is not the scene changing, but it is
+indistinguishable from it: the live viewer's stillness gate measures
+inter-frame difference, and the banding held that gate shut about 80% of the
+time, so no shot could ever be taken. Locking the exposure to a whole number
+of flicker periods — 20 ms at 50 Hz — integrates the same light every frame and
+the bands go away. Measured on the device, the motion metric's median fell
+from 31.3 grey levels to 4.1.
+
+The gain is then trimmed automatically to reach a target brightness, because
+the right value depends on the room. `--exposure 0` restores auto exposure and
+the flicker with it. Locking also makes a capture reproducible, which the
+measurement wants anyway: an auto-exposing camera is one whose noise you
+measured under conditions you did not record.
+
+`lidar_set_ae_param` is not in the Python bindings and is declared by hand in
+`capture/odin1.py`.
+
+**The depth panel is turned for display.** The dTOF array is stored bottom-up
+relative to the colour sensor, so the two panels show the same scene mirrored
+and cannot be checked against each other by eye — which is the one job that
+view has. `view.display_transform` derives the turn from the extrinsic rather
+than hardcoding it, applies it *after* the region outlines are drawn so they
+travel with the image, and labels the panel. The geometry never sees it:
+masks are computed through the ray table and are unaffected.
+
+## The stillness gate
+
+A shot needs every camera to have been still for a whole ring buffer. "Still"
+is measured as the 98th percentile of the blurred, row-median-subtracted
+difference between consecutive greyscale frames, against a threshold of a few
+times that camera's own noise floor — the 10th percentile of its recent motion
+values.
+
+Every part of that is there because a simpler version failed. A *fixed* grey
+level threshold cannot work: the two cameras' floors here are 36 and 1, and the
+original threshold of 3 made "still" unreachable for one and trivial for the
+other. A *mean* rather than a percentile dilutes a hand in one corner into the
+noise of everything that did not move. And the row-median subtraction removes
+what is left of the rolling-shutter banding after the exposure lock.
+
+## Both cameras on one USB controller
+
+`lsusb -t` puts the D405 and the Odin 1 on the same xHCI controller here. The
+D405 can stop delivering frames once the lidar starts streaming, and it does
+not recover by itself — `wait_for_frames` times out for ever, including after
+the offending process exits. `live.py` issues a USB hardware reset and
+reopens the stream after 25 consecutive failures, which makes a session
+survive it. The actual fix is to move one of them to a different controller;
+buses 2, 6 and 8 are separate root hubs with free ports.
 
 ## Known concerns going in — D405
 

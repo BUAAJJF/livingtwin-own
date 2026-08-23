@@ -122,6 +122,8 @@
     <div class="note">
       新视角要和<em>已拍过的每一张</em>都拉开距离才会触发，所以采样点会自己铺开，不用规划。
       整个环形缓冲（24 帧）都必须静止才拍——测到的帧全在触发之前，不含接近过程的运动模糊。
+      静止阈值是<em>比值</em>不是绝对灰阶：每台相机自己的噪声底噪由最近 300 帧的 10 分位实测，
+      阈值取该底噪的倍数。两台噪声不同的相机没法共用一个绝对数字。
     </div>
   </fieldset>
 
@@ -150,7 +152,7 @@ function camPanel(c) {
     <div class="stats">
       <div class="stat"><div class="k">距离</div><div class="v" data-f="distance_mm">–</div></div>
       <div class="stat"><div class="k">倾角</div><div class="v" data-f="tilt_deg">–</div></div>
-      <div class="stat"><div class="k">运动</div><div class="v" data-f="motion">–</div></div>
+      <div class="stat"><div class="k">运动 / 阈值</div><div class="v" data-f="motion">–</div></div>
       <div class="stat"><div class="k">fps</div><div class="v" data-f="fps">–</div></div>
     </div></div>`;
 }
@@ -158,7 +160,12 @@ function camPanel(c) {
 function fmt(c, f) {
   if (f === 'distance_mm') return c.sees_target ? c.distance_mm + ' mm' : '看不到板';
   if (f === 'tilt_deg')    return c.sees_target ? c.tilt_deg + '°' : '–';
-  if (f === 'motion')      return c.motion == null ? '–' : c.motion.toFixed(1);
+  if (f === 'motion') {
+    if (c.motion == null) return '–';
+    const t = c.motion_thresh;
+    return t == null ? c.motion.toFixed(1) + ' /…'
+                     : c.motion.toFixed(1) + ' / ' + t.toFixed(1);
+  }
   if (f === 'fps')         return c.fps;
   return '–';
 }

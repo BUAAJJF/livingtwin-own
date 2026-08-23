@@ -89,6 +89,9 @@ class CameraWorker(threading.Thread):
     self.pose: dict | None = None
     self.pose_age = 0.0
     self.motion = float("inf")
+    self.motion_floor = None
+    self.motion_thresh = None
+    self._floor_hist: deque = deque(maxlen=300)
     self.still_frames = 0
     self.fps = 0.0
     self.error: str | None = None
@@ -147,13 +150,42 @@ class CameraWorker(threading.Thread):
           continue
         i += 1
 
-        # Motion on a 1/4-scale image: enough to see a hand or a camera move,
-        # cheap enough to run on every frame of every camera.
-        small = cv2.resize(gray, None, fx=0.25, fy=0.25,
-                           interpolation=cv2.INTER_AREA).astype(np.float32)
-        motion = (float(np.mean(np.abs(small - self._prev_small)))
-                  if self._prev_small is not None else float("inf"))
+        # Motion on a blurred 1/4-scale image.  Blurred because the raw
+        # inter-frame difference of an infrared frame is dominated by sensor
+        # noise, and a fixed threshold on that never fires: the D405 sits near
+        # 13-16 grey levels on a scene nobody is touching, so a threshold of 3
+        # means "still" is unreachable and the session captures nothing.
+        small = cv2.GaussianBlur(
+          cv2.resize(gray, None, fx=0.25, fy=0.25,
+                     interpolation=cv2.INTER_AREA).astype(np.float32), (0, 0), 1.5)
+        if self._prev_small is None:
+          motion = float("inf")
+        else:
+          d = small - self._prev_small
+          # Remove per-row brightness before measuring motion.  The Odin 1's
+          # colour image flickers: mains-frequency lighting beats against a
+          # 10 Hz rolling shutter and puts moving horizontal bands across the
+          # frame.  That is not the scene moving, but a raw difference reports
+          # it as though it were, and it kept this camera's stillness gate shut
+          # 80% of the time.  Subtracting a *global* offset does not touch it,
+          # because each row is shifted by a different amount; subtracting each
+          # row's own median does, and a real object still stands out because
+          # it occupies a small part of the rows it crosses.
+          d = d - np.median(d, axis=1, keepdims=True)
+          # A high percentile, not a mean: a hand entering one corner moves a
+          # small fraction of the pixels, and a mean over the whole frame
+          # dilutes it into the noise of everything that did not move.
+          motion = float(np.percentile(np.abs(d), 98))
         self._prev_small = small
+
+        # The threshold calibrates itself to this camera's own noise floor.
+        # Two sensors with different noise cannot share one number, and asking
+        # a person to tune it per camera is asking them to guess.
+        self._floor_hist.append(motion)
+        floor = (float(np.percentile(self._floor_hist, 10))
+                 if len(self._floor_hist) >= 40 else None)
+        thresh = (max(floor * self.args.still, floor + 1.0) if floor is not None
+                  else float("inf"))
 
         pose = None
         if i % pose_every == 0:
@@ -169,8 +201,9 @@ class CameraWorker(threading.Thread):
           self.depth, self.gray = depth, gray
           self.ring.append(depth)
           self.motion = motion
-          self.still_frames = (self.still_frames + 1
-                               if motion < self.args.still else 0)
+          self.motion_floor = floor
+          self.motion_thresh = thresh
+          self.still_frames = (self.still_frames + 1 if motion < thresh else 0)
           if i % pose_every == 0:
             self.pose, self.pose_age = pose, time.time()
           self.error = None
@@ -204,6 +237,9 @@ class CameraWorker(threading.Thread):
         "error": self.error,
         "fps": round(self.fps, 1),
         "motion": None if self.motion == float("inf") else round(self.motion, 2),
+        "motion_floor": None if self.motion_floor is None else round(self.motion_floor, 2),
+        "motion_thresh": (None if self.motion_thresh in (None, float("inf"))
+                          else round(self.motion_thresh, 2)),
         "still_frames": self.still_frames,
         "ring": len(self.ring),
         "model": self.meta.get("model", "-"),
@@ -645,7 +681,9 @@ def main() -> None:
   ap.add_argument("--d-angle", dest="d_angle", type=float, default=12.0,
                   help="degrees of viewpoint change that counts as a new shot")
   ap.add_argument("--still", type=float, default=3.0,
-                  help="grey levels of inter-frame motion still counted as still")
+                  help="how many times its own noise floor a camera may move and "
+                       "still count as still; the floor is measured per camera, "
+                       "so this is a ratio, not a number of grey levels")
   ap.add_argument("--min-interval", dest="min_interval", type=float, default=1.0)
   ap.add_argument("--save-raw", action="store_true",
                   help="also write the frame stacks (~40 MB per camera per shot)")
@@ -663,6 +701,9 @@ def main() -> None:
   ap.add_argument("--undistort-f", type=float, default=620.0)
   ap.add_argument("--undistort-size", default="1280x1024")
   ap.add_argument("--rebuild-rays", action="store_true")
+  ap.add_argument("--exposure", type=float, default=0.02)
+  ap.add_argument("--gain", type=float, default=0.0)
+  ap.add_argument("--mains-hz", type=float, default=50.0)
   args = ap.parse_args()
 
   board, spec = M.load_target(args.target)

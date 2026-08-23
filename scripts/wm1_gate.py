@@ -340,18 +340,25 @@ def criterion_6(post: dict | None, train: dict | None, clf: dict | None,
   separately.  What a deployment spends is: collecting the target data,
   running inference on it, and the PPO adaptation.
   """
+  # wm1_timings.py nests these under "offline" and "online"; reading them from
+  # the top level silently produced None for every one and failed G6 on a
+  # phase that had recorded all of them.
+  t_off = (timings or {}).get("offline", {})
+  t_on = (timings or {}).get("online", {})
   out = {"checked": True}
   out["offline"] = {
     "world_model_train_s": (train or {}).get("train_wall_clock_s"),
     "classifier_train_s": (clf or {}).get("wall_clock_s"),
-    "dataset_generation": (timings or {}).get("dataset_generation_s"),
+    "dataset_generation_s": t_off.get("dataset_generation_s"),
+    "dataset": t_off.get("dataset"),
   }
   budget = float(G1_BUDGET)
   out["online"] = {
     "target_data_collection_s": budget,
-    "posterior_inference_s": (timings or {}).get("inference_per_session_s"),
-    "ppo_adaptation_s": (timings or {}).get("ppo_per_run_s"),
+    "posterior_inference_s": t_on.get("inference_per_session_s"),
+    "ppo_adaptation_s": t_on.get("ppo_per_run_s"),
   }
+  out["inference_breakdown_s"] = t_on.get("inference_breakdown_s")
   known = [v for v in out["online"].values() if isinstance(v, (int, float))]
   out["online_total_s"] = sum(known) if len(known) == len(out["online"]) else None
   out["g6"] = all(v is not None for v in out["online"].values())
@@ -436,6 +443,15 @@ def main() -> int:
     verdict = "YELLOW"
     why = ("the target is recovered and the nominal domain is not retained; "
            "the posterior is too narrow and needs more source-prior mixing")
+  elif (c1.get("g1") and c234.get("g2") and c234.get("g4")
+        and not c234.get("g3")):
+    verdict = "YELLOW"
+    why = ("throughput recovers and the source domain is retained, but the "
+           "safety criterion is met only by the point estimate and not by its "
+           "interval: the trip rate is overdispersed across training seeds, so "
+           "the loop as it stands cannot be said to have recovered the safety "
+           "half of the gap"
+           + (" -- and a cheaper baseline did" if c234.get("g3_point") else ""))
   else:
     verdict = "YELLOW"
     why = "mixed; see the per-criterion table"

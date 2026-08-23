@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import mujoco
 import torch
+import torch.nn.functional as F
 from mjlab.entity import Entity
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -35,7 +36,7 @@ from mjlab.utils.lab_api.math import (
   sample_uniform,
 )
 
-from piper_push import objects, shapes
+from piper_push import depth_noise, objects, shapes
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -810,15 +811,7 @@ def gripper_squeeze(env: "ManagerBasedRlEnv") -> torch.Tensor:
   return (actual - target).unsqueeze(-1)
 
 
-def camera_scene(
-  env: "ManagerBasedRlEnv",
-  sensor_name: str,
-  command_name: str,
-  cutoff_distance: float = 1.5,
-  min_depth: float = 0.05,
-  noise_m: float = 0.0,
-  dropout: float = 0.0,
-) -> torch.Tensor:
+class CameraScene:
   """Three channels: the whole scene in depth, the target, and the two crossed.
 
   Kept as separate channels rather than handed over as ``depth * mask``.  The
@@ -832,40 +825,113 @@ def camera_scene(
   Depth is normalised against a fixed far plane, not per frame: per-frame
   normalisation is immune to sensor bias and destroys absolute scale, which is
   the cue that says how tall the object is.
+
+  A class rather than a function because the sensor has state.  A third of a
+  D405's error is a fixed pattern that does not change between frames
+  (``piper_push.depth_noise``), and so is the surface quality of whatever is on
+  the table -- neither can be redrawn every step without turning a systematic
+  error into something the policy can average away in three frames.  Both are
+  drawn at reset, which is what the ``reset`` hook here is for.
+
+  The mask is corrupted too, and for the same reason the depth is.  On the real
+  robot it comes out of ``hardware/deploy/mask.py``, which segments the depth
+  image: where the sensor returned nothing, the segmenter has nothing to label,
+  and its boundary is a pixel or so off wherever it did.  A perfect mask in
+  simulation is a channel the policy learns to trust completely and then does
+  not get.
   """
-  sensor = env.scene[sensor_name]
-  depth = sensor.data.depth
-  seg = sensor.data.segmentation
-  assert depth is not None and seg is not None
 
-  depth = depth.permute(0, 3, 1, 2)          # (B, 1, H, W)
-  cmd: PickCommand = env.command_manager.get_term(command_name)
+  def __init__(self, cfg, env) -> None:
+    del cfg  # the parameters arrive through __call__, as for a plain term
+    self._env = env
+    self._corr: depth_noise.DepthCorruption | None = None
+    self._noise_cfg: depth_noise.DepthNoiseCfg | None = None
+    self._mask_jitter = 0
 
-  if noise_m > 0.0 or dropout > 0.0:
-    # A real depth sensor is noisier further away and drops out entirely on
-    # dark, thin and specular surfaces.  Both are modelled crudely here and
-    # both should be replaced by a fit to the actual sensor before S5.
-    if noise_m > 0.0:
-      scale = (depth / cutoff_distance).clamp(0.1, 1.0)
-      depth = depth + torch.randn_like(depth) * noise_m * scale
-    if dropout > 0.0:
-      holes = torch.rand_like(depth) < dropout
-      depth = torch.where(holes, torch.full_like(depth, cutoff_distance), depth)
+  def _build(self, sensor_name: str, shape, device, noise_cfg, mask_jitter):
+    from piper_push import camera as camera_mod
 
-  norm = torch.clamp(
-    torch.clamp(depth, min=min_depth, max=cutoff_distance) / cutoff_distance, 0.0, 1.0
-  )
+    self._noise_cfg = noise_cfg
+    self._mask_jitter = int(mask_jitter)
+    height, width = int(shape[-2]), int(shape[-1])
+    self._corr = depth_noise.DepthCorruption(
+      num_envs=self._env.num_envs,
+      height=height,
+      width=width,
+      f_px_per_rad=camera_mod.f_px_per_rad(height=height),
+      device=device,
+      cfg=noise_cfg,
+    )
+    del sensor_name
 
-  ids = seg[..., 0]
-  types = seg[..., 1]
-  # (B, K), not (K,): with several objects on the table the mask has to say
-  # which one is the target, and that changes as each is cleared.
-  target = cmd.target_geom_ids.to(ids.device)
-  is_geom = types == int(mujoco.mjtObj.mjOBJ_GEOM)
-  mask = (ids.unsqueeze(-1) == target[:, None, None, :]).any(-1) & is_geom
-  mask = mask.float().unsqueeze(1)
+  def reset(self, env_ids=None) -> None:
+    if self._corr is not None:
+      self._corr.reset(env_ids)
 
-  return torch.cat([norm, mask, norm * mask], dim=1)
+  def _jitter_mask(self, mask: torch.Tensor) -> torch.Tensor:
+    """Move the mask boundary by a pixel, in a direction drawn per environment.
+
+    Three outcomes rather than a symmetric blur: a real segmenter's boundary is
+    biased one way for a whole scene -- a threshold that includes the shadow at
+    the base of every object, or one that clips every silhouette -- and a
+    per-pixel coin flip would average that bias to zero and teach the policy
+    that the mask edge is unbiased, which it is not.
+    """
+    k = 2 * self._mask_jitter + 1
+    grown = F.max_pool2d(mask, k, 1, self._mask_jitter)
+    shrunk = -F.max_pool2d(-mask, k, 1, self._mask_jitter)
+    pick = torch.randint(0, 3, (mask.shape[0], 1, 1, 1), device=mask.device)
+    return torch.where(pick == 0, shrunk, torch.where(pick == 1, mask, grown))
+
+  def __call__(
+    self,
+    env: "ManagerBasedRlEnv",
+    sensor_name: str,
+    command_name: str,
+    cutoff_distance: float = 1.5,
+    min_depth: float = 0.05,
+    noise_cfg: "depth_noise.DepthNoiseCfg | None" = None,
+    mask_jitter_px: int = 1,
+  ) -> torch.Tensor:
+    sensor = env.scene[sensor_name]
+    depth = sensor.data.depth
+    seg = sensor.data.segmentation
+    assert depth is not None and seg is not None
+
+    depth = depth.permute(0, 3, 1, 2)          # (B, 1, H, W)
+    cmd: PickCommand = env.command_manager.get_term(command_name)
+
+    ids = seg[..., 0]
+    types = seg[..., 1]
+    # (B, K), not (K,): with several objects on the table the mask has to say
+    # which one is the target, and that changes as each is cleared.
+    target = cmd.target_geom_ids.to(ids.device)
+    is_geom = types == int(mujoco.mjtObj.mjOBJ_GEOM)
+    mask = ((ids.unsqueeze(-1) == target[:, None, None, :]).any(-1) & is_geom)
+    mask = mask.float().unsqueeze(1)
+
+    cfg = noise_cfg if noise_cfg is not None else depth_noise.DepthNoiseCfg()
+    if cfg.strength > 0.0:
+      if self._corr is None:
+        self._build(sensor_name, depth.shape, depth.device, cfg, mask_jitter_px)
+      # Clamp before corrupting, not after: the far plane is the sky, and the
+      # relative gradient at the horizon of an unclamped depth buffer is
+      # enormous and entirely fictional.
+      clean = depth.clamp(min=min_depth, max=cutoff_distance)
+      depth, valid = self._corr(clean)
+      # A hole reads as the far plane.  It has to read as *something*, and this
+      # is the convention hardware/deploy/obs.py maps the driver's zero onto,
+      # so the two pipelines agree about what "no data" looks like.
+      depth = torch.where(valid, depth, torch.full_like(depth, cutoff_distance))
+      if self._mask_jitter > 0:
+        mask = self._jitter_mask(mask)
+      mask = mask * valid.to(mask.dtype)
+
+    norm = torch.clamp(
+      torch.clamp(depth, min=min_depth, max=cutoff_distance) / cutoff_distance,
+      0.0, 1.0,
+    )
+    return torch.cat([norm, mask, norm * mask], dim=1)
 
 
 def grasp_state(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:

@@ -26,6 +26,53 @@ import metrics as M
 COLOURS = {"charuco": (0, 255, 0), "white": (255, 128, 0), "black": (0, 200, 255)}
 
 
+def display_transform(T_dg):
+  """How to turn the depth panel so it faces the same way as the greyscale one.
+
+  The Odin 1 stores its dTOF array bottom-up relative to its colour sensor, so
+  the two panels show the same scene mirrored, and side by side they are
+  impossible to check against each other -- which is the one job this view has.
+  The geometry does not care: masks are computed through the ray table and land
+  correctly either way.  Only the human looking at it cares.
+
+  The turn is derived from the extrinsic rather than hardcoded, so a sensor
+  mounted some other way is handled and the D405, whose two panels are the same
+  grid, gets no transform at all.  It is applied *after* the region outlines
+  are drawn, so they travel with the image, and the panel is labelled -- a
+  silently mirrored image is worse than a confusing one.
+  """
+  R = np.asarray(T_dg)[:3, :3]
+  i, j = int(np.argmax(np.abs(R[0]))), int(np.argmax(np.abs(R[1])))
+  transpose = (i, j) == (1, 0)
+  if transpose:
+    fx, fy = R[0, 1] < 0, R[1, 0] < 0
+  elif (i, j) == (0, 1):
+    fx, fy = R[0, 0] < 0, R[1, 1] < 0
+  else:
+    return (lambda img: img), ""  # not an axis-aligned turn; leave it alone
+
+  bits = []
+  if transpose:
+    bits.append("transposed")
+  if fx:
+    bits.append("mirrored L-R")
+  if fy:
+    bits.append("mirrored U-D")
+  if not bits:
+    return (lambda img: img), ""
+
+  def apply(img):
+    if transpose:
+      img = cv2.transpose(img)
+    if fx:
+      img = cv2.flip(img, 1)
+    if fy:
+      img = cv2.flip(img, 0)
+    return img
+
+  return apply, "depth " + " + ".join(bits) + " for display"
+
+
 def depth_panel(depth: np.ndarray, near: float, far: float) -> np.ndarray:
   dn = np.clip((depth - near) / max(far - near, 1e-6), 0, 1)
   vis = cv2.applyColorMap((dn * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
@@ -68,6 +115,14 @@ def compose(gray, depth, K, dist, rays, T_dg, spec, board=None, pose_img=None,
     banner = banner or (
       f"{pose['plane_distance_m'] * 1000:.0f} mm  tilt {pose['tilt_deg']:.0f} deg  "
       f"{pose_img['n_corners']} corners  reproj {pose_img['reproj_rms_px']:.2f} px")
+
+  turn, turn_note = display_transform(T_dg)
+  dv = turn(dv)
+  if turn_note:
+    cv2.putText(dv, turn_note, (8, dv.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                0.45, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(dv, turn_note, (8, dv.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                0.45, (220, 220, 220), 1, cv2.LINE_AA)
 
   # The panels are different grids on a lidar, so match heights before joining
   # rather than assuming they already agree.

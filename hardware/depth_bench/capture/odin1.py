@@ -30,37 +30,43 @@ fisheye, not a pinhole, so it is undistorted to a pinhole first (verified by
 straight edges coming out straight), the board is found there, and the pose is
 carried into the lidar frame by the factory extrinsic.
 
-**The factory extrinsic cannot be used as written.**  The vendor documents
-that ``Tcl`` maps lidar to camera (``P_A = T^A_B . P_B``) and that the camera
-frame is OpenCV's -- x right, y down, z forward -- so the structure is
-``T_dtof<-colour = Q . inv(Tcl)``.  What it does *not* document, anywhere, is
-the lidar frame's own axis convention, nor whether the dTOF grid is rotated
-relative to the colour sensor.  Both had to be measured.
+**The colour-to-depth transform is a reflection, and the vendor's own driver
+says so.**  ``src/rawCloudRender.cpp`` in ``odin_ros_driver`` converts a raw
+DTOF point to the lidar frame as::
 
-``Q`` is found by searching the 24 signed axis permutations against the device
-and scoring each by the angle between the ChArUco plane's normal and a plane
-fitted to the lidar's own points -- a criterion that tests the rotation alone,
-since a translation cannot tilt a normal.  One wins by 28 degrees over the
-runner-up, and the composite it produces is approximately diag(-1, -1, +1):
-the dTOF grid is rotated 180 degrees about the optical axis relative to the
-colour sensor, which is undocumented and is what an upside-down die gives.
-Deriving this instead of measuring it produced a different answer that the
-device disagreed with by 86 degrees.
+    const float x = pf[2] * inv_1000;   // lidar x =  raw z / 1000
+    const float y = -pf[0] * inv_1000;  // lidar y = -raw x / 1000
+    const float z = pf[1] * inv_1000;   // lidar z =  raw y / 1000
 
-A single board pose cannot pin the continuous part -- one plane leaves the
-rotation about its own normal free -- so the bench
-calibrates this extrinsic itself, once, with ``calibrate_odin1.py``, and stores
-it beside the ray table.  Until that has been run this backend reports
-``extrinsic: "uncalibrated"`` and ``evaluate`` refuses to quote a bias -- a
-wrong bias is worse than no bias, because it is the number that decides whether
-a sensor is trusted.
+which is the matrix ``A`` below, with ``det(A) = -1``.  Composed with the
+documented ``P_cam = Tcl . P_lidar`` it gives ``Tcl @ A``, whose rotation comes
+out as approximately ``diag(1, -1, 1)``: the dTOF array is stored bottom-up
+relative to the colour sensor, and the two frames have opposite handedness.
+That file is also where the millimetre units are settled -- ``inv_1000`` is the
+vendor dividing by a thousand, on the path this backend reads.
 
-**What needs the extrinsic and what does not.**  ``bias`` crosses it and is
-withheld until calibration.  ``fill``, ``spatial_rms`` and ``temporal_std``
-are computed against a plane fitted to the sensor's own points inside the
-region, so they never cross it; the extrinsic only has to be good enough to
-say which pixels are looking at the sheet, and eight degrees is good enough
-for that.
+This took far too long to find, and the reason is worth keeping.  Every search
+tried here assumed a *rotation*: the 24 signed axis permutations with
+``det = +1``, a uniform sample of SO(3), a closed-form solve from ray
+correspondences.  The answer has ``det = -1``, so **it was never in the search
+space**, and each method returned the best wrong element of its own space --
+three different confident answers.  The indirect criteria could not catch it
+either: with the sheet flat on a desk, a flipped mapping lands the region
+somewhere else *on the same desk*, at a similar distance and with an identical
+normal, so plane-normal and depth tests both see nothing.
+
+What did catch it: the printed sheet is white paper on a black desk, so the
+range-compensated infrared albedo inside the sheet against a ring 11-31 px
+outside it separates the candidates -- a ring only 30 mm out is still on the
+paper and reports 1.0, which is how an earlier version of that test came back
+inconclusive.  A person looking at ``results/odin1/align_check.png`` said
+"vertically mirrored" at the same time.  Then the driver source confirmed both.
+Reading the vendor's code should have been the first move, not the last.
+
+Measured against the device, the exact composition scores 2.04 on that albedo
+ratio where an approximate ``diag(1, -1, 1)`` scores 1.93, so the small
+off-diagonal terms are real and worth carrying.
+
 """
 
 from __future__ import annotations
@@ -82,12 +88,14 @@ RAYS_CACHE = Path(__file__).resolve().parent / "odin1_raytable.npz"
 
 EXTRINSIC_CACHE = Path(__file__).resolve().parent / "odin1_extrinsic.npz"
 
-_Q = np.eye(4)
-_Q[:3, :3] = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], float)
-"""dTOF frame from the lidar frame ``Tcl`` is written against.
+RAW_TO_LIDAR = np.eye(4)
+RAW_TO_LIDAR[:3, :3] = np.array([[0, 0, 1], [-1, 0, 0], [0, 1, 0]], float)
+"""The vendor's own raw-DTOF-to-lidar mapping, from rawCloudRender.cpp.
 
-Undocumented, and measured: of the 24 signed axis permutations this one wins by
-28 degrees on a criterion that only the rotation can affect."""
+``det = -1``.  Not a rotation, which is why every search over rotations here
+missed it."""
+
+
 
 
 def add_args(ap) -> None:
@@ -103,6 +111,15 @@ def add_args(ap) -> None:
                   help="focal length of the pinhole the colour is rectified to")
   ap.add_argument("--undistort-size", default="1280x1024")
   ap.add_argument("--rebuild-rays", action="store_true")
+  ap.add_argument("--exposure", type=float, default=0.02,
+                  help="colour exposure in seconds, locked. 0 leaves auto "
+                       "exposure on, which flickers under mains lighting")
+  ap.add_argument("--gain", type=float, default=0.0,
+                  help="analog gain 1-64; 0 trims it automatically to reach a "
+                       "target image brightness at the locked exposure")
+  ap.add_argument("--mains-hz", type=float, default=50.0,
+                  help="only used to warn when the exposure is not an integer "
+                       "number of light-flicker periods")
 
 
 def available() -> list[dict]:
@@ -225,7 +242,18 @@ def _extrinsic(Tcl: np.ndarray) -> tuple[np.ndarray, str]:
   if EXTRINSIC_CACHE.exists():
     z = np.load(EXTRINSIC_CACHE)
     return z["T_dg"], "calibrated"
-  return _Q @ np.linalg.inv(Tcl), "uncalibrated"
+  return np.linalg.inv(Tcl @ RAW_TO_LIDAR), "vendor"
+
+
+def _set_ae(dev, mode: int, exposure: float, gain: float) -> int:
+  """``lidar_set_ae_param``, which the Python bindings do not declare."""
+  import ctypes
+
+  fn = dev._lib.lidar_set_ae_param
+  fn.argtypes = [type(dev._handle), ctypes.c_int, ctypes.c_float, ctypes.c_float]
+  fn.restype = ctypes.c_int
+  return int(fn(dev._handle, ctypes.c_int(mode), ctypes.c_float(exposure),
+                ctypes.c_float(gain)))
 
 
 class Stream:
@@ -263,6 +291,7 @@ class Stream:
 
     self._conf_min = args.conf_min
     self._last_gray = None
+    self.ae = self._lock_exposure(args)
     dev_serial = (available() or [{}])[0].get("serial", "")
     self.rays, ray_info = _ray_table(self._raw_frames, args, dev_serial)
 
@@ -286,14 +315,58 @@ class Stream:
       "conf_min": args.conf_min,
       "emitter": "SPAD dTOF, active illumination",
       "colour_model": "FishPoly rectified to a pinhole",
+      "ae": self.ae,
       "colour_resolution": [w, h],
       "colour_fx_px": f,
       "geometry": "measured ray table (the depth grid is not a pinhole)",
       "cross_frame_pose": True,
       "extrinsic": self.extrinsic_source,
+      # The vendor composition is an answer, not a guess, but it still leaves a
+      # couple of centimetres against the ChArUco plane at 0.9 m, and until
+      # calibrate_odin1.py has separated that into extrinsic residual and
+      # sensor bias it is not a bias measurement.
       "bias_trustworthy": self.extrinsic_source == "calibrated",
       **ray_info,
     }
+
+  def _lock_exposure(self, args) -> dict:
+    """Fix the colour exposure and trim the gain to match.
+
+    Auto exposure has to go.  Under mains lighting it beats against the 10 Hz
+    rolling shutter and lays moving horizontal bands across the frame, which is
+    not the scene changing but is indistinguishable from it: it held the live
+    viewer's stillness gate shut about 80% of the time, so no shot could ever
+    be taken.  An exposure that is a whole number of light-flicker periods
+    integrates the same amount of light every frame and the bands go away.
+
+    Locking it also makes a capture reproducible, which the measurement wants
+    anyway -- an auto-exposing camera is a camera whose noise you measured
+    under conditions you did not record.
+
+    The gain is trimmed here rather than asked for, because the right value
+    depends on the room and nobody should have to find it by hand.
+    """
+    if args.exposure <= 0:
+      return {"mode": "auto", "note": "auto exposure: expect mains flicker"}
+    period = 1.0 / (2 * args.mains_hz)  # light flickers at twice the mains rate
+    note = ""
+    if abs(args.exposure / period - round(args.exposure / period)) > 0.05:
+      note = (f"exposure {args.exposure * 1000:.1f} ms is not a whole number of "
+              f"{period * 1000:.0f} ms flicker periods; banding will remain")
+    gain = args.gain if args.gain > 0 else 8.0
+    rc = _set_ae(self.dev, 1, args.exposure, gain)
+    for _ in range(6):
+      if args.gain > 0:
+        break
+      for _ in range(3):
+        self.read()
+      mean = float(np.mean(self._last_gray))
+      if 90 <= mean <= 150:
+        break
+      gain = float(np.clip(gain * (118.0 / max(mean, 1.0)), 1.0, 64.0))
+      rc = _set_ae(self.dev, 1, args.exposure, gain)
+    return {"mode": "manual", "exposure_s": args.exposure, "gain": gain,
+            "rc": rc, "note": note}
 
   def _raw_frames(self, n: int) -> tuple[np.ndarray, np.ndarray]:
     xyz, zz = [], []

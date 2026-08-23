@@ -125,7 +125,13 @@ def transform_pose(pose: dict, T: np.ndarray) -> dict:
   normal = R[:, 2] / np.linalg.norm(R[:, 2])
   out = dict(pose)
   out["R"], out["tvec"] = R, t
-  out["rvec"] = cv2.Rodrigues(R)[0]
+  # The Odin 1's colour-to-depth transform is a reflection, so this can arrive
+  # with det = -1.  Points, planes and normals all transform correctly through
+  # it; a rotation vector does not exist for it.  Nothing downstream of the
+  # depth frame needs one -- the region outline on the greyscale panel is drawn
+  # with the *untransformed* pose -- so this is left absent rather than filled
+  # with whatever Rodrigues returns for a matrix that is not a rotation.
+  out["rvec"] = cv2.Rodrigues(R)[0] if np.linalg.det(R) > 0 else None
   out["normal"] = normal
   out["plane_distance_m"] = abs(float(normal @ t.ravel()))
   out["tilt_deg"] = float(np.degrees(np.arccos(

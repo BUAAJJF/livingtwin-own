@@ -1,0 +1,161 @@
+{
+  "index": 7,
+  "t": 70.59393858909607,
+  "manual": true,
+  "cameras": {
+    "D405": {
+      "pose": {
+        "distance_m": 0.4635459527681609,
+        "n_corners": 16,
+        "reproj_rms_px": 0.4022361636161804,
+        "tilt_deg": 6.632499500553538,
+        "board_span_px": 112.41763305664062,
+        "plane_uncertainty_m": 0.001658591633995074,
+        "cross_frame": false
+      },
+      "reference": "target",
+      "regions": {
+        "charuco": {
+          "n_pixels": 14406,
+          "range_m": 0.4702310026806316,
+          "fill": 0.9980187653292609,
+          "gross_outlier_frac": 8.67694016382063e-06,
+          "stable_fill": 0.9598084131611828,
+          "bias_m": -0.014590733254741695,
+          "spatial_rms_m": 0.005237378892895429,
+          "temporal_std_m": 0.0029007275588810444,
+          "temporal_n_pixels": 14406,
+          "p95_abs_m": 0.022786217291163136
+        },
+        "white": {
+          "n_pixels": 1687,
+          "range_m": 0.4622543943208186,
+          "fill": 0.9599387472831457,
+          "gross_outlier_frac": 4.939735230191662e-05,
+          "stable_fill": 0.4101956135151156,
+          "bias_m": -0.008944565405883509,
+          "spatial_rms_m": 0.011338164483096741,
+          "temporal_std_m": 0.011066404171288013,
+          "temporal_n_pixels": 1687,
+          "p95_abs_m": 0.027620054305978983
+        },
+        "black": {
+          "n_pixels": 1592,
+          "range_m": 0.4711771454388349,
+          "fill": 0.9743247487437185,
+          "gross_outlier_frac": 0.0007590033500837521,
+          "stable_fill": 0.5307788944723618,
+          "bias_m": -0.008854474411861712,
+          "spatial_rms_m": 0.011422126275865876,
+          "temporal_std_m": 0.010833252221345901,
+          "temporal_n_pixels": 1592,
+          "p95_abs_m": 0.02757161520916125
+        }
+      },
+      "capture": {
+        "backend": "d405",
+        "model": "RealSense D405",
+        "serial": "262622270868",
+        "firmware": "5.15.1.55",
+        "usb": "3.2",
+        "librealsense": "2.58.3",
+        "resolution": [
+          848,
+          480
+        ],
+        "fps": 30,
+        "preset": "default",
+        "depth_units_m": 9.999999747378752e-05,
+        "filters": false,
+        "emitter": "none (D405 is passive stereo)",
+        "stereo_baseline_m": 0.017945981979370116,
+        "fx_px": 430.751953125,
+        "n_frames": 24
+      }
+    },
+    "Odin1": {
+      "pose": {
+        "distance_m": 0.4670551261081791,
+        "n_corners": 16,
+        "reproj_rms_px": 0.2596612274646759,
+        "tilt_deg": 8.385352035053652,
+        "board_span_px": 156.31320190429688,
+        "plane_uncertainty_m": 0.000768351464390772,
+        "cross_frame": true
+      },
+      "reference": "self",
+      "regions": {
+        "charuco": {
+          "n_pixels": 660,
+          "range_m": 0.4759384609991001,
+          "fill": 0.9943813131313132,
+          "gross_outlier_frac": 0.0056186868686868684,
+          "stable_fill": 0.896969696969697,
+          "bias_m": NaN,
+          "spatial_rms_m": 0.01639517487326153,
+          "temporal_std_m": 0.011189973913133144,
+          "temporal_n_pixels": 660,
+          "p95_abs_m": 0.035517525851943454
+        },
+        "white": {
+          "n_pixels": 99,
+          "range_m": 0.4354396800843488,
+          "fill": 0.9903198653198653,
+          "gross_outlier_frac": 0.00968013468013468,
+          "stable_fill": 0.7777777777777778,
+          "bias_m": NaN,
+          "spatial_rms_m": 0.014444633852512087,
+          "temporal_std_m": 0.012643644586205482,
+          "temporal_n_pixels": 99,
+          "p95_abs_m": 0.03058140849897057
+        },
+        "black": {
+          "n_pixels": 89,
+          "range_m": 0.45729318945296504,
+          "fill": 0.7308052434456929,
+          "gross_outlier_frac": 0.26919475655430714,
+          "stable_fill": 0.033707865168539325,
+          "bias_m": NaN,
+          "spatial_rms_m": 0.01998711215733435,
+          "temporal_std_m": 0.018557097762823105,
+          "temporal_n_pixels": 89,
+          "p95_abs_m": 0.047603329834083774
+        }
+      },
+      "capture": {
+        "backend": "odin1",
+        "model": "Manifold Tech Odin 1",
+        "serial": "884531645a142e70",
+        "sdk": "odin_ros_driver v0.14.0 (liblydHostApi_amd.a)",
+        "resolution": [
+          256,
+          192
+        ],
+        "fps": 29,
+        "depth_units_m": 0.001,
+        "conf_min": 30,
+        "emitter": "SPAD dTOF, active illumination",
+        "colour_model": "FishPoly rectified to a pinhole",
+        "ae": {
+          "mode": "manual",
+          "exposure_s": 0.02,
+          "gain": 8.0,
+          "rc": 0,
+          "note": ""
+        },
+        "colour_resolution": [
+          1280,
+          1024
+        ],
+        "colour_fx_px": 620.0,
+        "geometry": "measured ray table (the depth grid is not a pinhole)",
+        "cross_frame_pose": true,
+        "extrinsic": "vendor",
+        "bias_trustworthy": false,
+        "rays_measured_frac": 0.9739583333333334,
+        "rays_cache": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/depth_bench/capture/odin1_raytable.npz",
+        "n_frames": 24
+      }
+    }
+  }
+}

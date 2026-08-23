@@ -31,6 +31,8 @@ import torch
 from mjlab.managers.event_manager import requires_model_fields
 from mjlab.sensor import CameraSensorCfg
 
+from piper_push import depth_noise
+
 CAMERA_NAME = "scene_cam"
 PARENT_BODY = "robot/base_link"
 
@@ -56,13 +58,21 @@ which is exactly the cue that says how tall the object is."""
 POS_JITTER_M = 0.020
 ROT_JITTER_RAD = math.radians(2.0)
 
-# Depth sensor realism.  These are PLACEHOLDERS: a real depth camera's noise
-# grows with distance and it drops out entirely on dark, specular and thin
-# surfaces, and neither is a Gaussian.  Measure the actual sensor against a
-# known plane and put the fitted model here before S5 -- guessing this is the
-# single largest sim2real risk in the vision stage.
-DEPTH_NOISE_M = 0.004
-DEPTH_DROPOUT = 0.02
+# Depth sensor realism.  These used to be two placeholders -- 4 mm of Gaussian
+# noise and 2% of uniformly scattered dropout -- with a note saying they were
+# guesses and that guessing was the largest sim2real risk in the vision stage.
+# The camera has since been measured (``hardware/depth_bench``) and the fitted
+# model lives in ``piper_push.depth_noise``, which carries every number and the
+# measurement it came from.  The short version of what the guess got wrong:
+# the error grows as z^2 and at this camera's 0.70 m is 10 mm, not 4; a third
+# of it is a fixed pattern that no amount of temporal filtering removes; it is
+# correlated across ~3 pixels of this image rather than independent; and the
+# dropout is not scattered at all -- it is concentrated on depth
+# discontinuities, which for a 25-45 mm object is the entire object.
+DEPTH_NOISE = depth_noise.DepthNoiseCfg()
+MASK_JITTER_PX = 1
+"""How far the target mask's boundary can be wrong.  On hardware the mask comes
+from ``hardware/deploy/mask.py``, not from a segmentation buffer."""
 
 
 def look_at_quat(pos, target=CAMERA_AIM) -> tuple[float, float, float, float]:
@@ -88,6 +98,17 @@ def look_at_quat(pos, target=CAMERA_AIM) -> tuple[float, float, float, float]:
 
 def fovx_deg(fovy: float = FOVY_DEG, width: int = WIDTH, height: int = HEIGHT) -> float:
   return 2 * math.degrees(math.atan(math.tan(math.radians(fovy / 2)) * width / height))
+
+
+def f_px_per_rad(fovy: float = FOVY_DEG, height: int = HEIGHT) -> float:
+  """Pixels per radian at the image centre.
+
+  The measured sensor model states its correlation length and its edge
+  threshold in angle, not in pixels, so that changing the policy's resolution
+  or field of view does not silently change what the sensor does.  This is the
+  conversion, and it is the only one.
+  """
+  return 0.5 * height / math.tan(math.radians(fovy) / 2)
 
 
 def camera_cfg(width: int = WIDTH, height: int = HEIGHT) -> CameraSensorCfg:

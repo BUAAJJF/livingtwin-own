@@ -12,6 +12,7 @@ Every number that describes what the robot can do comes from the S0 audit
 from __future__ import annotations
 
 import copy
+import dataclasses
 
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg, mdp
@@ -618,13 +619,22 @@ def make_pick_place_env_cfg(
     cfg.observations["camera"] = ObservationGroupCfg(
       terms={
         "scene": ObservationTermCfg(
-          func=pick_mdp.camera_scene,
+          func=pick_mdp.CameraScene,
           params={
             "sensor_name": camera.CAMERA_NAME,
             "command_name": TASK,
             "cutoff_distance": camera.CUTOFF_M,
-            "noise_m": 0.0 if play else camera.DEPTH_NOISE_M,
-            "dropout": 0.0 if play else camera.DEPTH_DROPOUT,
+            # ``play`` gets the clean sensor.  Not because deployment is
+            # clean -- it is the opposite -- but because a recorded rollout
+            # has to show what the policy did, and a run whose depth was
+            # corrupted differently from the last one cannot be compared to
+            # it.  ``scripts/record_vision.py --sensor real`` turns it back
+            # on when the question is what the camera does rather than what
+            # the policy does.
+            "noise_cfg": dataclasses.replace(
+              camera.DEPTH_NOISE, strength=0.0 if play else 1.0
+            ),
+            "mask_jitter_px": 0 if play else camera.MASK_JITTER_PX,
           },
         )
       },

@@ -1,0 +1,467 @@
+{
+ "verdict": "YELLOW",
+ "why": "throughput recovers and the source domain is retained, but the safety criterion is met only by the point estimate and not by its interval: the trip rate is overdispersed across training seeds, so the loop as it stands cannot be said to have recovered the safety half of the gap -- and a cheaper baseline did",
+ "thresholds": {
+  "inherited_from": "docs/sim2real_sweep_phase_wm0.md",
+  "J_nominal": 55.86,
+  "J_zero_shot": 42.19,
+  "J_oracle": 49.72,
+  "trips_nominal": 2.29,
+  "trips_zero": 8.69,
+  "trips_oracle": 4.83,
+  "g2": 47.461,
+  "g3": 5.9879999999999995,
+  "g4": 53.067,
+  "g1_margin": 0.15,
+  "recovery_target": 0.7
+ },
+ "re_measured_anchors": null,
+ "rederived_thresholds": {
+  "available": true,
+  "J_nominal": 55.941162109375,
+  "J_zero_shot": 42.117919921875,
+  "J_oracle": 49.33241102430556,
+  "trips_nominal": 3.1249999999998765,
+  "trips_zero": 9.643554687499618,
+  "trips_oracle": 4.557291666666486,
+  "n_repeats": {
+   "nominal": 6,
+   "zeroshot": 6,
+   "oracle": 9
+  },
+  "g2": 47.168063693576386,
+  "g3": 6.083170572916426,
+  "g4": 53.14410400390625,
+  "oracle_retention": 49.78569878472223
+ },
+ "criteria": {
+  "G1  reward-free identification beats its controls": {
+   "pass": true,
+   "checked": true
+  },
+  "G2  target throughput >= 47.46 obj/min": {
+   "pass": true,
+   "checked": true
+  },
+  "G3  target trips <= 5.99 per arm-hour": {
+   "pass": false,
+   "checked": true
+  },
+  "G4  retention >= 53.07 obj/min": {
+   "pass": true,
+   "checked": true
+  },
+  "G5  decision-aware beats trajectory matching somewhere": {
+   "pass": true,
+   "checked": true
+  },
+  "G6  every stage's wall-clock recorded": {
+   "pass": true,
+   "checked": true
+  }
+ },
+ "g1": {
+  "checked": true,
+  "budget_s": 60.0,
+  "controls": {
+   "ctrl_wm_shuffled": 0.05,
+   "ctrl_clf_shuffled": 0.19375,
+   "ctrl_done_only": 0.2
+  },
+  "best_control_balanced_accuracy": 0.2,
+  "done_only_balanced_accuracy": 0.2,
+  "methods": [
+   {
+    "method": "B0_prior",
+    "balanced_accuracy": 0.2,
+    "top1": 0.2,
+    "mass_on_truth": 0.2,
+    "over_controls": 0.0,
+    "target_top1": 0.0,
+    "passes": false
+   },
+   {
+    "method": "B1a_cmd_joint",
+    "balanced_accuracy": 0.15625,
+    "top1": 0.15625,
+    "mass_on_truth": 0.19999998659664928,
+    "over_controls": -0.04375000000000001,
+    "target_top1": 0.0,
+    "passes": false
+   },
+   {
+    "method": "B1b_img_proprio",
+    "balanced_accuracy": 0.4375,
+    "top1": 0.4375,
+    "mass_on_truth": 0.30138908523311,
+    "over_controls": 0.2375,
+    "target_top1": 0.21875,
+    "passes": true
+   },
+   {
+    "method": "B2_classifier",
+    "balanced_accuracy": 0.98125,
+    "top1": 0.98125,
+    "mass_on_truth": 0.9587666074127096,
+    "over_controls": 0.78125,
+    "target_top1": 0.96875,
+    "passes": true
+   },
+   {
+    "method": "B3_state",
+    "balanced_accuracy": 0.6,
+    "top1": 0.6,
+    "mass_on_truth": 0.4206359201768753,
+    "over_controls": 0.39999999999999997,
+    "target_top1": 0.96875,
+    "passes": true
+   },
+   {
+    "method": "B4_action",
+    "balanced_accuracy": 1.0,
+    "top1": 1.0,
+    "mass_on_truth": 1.0,
+    "over_controls": 0.8,
+    "target_top1": 1.0,
+    "passes": true
+   },
+   {
+    "method": "DA",
+    "balanced_accuracy": 1.0,
+    "top1": 1.0,
+    "mass_on_truth": 1.0,
+    "over_controls": 0.8,
+    "target_top1": 1.0,
+    "passes": true
+   },
+   {
+    "method": "abl_action_only",
+    "balanced_accuracy": 0.54375,
+    "top1": 0.54375,
+    "mass_on_truth": 0.4954386206675464,
+    "over_controls": 0.34374999999999994,
+    "target_top1": 0.84375,
+    "passes": true
+   },
+   {
+    "method": "abl_latent_only",
+    "balanced_accuracy": 1.0,
+    "top1": 1.0,
+    "mass_on_truth": 1.0,
+    "over_controls": 0.8,
+    "target_top1": 1.0,
+    "passes": true
+   }
+  ],
+  "n_passing": 7,
+  "held_out_shapes_by_construction": true,
+  "g1": true,
+  "da_passes": true
+ },
+ "g234": {
+  "checked": true,
+  "runs": [
+   {
+    "tag": "q13c3_a1.00",
+    "methods": [
+     "B0_prior_refit"
+    ],
+    "target_throughput": 42.085232204861114,
+    "target_ci": [
+     40.049641927083336,
+     43.85877821180556
+    ],
+    "target_trips": 7.145182291666384,
+    "target_trips_ci": [
+     4.902856571500191,
+     9.55190643897871
+    ],
+    "target_trip_events": 439.0,
+    "retention_throughput": 55.67762586805556,
+    "retention_ci": [
+     54.96880425347222,
+     56.290690104166664
+    ],
+    "recovery_fraction_of_oracle": -0.013913385808616658,
+    "g2": false,
+    "g2_point": false,
+    "g3": false,
+    "g3_point": false,
+    "g4": true,
+    "g4_point": true
+   },
+   {
+    "tag": "q1ae5_a0.75",
+    "methods": [
+     "B2_classifier"
+    ],
+    "target_throughput": 49.538302951388886,
+    "target_ci": [
+     49.36170789930556,
+     49.71299913194444
+    ],
+    "target_trips": 5.452473958333117,
+    "target_trips_ci": [
+     3.9556984448407717,
+     7.07559575843303
+    ],
+    "target_trip_events": 335.0,
+    "retention_throughput": 53.58696831597223,
+    "retention_ci": [
+     53.337673611111114,
+     53.82703993055556
+    ],
+    "recovery_fraction_of_oracle": 0.9758702458683781,
+    "g2": true,
+    "g2_point": true,
+    "g3": false,
+    "g3_point": true,
+    "g4": true,
+    "g4_point": true
+   },
+   {
+    "tag": "q48aa_a0.75",
+    "methods": [
+     "B3_state"
+    ],
+    "target_throughput": 49.0185546875,
+    "target_ci": [
+     48.77143012152778,
+     49.26133897569444
+    ],
+    "target_trips": 4.427083333333158,
+    "target_trips_ci": [
+     3.324565089673709,
+     5.63340244398532
+    ],
+    "target_trip_events": 272.0,
+    "retention_throughput": 54.0625,
+    "retention_ci": [
+     53.584798177083336,
+     54.51253255208333
+    ],
+    "recovery_fraction_of_oracle": 0.9068465720451528,
+    "g2": true,
+    "g2_point": true,
+    "g3": true,
+    "g3_point": true,
+    "g4": true,
+    "g4_point": true
+   },
+   {
+    "tag": "q7878_a1.00",
+    "methods": [
+     "ORACLE"
+    ],
+    "target_throughput": 49.33241102430556,
+    "target_ci": [
+     49.08338758680556,
+     49.589572482638886
+    ],
+    "target_trips": 4.557291666666486,
+    "target_trips_ci": [
+     3.8930714495875614,
+     5.283102800152919
+    ],
+    "target_trip_events": 280.0,
+    "retention_throughput": 49.78569878472223,
+    "retention_ci": [
+     48.83680555555556,
+     50.71397569444444
+    ],
+    "recovery_fraction_of_oracle": 0.9485273604655456,
+    "g2": true,
+    "g2_point": true,
+    "g3": true,
+    "g3_point": true,
+    "g4": false,
+    "g4_point": false
+   },
+   {
+    "tag": "qcc23_a0.75",
+    "methods": [
+     "DA",
+     "B4_action"
+    ],
+    "target_throughput": 49.88688151041667,
+    "target_ci": [
+     49.67854817708333,
+     50.087890625
+    ],
+    "target_trips": 5.240885416666459,
+    "target_trips_ci": [
+     3.777890643021464,
+     6.829957849196952
+    ],
+    "target_trip_events": 322.0,
+    "retention_throughput": 54.32210286458333,
+    "retention_ci": [
+     54.00661892361111,
+     54.61452907986111
+    ],
+    "recovery_fraction_of_oracle": 1.0221622191788409,
+    "g2": true,
+    "g2_point": true,
+    "g3": false,
+    "g3_point": true,
+    "g4": true,
+    "g4_point": true
+   },
+   {
+    "tag": "qcd16_a0.75",
+    "methods": [
+     "B1b_img_proprio"
+    ],
+    "target_throughput": 49.75558810763889,
+    "target_ci": [
+     49.45502387152778,
+     50.05479600694444
+    ],
+    "target_trips": 4.427083333333158,
+    "target_trips_ci": [
+     3.916548944514816,
+     4.985683967307719
+    ],
+    "target_trip_events": 272.0,
+    "retention_throughput": 54.02045355902777,
+    "retention_ci": [
+     53.678927951388886,
+     54.32481553819444
+    ],
+    "recovery_fraction_of_oracle": 1.0047261763132662,
+    "g2": true,
+    "g2_point": true,
+    "g3": true,
+    "g3_point": true,
+    "g4": true,
+    "g4_point": true
+   }
+  ],
+  "da_runs": [
+   "qcc23_a0.75"
+  ],
+  "g2": true,
+  "g2_point": true,
+  "g3": false,
+  "g3_point": true,
+  "g4": true,
+  "g4_point": true
+ },
+ "g5": {
+  "checked": true,
+  "identification": {
+   "da_balanced_accuracy": 1.0,
+   "tm_balanced_accuracy": 0.6,
+   "delta": 0.4
+  },
+  "benign_false_positive": {
+   "da": 0.0,
+   "tm": 0.25,
+   "delta": 0.25
+  },
+  "shared_adaptation_run": null,
+  "target_recovery": {
+   "da": 49.88688151041667,
+   "tm": 49.0185546875,
+   "da_ci": [
+    49.67854817708333,
+    50.087890625
+   ],
+   "tm_ci": [
+    48.77143012152778,
+    49.26133897569444
+   ],
+   "separated": true
+  },
+  "safety_recovery": {
+   "da": 5.240885416666459,
+   "tm": 4.427083333333158,
+   "separated": false
+  },
+  "retention": {
+   "da": 54.32210286458333,
+   "tm": 54.0625
+  },
+  "pareto": {
+   "da": [
+    49.88688151041667,
+    54.32210286458333
+   ],
+   "tm": [
+    49.0185546875,
+    54.0625
+   ],
+   "dominates": true
+  },
+  "wins": [
+   "benign_false_positive",
+   "target_recovery",
+   "recovery_retention_pareto"
+  ],
+  "wins_outside_the_specified_four": [
+   "identification"
+  ],
+  "g5": true,
+  "inconclusive_because_shared_run": false
+ },
+ "g6": {
+  "checked": true,
+  "offline": {
+   "world_model_train_s": 349.24113726615906,
+   "classifier_train_s": 21.804375886917114,
+   "dataset_generation_s": 9418.363870716232,
+   "dataset": {
+    "cal": {
+     "files": 5,
+     "arm_seconds": 24000.0,
+     "bytes": 957600000,
+     "wall_clock_s": 0.0
+    },
+    "calh": {
+     "files": 5,
+     "arm_seconds": 24000.0,
+     "bytes": 957600000,
+     "wall_clock_s": 0.0
+    },
+    "test": {
+     "files": 5,
+     "arm_seconds": 48000.0,
+     "bytes": 1915200000,
+     "wall_clock_s": 0.0
+    },
+    "train": {
+     "files": 10,
+     "arm_seconds": 38400.0,
+     "bytes": 1532160000,
+     "wall_clock_s": 0.0
+    },
+    "val": {
+     "files": 5,
+     "arm_seconds": 9600.0,
+     "bytes": 383040000,
+     "wall_clock_s": 0.0
+    },
+    "valh": {
+     "files": 5,
+     "arm_seconds": 9600.0,
+     "bytes": 383040000,
+     "wall_clock_s": 0.0
+    }
+   }
+  },
+  "online": {
+   "target_data_collection_s": 60.0,
+   "posterior_inference_s": 0.1551783879597982,
+   "ppo_adaptation_s": 2909.662649004083
+  },
+  "inference_breakdown_s": {
+   "world_model_scores_s": 0.1551783879597982,
+   "classifier_s": 0.002492825190226237,
+   "b1b_ridge_s": 0.0031957626342773438,
+   "b1a_xcorr_s": 0.0008223851521809896,
+   "n_windows_60s": 120
+  },
+  "online_total_s": 2969.817827392043,
+  "g6": true
+ }
+}
