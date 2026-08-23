@@ -195,6 +195,7 @@ class PerturbedCameraScene:
     p = cfg.params
     self._scale = float(p.get("depth_scale", 1.0))
     self._bias = float(p.get("depth_bias_m", 0.0))
+    self._blob = float(p.get("depth_dropout_blob", 0.0))
     self._env = env
     # Observation latency used to live here as a hand-rolled ring buffer.  It
     # is now ``delay_min_lag``/``delay_max_lag`` on this term's config --

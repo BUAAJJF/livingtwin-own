@@ -204,3 +204,94 @@ def test_pitch_and_yaw_turn_about_different_axes():
   dp, dy = p[0] - fwd[0], y[0] - fwd[0]
   assert float(dp.norm()) == pytest.approx(float(dy.norm()), rel=1e-3)
   assert abs(float((dp / dp.norm() * (dy / dy.norm())).sum())) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# The camera term itself
+# ---------------------------------------------------------------------------
+#
+# Added after a refactor dropped one attribute from the constructor and the
+# failure only surfaced 4 minutes into a 512-environment rollout.  Every axis
+# this class owns is now constructed and called on the CPU.
+
+
+class _Sensor:
+  class data:  # noqa: N801 -- mirrors mjlab's sensor.data.depth
+    depth = None
+
+
+class _Scene(dict):
+  pass
+
+
+class _Env:
+  def __init__(self, depth):
+    s = _Sensor()
+    s.data = type("D", (), {"depth": depth})()
+    self.scene = _Scene(cam=s)
+    self.num_envs = int(depth.shape[0])
+    self.device = "cpu"
+
+
+class _Cfg:
+  def __init__(self, **params):
+    self.params = params
+
+
+def _term(**params):
+  """PerturbedCameraScene with the inner task term replaced by a probe.
+
+  The inner term owns masking, clamping and normalisation and is unchanged by
+  any of this; what is under test is the sensor-frame error written onto the
+  depth buffer before it runs, and that it is written *back* afterwards.
+  """
+  # 16x16, not 4x4: the blob field is smoothed with a 9x9 reflect-padded
+  # kernel, which needs an image wider than the padding.
+  depth = torch.full((2, 16, 16, 1), 1.0)
+  env = _Env(depth)
+  t = perturb.PerturbedCameraScene(_Cfg(**params), env)
+  seen = {}
+
+  def probe(e, sensor_name, *a, **k):
+    seen["depth"] = e.scene[sensor_name].data.depth.clone()
+    return seen["depth"].reshape(2, -1)
+
+  t._inner = probe
+  return t, env, seen
+
+
+def test_camera_term_constructs_with_every_depth_axis():
+  for params in ({}, {"depth_scale": 1.05}, {"depth_bias_m": 0.01},
+                 {"depth_dropout_blob": 0.2},
+                 {"depth_scale": 1.05, "depth_bias_m": -0.01,
+                  "depth_dropout_blob": 0.1}):
+    t, env, seen = _term(**params)
+    t(env, "cam", "pick")
+    assert "depth" in seen
+
+
+def test_depth_scale_and_bias_reach_the_inner_term():
+  t, env, seen = _term(depth_scale=1.10, depth_bias_m=0.02)
+  t(env, "cam", "pick")
+  assert float(seen["depth"].mean()) == pytest.approx(1.0 * 1.10 + 0.02)
+
+
+def test_the_sensor_buffer_is_restored_afterwards():
+  """Written in place for speed; leaving it written would compound every step."""
+  t, env, _ = _term(depth_scale=1.10)
+  before = env.scene["cam"].data.depth.clone()
+  t(env, "cam", "pick")
+  assert torch.equal(env.scene["cam"].data.depth, before)
+
+
+def test_blob_dropout_removes_about_the_fraction_asked_for():
+  d = torch.rand(2, 64, 64, 1) * 0.5 + 0.5
+  out = perturb._blob_dropout(d, 0.25, far=1.5)
+  frac = float((out == 1.5).float().mean())
+  assert frac == pytest.approx(0.25, abs=0.05)
+
+
+def test_no_perturbation_leaves_the_depth_buffer_untouched():
+  t, env, seen = _term()
+  t(env, "cam", "pick")
+  assert torch.equal(seen["depth"], torch.full((2, 16, 16, 1), 1.0))
