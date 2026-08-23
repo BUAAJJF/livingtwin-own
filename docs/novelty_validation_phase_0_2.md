@@ -466,13 +466,15 @@ Three objects, fine-tuned policy — the deployed one. Every sign replicates.
 | slew × 0.70 | 35.6 | −9.6% | 0.7 | −94.7% |
 | accel ≤ 180 | 39.5 | +0.3% | 13.9 | +4.5% |
 | accel ≤ 120 | 38.5 | −2.3% | 25.2 | +89.5% |
-| accel ≤ 80 | 35.1 | −10.9% | 57.6 | **+333%** |
-| low-pass 15 Hz | 39.1 | −0.8% | 22.3 | **+67.7%** |
+| accel ≤ 80 | 35.1 | −11.0% | 57.6 | **+332%** |
+| low-pass 15 Hz | 39.1 | −0.9% | 22.3 | **+67.0%** |
+| low-pass 8 Hz | 35.9 | −9.0% | 45.0 | **+237%** |
 
 Both findings from §4.2 hold at the second scale, with the numbers slightly
 *more* favourable to the slew limiter (−85.7% trips for −3.3% throughput,
 against −81.5% for −4.5%) and considerably more damning for the others: an
-80 rad/s² acceleration ceiling more than quadruples the shell rate in clutter.
+80 rad/s² acceleration ceiling more than quadruples the shell rate in clutter,
+and an 8 Hz low-pass more than triples it.
 
 ### 4.4 The frontier
 
