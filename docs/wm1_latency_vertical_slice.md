@@ -98,8 +98,9 @@ Not recorded, and not nameable: reward, return, success, placement counts,
 safety-shell trips, object pose, mass, friction, contact flags, the privileged
 critic's value, and the latency itself.
 `wm_data.assert_deployable` is called by the loaders and by `wm_data.gather`,
-so a batch containing the label cannot be assembled at all; `--
-tests/test_wm_data.py` checks that eight privileged names raise.
+so a batch containing the label cannot be assembled at all, and
+`tests/test_wm_data.py` checks that eight privileged names raise rather than
+resolving to an empty feature.
 
 `done` is deployable — a robot knows when the task restarts — but it is
 excluded from every feature set anyway, because reset cadence is a consequence
