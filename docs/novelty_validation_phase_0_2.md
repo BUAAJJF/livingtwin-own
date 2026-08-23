@@ -1212,8 +1212,8 @@ conditions hold.
 |---|---|---|---|
 | 1 | EP-All produces ≥ 3% degradation on the honest test, or reproducible safety degradation | **PASS**, reframed | §5.2: +11.8% inflation for the recurrent policy — about 4× the run-to-run noise floor (§7.6) — against nothing measurable for the memoryless control. Passes on the throughput half only; §5.3 withdraws the safety half, which reverses sign across training seeds |
 | 2 | effect consistent in direction across ≥ 2 **training** seeds | **PARTIAL** | §5.6: the memoryless teacher has two seeds and its throughput effect replicates (+1.5%, +1.2%, both inside the noise floor) while its *safety* effect reverses. Neither vision student has a second seed, so the condition is untested on the only policies that show the effect |
-| 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2: −0.8 pp (shape) and +1.4 pp (mass) for the distilled policy under the honest cadence; +2.2 and +1.9 for the fine-tuned one |
-| 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: swap divergence is 0.65–0.74 of the action spread in every condition, and does not separate by cadence or by policy |
+| 3 | hidden state decodes **previous**-object attributes above chance | **FAIL** | §6.2, on balanced accuracy: previous shape +1.6 pp and previous **mass −0.4 pp** for the distilled policy under the honest cadence, against +7.1 and +9.1 pp for the *current* object. The memory encodes what is in the hand and not what was |
+| 4 | zeroing the hidden state per object markedly reduces history-swap sensitivity | **FAIL** | §6.4: zeroing *raises* it, 0.77 against 0.69. And the memory's influence decays to 6% of the action spread within 0.5 s while an object cycle is 1.0 s, so no across-boundary channel of sufficient duration exists |
 | 5 | long PPO fine-tuning in the wrong cadence does not transfer to the honest test | **FAIL** | §5.5: 1100 EP-All fine-tuning iterations take the student from 47.3 to **54.3** on the honest test and cut shell trips from 22.6 to 7.5. It transfers well. Switching to the honest cadence adds a further +2.9% and −72% trips, so the right cadence is *better* — but "does not transfer" is not what the data says |
 
 **One of five passes, one passes only on the control, three fail** — and the three failures
@@ -1244,11 +1244,14 @@ solving a problem this system does not have.
 What survives, and survives strongly, is the benchmark-hygiene half:
 
 > Holding a parameter constant for longer than deployment would inflates a
-> recurrent policy's measured throughput by 11.8% and depresses its measured
-> constraint-violation rate, while moving a memoryless policy on the same task
-> by 1.5%. Roughly 85% of that is attributable to the **shape** cadence alone.
-> Two thirds of the inflation is removed by training in the correctly paced
-> environment, with no architectural change.
+> recurrent policy's measured **throughput** by 11.8%, while moving a
+> memoryless policy on the same task by nothing measurable at either of two
+> training seeds. Roughly 85% of it is attributable to the **shape** cadence
+> alone — the one parameter the camera sees directly. Two thirds of the
+> inflation is removed by training in the correctly paced environment, with no
+> architectural change. It does **not** measurably affect the
+> constraint-violation rate: that half was claimed here on one seed and
+> withdrawn when a second reversed its sign (§5.3).
 
 And a corollary with teeth, because it has already happened twice in this
 project's own records: **a leaked benchmark does not only inflate scores, it
