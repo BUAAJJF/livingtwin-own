@@ -1009,9 +1009,44 @@ Modified:
 | `src/piper_push/shapes.py` | `redraw` subset parameter; per-asset record extended to size/pos/mass/friction; record seeding fixed to broadcast per world |
 | `src/piper_push/tasks/pick_place/mdp.py` | `redraw_on_place` cadence knob resolved live from config |
 | `scripts/finetune.py`, `scripts/distill.py` | `--cadence`, to train under a chosen cadence |
+| `docs/results.md` | a correction notice on the rows §3.3 and §5.5 show were measured in the leaky environment. Flagged, not rewritten — the file records what was measured, this report records what it was measured *in* |
+
+Full diff against the starting commit, excluding the results directory:
+
+```
+ docs/novelty_validation_phase_0_2.md   | 1160 +
+ docs/results.md                        |   23 +
+ scripts/accept_s1.py                   |  455 +
+ scripts/analyze_novelty.py             |  494 +
+ scripts/check_cadence.py               |  117 +
+ scripts/distill.py                     |   16 +
+ scripts/eval.sh                        |   59 +
+ scripts/finetune.py                    |   16 +
+ scripts/probe_hidden.py                |  346 +
+ src/piper_push/actions.py              |  126 +
+ src/piper_push/shapes.py               |   98 +
+ src/piper_push/tasks/pick_place/mdp.py |   75 +
+ tests/test_cadence.py                  |  165 +
+ 13 files changed, 3089 insertions(+), 61 deletions(-)
+```
 
 Deliberately **not** touched: rewards, teacher inputs, observation spaces,
-network capacity, `COMMAND_DERATE`, or anything else in the training path.
+network capacity, `COMMAND_DERATE`, or anything else in the training path. No
+checkpoint was retrained and no policy weights were modified; every result
+here comes from evaluating checkpoints that already existed.
+
+### 9.1 Bugs found and fixed along the way
+
+Four of these were in code written *for* this round, and are recorded because
+each one produced a plausible-looking wrong answer rather than an error:
+
+| where | symptom | cause |
+|---|---|---|
+| `analyze_novelty.py` | every confidence interval printed as a point, e.g. `[48.1, 48.1]` | hand-rolled LCG; `s % n` takes the low bits, which cycle with period `n`, so each "resample" drew every environment exactly once |
+| `probe_hidden.py` | history-swap divergence fell to exactly 0.000 at k=5, reading as "the memory decays in five steps" | on an episode boundary the main branch was re-read from the policy, which was holding the *alt* branch — the two silently merged |
+| `probe_hidden.py` | mass looked twice as decodable under EP-All (+14.4 vs +7.3 pp) | lift compared across conditions with different label marginals; raw accuracy was 36.7% vs 36.0% and the difference was entirely in the moving majority baseline |
+| `accept_s1.py` | per-shape breakdown attributed to the wrong class | pre-existing: `cls_now` refreshed only on episode boundaries, wrong since the object started being redrawn per placement at `6d1d0a9` |
+| shell orchestration | two queues waited forever | `tmux has-session -t prb` prefix-matches `prb2`, so a session waited on itself |
 
 ## 10. Gate verdicts
 
