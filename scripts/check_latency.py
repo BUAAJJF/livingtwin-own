@@ -82,7 +82,8 @@ def main() -> int:
     if t >= max(latency.LAGS):
       seen += 1
       for ci, c in enumerate(latency.LAGS):
-        same = (got - hist[-1 - c]).abs().amax(dim=-1) < 1e-5
+        d = (got - hist[-1 - c]).reshape(got.shape[0], -1)
+        same = d.abs().amax(dim=-1) < 1e-5
         matches[:, ci] += same.long().cpu()
     act = torch.randn(a.num_envs, u.action_manager.total_action_dim,
                       device=a.device, generator=g) * 0.1
