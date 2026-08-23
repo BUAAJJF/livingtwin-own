@@ -71,10 +71,14 @@ def main() -> int:
   p.add_argument("--out", required=True)
   a = p.parse_args()
 
-  post = load_posteriors(Path(a.posteriors))
+  # The anchor stage is the two runs that do not depend on any posterior --
+  # the oracle and a refit conditioned on the source prior -- so it can be
+  # planned and launched before inference has finished.
+  post = ({} if a.stage == "anchor"
+          else load_posteriors(Path(a.posteriors)))
   want = [m for m in a.methods.split(",") if m in post]
   missing = [m for m in a.methods.split(",") if m not in post]
-  if missing:
+  if missing and a.stage != "anchor":
     print(f"  !! no posterior for {missing}; they are dropped from the plan")
 
   if a.stage == "screen":
