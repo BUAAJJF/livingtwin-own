@@ -33,7 +33,7 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
-from piper_push import perturb
+from piper_push import latency, perturb
 from piper_push.checkpoints import as_actor_checkpoint
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
@@ -79,6 +79,7 @@ def main() -> int:
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
   perturb.add_mismatch_args(p)
+  latency.add_latency_args(p)
   a = p.parse_args()
 
   if not a.resume and not a.student:
@@ -110,6 +111,18 @@ def main() -> int:
   applied_mismatch = perturb.apply_session_mismatch(env_cfg, mismatch)
   if applied_mismatch:
     print(f"[INFO] training under session mismatch: {applied_mismatch}")
+
+  # Posterior-guided adaptation (Phase WM1): train under a *distribution* over
+  # observation delay rather than a single value.  The oracle above is the
+  # special case q = delta(3); passing --latency-probs is how a method's own
+  # posterior, already mixed with the source prior, gets into the simulator.
+  prior = latency.prior_from_args(a)
+  applied_prior = latency.apply_latency_prior(env_cfg, prior, seed=a.seed)
+  if applied_prior:
+    print(f"[INFO] training under latency prior: {prior.probs} "
+          f"(mean {prior.mean_lag * latency.STEP_MS:.0f} ms)")
+  if applied_prior and mismatch.obs_latency_steps:
+    p.error("--latency-probs and --obs-latency-steps both set the same axis")
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger

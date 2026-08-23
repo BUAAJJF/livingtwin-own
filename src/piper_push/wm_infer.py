@@ -145,7 +145,7 @@ def xcorr_action_joint(v: SessionView, max_lag: int = 6) -> list[float]:
 
 
 def _ridge(x: torch.Tensor, y: torch.Tensor, lam: float) -> torch.Tensor:
-  x = torch.cat([x, torch.ones(len(x), 1, device=x.device, dtype=x.dtype)], 1)
+  x = torch.cat([x, x.new_ones(len(x), 1)], 1)
   a = x.T @ x + lam * torch.eye(x.shape[1], device=x.device, dtype=x.dtype)
   return torch.linalg.solve(a, x.T @ y)
 
@@ -180,8 +180,7 @@ def xcorr_latent_proprio(v: SessionView, enc_split: int,
   out = []
   for c in candidates:
     w = _ridge(img[fit], q[fit - c], lam)
-    pred = torch.cat([img[test], torch.ones(len(test), 1,
-                                            dtype=img.dtype)], 1) @ w
+    pred = torch.cat([img[test], img.new_ones(len(test), 1)], 1) @ w
     out.append(float(((pred - q[test - c]) ** 2).mean()))
   return out
 

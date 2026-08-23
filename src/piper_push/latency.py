@@ -42,9 +42,12 @@ four is 80 ms, past which the WM0 sweep measured the policy as unusable rather
 than degraded (`docs/sim2real_sweep_phase_wm0.md`, section 5)."""
 
 TARGET_LAG = 3
-"""The hidden target for WM1-A: 60 ms.  Named here only so that scripts which
-must *not* see it can be checked against a single symbol; the inference path
-never imports it."""
+"""The hidden target for WM1-A: 60 ms.
+
+Named as a single symbol so that "who reads the answer" is greppable.  No
+estimator reads it: it appears only in the code that scores a posterior after
+that posterior has been produced, and in the runners that construct the target
+domain in the first place."""
 
 
 @dataclass(frozen=True)
@@ -182,8 +185,8 @@ nothing to retain."""
 class LatencyScene:
   """The camera term, plus the per-environment lag assignment.
 
-  Subclasses the WM0 perturbation term so that the depth axes still compose;
-  with no depth mismatch configured that parent is a straight pass-through to
+  Wraps the WM0 perturbation term so that the depth axes still compose; with
+  no depth mismatch configured that wrapper is a straight pass-through to
   ``pick_mdp.camera_scene``.
 
   Where the lag write lands in the step: the observation manager runs
