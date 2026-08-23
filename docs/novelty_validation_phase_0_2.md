@@ -520,7 +520,106 @@ the same way.
 
 ## 6. Hidden-state probes and history swap
 
-*(Phase 2.3 — pending.)*
+This is where the proposed **mechanism** is tested, as opposed to the effect,
+and it is where the hypothesis as stated does not survive.
+
+### 6.1 Method
+
+A multinomial logistic regression decodes, from the 256-unit GRU hidden state
+alone, four labels: the shape class and mass bin of the object currently in
+the hand, and of the object before it. Three choices decide whether the
+measurement means anything:
+
+* **The train/test split is by environment.** A random split over timesteps
+  would put frames 40 ms apart on both sides and report the autocorrelation of
+  the hidden state as probe accuracy.
+* **The probe is linear.** The question is whether the information is present
+  and linearly available, not whether some network can be built to extract it;
+  a deep enough probe recovers almost anything.
+* **The floor is the majority-class rate**, not `1/K`. The shape prior is
+  (0.34, 0.22, 0.16, 0.16, 0.12), so a probe that has learned nothing still
+  reads 34% against uniform chance.
+
+### 6.2 Result
+
+Lift over the majority-class baseline, in percentage points. 71 500 hidden
+states from 256 environments; 3000 steps.
+
+| policy (training cadence) | eval cadence | cur shape | **prev shape** | cur mass | **prev mass** |
+|---|---|---:|---:|---:|---:|
+| distilled (EP-All) | OBJ-All | +5.5 | **−0.8** | +7.3 | **+1.4** |
+| distilled (EP-All) | EP-All | +7.0 | +7.0 † | +14.4 | +14.4 † |
+| fine-tuned (OBJ-All) | OBJ-All | +2.5 | **+2.2** | +7.3 | **+1.9** |
+
+† Under EP-All the previous object *is* the current object, so those two
+columns are the same measurement written twice. They carry no information
+about carry-over and are shown only to make the tautology explicit.
+
+**Under the honest cadence, the recurrent state carries essentially nothing
+about the previous object.** Previous shape decodes at −0.8 pp for the
+distilled policy — below its own floor — and +2.2 pp for the fine-tuned one;
+previous mass at +1.4 and +1.9 pp. Meanwhile the *current* object's mass
+decodes at +7.3 pp for both, which is the memory doing precisely the job it
+exists for: mass is the one parameter a camera cannot see and must be inferred
+from contact.
+
+### 6.3 A statistic that nearly fooled this section
+
+The EP-All row first read "+14.4 pp on mass against +7.3 pp honest", which
+looks like the leaky environment letting the memory learn twice as much. The
+raw accuracies were 36.7% and 36.0% — nearly identical. The entire difference
+was in the **majority baseline** (22.3% against 28.8%), because under EP-All
+the label is constant for a whole episode, so the empirical class frequencies
+are lumpy and the floor moves. Lift is not comparable across conditions with
+different label marginals.
+
+Two corrections are therefore reported alongside: **balanced accuracy** (mean
+per-class recall, invariant to the class prior), and **n_effective** — the
+number of distinct (environment, label) facts in the held-out set. Under
+EP-All tens of thousands of frames carry only a few hundred independent
+labels; under OBJ-All the label turns over every second or so. A confidence
+read off the frame count would be wildly overconfident for one condition and
+not the other.
+
+### 6.4 History swap
+
+Every environment is given another environment's hidden state and its own
+present; both branches are then fed the **identical** observation stream, so
+any difference in action is attributable to the recurrent state and to nothing
+else. Divergence is normalised by the across-environment spread of the action,
+so "large" means large relative to how much the policy varies its output at
+all.
+
+| policy | eval cadence | ‖Δa‖ / action spread |
+|---|---|---:|
+| distilled | OBJ-All | 0.69 |
+| distilled | EP-All | 0.65 |
+| fine-tuned | OBJ-All | 0.74 |
+
+The memory is doing a **lot** — swapping it moves the action by about
+two-thirds of the policy's entire output range. But it moves it by the same
+amount under both cadences and for both policies, including the one trained
+honestly. That is consistent with §5.2's finding that clearing the hidden state
+costs 21–25% of throughput: what the state carries is mostly the deployable
+belief the observation no longer provides (am I holding something, did the last
+squeeze work), not a stale fact about a previous object.
+
+### 6.5 What this means for the hypothesis
+
+The proposed mechanism was that the recurrent policy "treats history about
+previous objects as an implicit privileged observation of the current one".
+**The probes do not support that.** Under the honest cadence there is no
+recoverable previous-object information to treat as anything.
+
+The effect in §5 is nonetheless real and large. What the two sections together
+are consistent with is a different mechanism: not *stale carry-over* but
+*evidence accumulation about a quantity that should have changed*. When the
+object is held constant for an episode, a recurrent policy integrates
+information about it across ten grasps rather than one, and arrives at a
+sharper estimate than any deployment would ever permit. That is still cadence
+leakage and it still inflates the benchmark — but it is a different claim, and
+it implies a different fix. §11C proposes the experiment that would separate
+them.
 
 ## 7. Seeds and confidence intervals
 
