@@ -108,6 +108,8 @@ def main() -> int:
   p.add_argument("--max-concurrent", type=int, default=8)
   p.add_argument("--gpus", default=None,
                  help="comma-separated allow-list; default every visible card")
+  p.add_argument("--backoff", type=float, default=900.0,
+                 help="seconds to leave a tag alone after it fails")
   a = p.parse_args()
 
   plan = json.loads(Path(a.plan).read_text())
@@ -118,13 +120,24 @@ def main() -> int:
         f"need {a.min_free_mib} MiB free", flush=True)
 
   running: dict[int, tuple] = {}      # gpu -> (Popen, tag, started)
+  failed_at: dict[str, float] = {}
+  # A card must look free on two consecutive polls before it is used.  Another
+  # project shares this box; its jobs allocate within seconds of starting, so
+  # a card that is still free a minute later is much less likely to be taken
+  # out from under a run that has just begun -- which is how one job died a
+  # minute in, having passed the memory check moments before a 63 GB
+  # allocation landed on the same card.
+  was_free: set[int] = set()
   t0 = time.time()
   while True:
     for gpu in list(running):
       proc, tag, started = running[gpu]
       if proc.poll() is None:
         continue
-      mark = "ok" if proc.returncode == 0 and is_done(tag) else "FAILED"
+      ok = proc.returncode == 0 and is_done(tag)
+      mark = "ok" if ok else "FAILED"
+      if not ok:
+        failed_at[tag] = time.time()
       print(f"  [{(time.time() - t0) / 60:6.1f} min] cuda:{gpu} {tag} {mark} "
             f"(rc={proc.returncode}, {(time.time() - started) / 60:.1f} min)",
             flush=True)
@@ -147,8 +160,13 @@ def main() -> int:
 
     if len(running) < a.max_concurrent:
       free = gpu_free_mib()
+      stable = {g for g in free if free[g] >= a.min_free_mib} & was_free
+      was_free = {g for g in free if free[g] >= a.min_free_mib}
+      now = time.time()
+      pending = [j for j in pending
+                 if now - failed_at.get(j["tag"], 0.0) >= a.backoff]
       for job in pending:
-        cand = [g for g in allowed
+        cand = [g for g in stable
                 if g not in running and free.get(g, 0) >= a.min_free_mib]
         if not cand:
           break
@@ -166,6 +184,7 @@ def main() -> int:
         # One job per card, and the freshly launched one has not allocated
         # yet, so do not hand out this card again on this pass.
         free[gpu] = 0
+        stable.discard(gpu)
         if len(running) >= a.max_concurrent:
           break
 
