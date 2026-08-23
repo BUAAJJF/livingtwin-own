@@ -572,23 +572,73 @@ object parameters constant within an episode under-reports the constraint
 violation rate as well as over-reporting throughput, and the two errors point
 the same way.
 
-### 5.4 Per-quantity cadence, and a second training seed
+### 5.4 Which parameter is doing it
 
-Two further sets were queued and were still running when the connection
-dropped (see §4.4):
+`--cadence X` makes **X** turn over per object and holds the other two for the
+episode. So `episode` is the fully leaky end, `object` the fully honest one,
+and each single-quantity row says what is recovered by fixing that one
+parameter alone.
 
-* **Per-quantity attribution** — `--cadence shape`, `mass`, `friction`
-  separately, on both students. The point is to avoid attributing to "shape"
-  an effect that belongs to mass: §6.2 finds the recurrent state decodes the
-  current object's *mass* far better than its shape, and mass is the parameter
-  a camera cannot see at all, so the prediction is that mass cadence carries
-  most of the effect. Untested as of this document.
-* **A second training seed** — `h_full_s2`, the state teacher trained with
-  `--agent.seed 17` (`sweep.sh:81`), under both cadences. This is the only
-  pair of training seeds that exists in the repository and it bounds how much
-  of the memoryless control's +1.5% is seed noise. It does **not** give a
-  second seed for either vision student, which is the gap §7.3 records and
-  §11A proposes closing first.
+| what is honest | distilled | fine-tuned |
+|---|---:|---:|
+| nothing (`episode`) | 52.9 | 57.8 |
+| friction only | 52.1 | 57.3 |
+| mass only | 51.1 | 57.3 |
+| **shape only** | **48.0** | **56.1** |
+| everything (`object`) | 47.3 | 55.8 |
+
+Reading down from the leaky end: making **shape** honest recovers 4.9 of the
+distilled policy's 5.6-point gap and 1.7 of the fine-tuned policy's 2.0 —
+about **87% and 85%** of the effect. Mass recovers 1.8 and 0.5; friction 0.8
+and 0.5. (The three are sub-additive, as overlapping causes are.)
+
+**The leak is in the shape, and it is consistent across two policies trained
+under different cadences.** That is the opposite of what §6.2's probe results
+predicted — the hidden state decodes the current object's *mass* far better
+than its shape, and mass is the parameter a camera cannot see at all, so the
+natural guess was that mass cadence would dominate. It does not.
+
+The reading these two facts support together: the exploited invariant is
+mostly **visual**, not dynamical. Holding the shape fixed lets the convolutional
+encoder and the recurrent state settle onto one appearance for a whole episode
+— ten objects that all look the same — and that is worth far more than a
+sharper estimate of a mass the policy can already feel through the pads.
+
+### 5.5 Fine-tuning transfer
+
+All three scored in the **honest** environment. `f3` is literally `f2` at
+iteration 1100 plus 400 more iterations, with the cadence as the only thing
+changed between them, so that pair isolates the switch.
+
+| checkpoint | trained under | fine-tune iters | obj/min | trips/arm-h |
+|---|---|---:|---:|---:|
+| `d1r/model_2999` (no fine-tune) | EP-All | 0 | 47.3 | 22.6 |
+| `f2/model_1100` | EP-All | 1100 | 54.3 | 7.5 |
+| `f1c/model_2999` | EP-All | ~3000 | 52.6 | 2.3 |
+| **`f3/model_1500`** = f2@1100 + 400 | **OBJ-All** | 1500 | **55.9** | **2.1** |
+
+Switching cadence for 400 iterations bought **+2.9% throughput and −72%
+shell trips** over continuing in the leaky one. That supports Gate A
+condition 5 — but far more weakly than the project's own notes claim, and in
+correcting them it produces a second finding.
+
+**`docs/results.md` says "Fine-tuning in the wrong environment buys nothing":
+3000 EP-All iterations scoring 53.0 against "the 53.3 of the distilled policy
+they started from". Both of those are EP-All measurements.** Scored honestly,
+the distilled policy is 47.3 and the EP-All fine-tune is 52.6 — the same
+training that "bought nothing" is worth **+11%**. (Against `f1c`'s actual
+ancestor, `d1/model_1400`, whose sibling `d1/model_1500` reads 41.1 honest, it
+is worth considerably more.) Fine-tuning in the wrong environment buys a great
+deal; it just buys less than fine-tuning in the right one, and the original
+comparison could not see that because both of its terms were measured in the
+environment that inflates them.
+
+### 5.6 A second training seed
+
+`h_full_s2` — the state teacher trained with `--agent.seed 17`
+(`sweep.sh:81`) — was evaluated under both cadences. It is the only pair of
+training seeds in the repository, and it covers the memoryless control only;
+neither vision student has a second seed (§7.3, §11A).
 
 ## 6. Hidden-state probes and history swap
 
@@ -967,16 +1017,27 @@ while the header claims otherwise. Every number in that file should be
 regenerated with `--cadence` recorded in the output — which the JSON now does
 automatically. Cheap, and it removes a live error from the record.
 
-**C. Test the mechanism the probes actually point at, not the one proposed.**
-§6 finds no previous-object information in the recurrent state under the
-honest cadence, so "stale carry-over" is not what is happening. What the
-probes are consistent with is *evidence accumulation about a quantity that
-should have changed*: mass is the parameter a camera cannot see, must be
-inferred from contact, and benefits most from an object that never changes.
-The minimal test is a cadence sweep on **mass alone** at several hold times —
-one object, two, four, a whole episode — and reading the throughput gain
-against hold length. A curve there is the paper; a step at "episode" is a
-benchmark bug.
+**C. Follow the shape, and measure the hold-length curve.**
+§5.4 localised 85–87% of the effect to the **shape** cadence, on both
+policies. That was not the prediction — §6.2's probes decode the current
+object's mass far better than its shape, so mass looked like the culprit — and
+the disagreement is the most interesting thing in this document. It says the
+exploited invariant is *visual* (one appearance for ten objects, which the
+convolutional encoder and the recurrent state can settle onto) rather than
+*dynamical*.
+
+The minimal follow-up is a **hold-length sweep on shape alone**: redraw it
+every 1, 2, 4, 8 objects and every episode, and plot throughput against hold
+length. Two outcomes, and they lead different places:
+
+* a smooth curve rising with hold length → the effect is graded evidence
+  accumulation, it will exist at *any* mismatch between simulated and real
+  hold time, and that generalises into a claim about domain randomisation;
+* a step between "1 object" and "everything else" → it is a benchmark bug with
+  a binary fix, worth a paragraph in a benchmark paper and not a method.
+
+This is cheap — five evaluations, no training — and it decides whether there
+is a paper here at all.
 
 **D. Only if A and C both come back positive: two-timescale memory.** Gate A
 does not authorise it, and §6 argues the specific design implied by the
