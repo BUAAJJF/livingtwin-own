@@ -73,9 +73,24 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
       --run-name "wm1_$TAG" --device "cuda:$GPU" --logger tensorboard \
       > "logs/wm1_adapt/$TAG.train.log" 2>&1 \
       || { echo "!!! $TAG training FAILED" >&2; exit 5; }
-    ADAPTED=$(ls -1v logs/rsl_rl/piperx_pick_place_vision/*wm1_"$TAG"/model_*.pt \
-              2>/dev/null | tail -1)
+    # Highest ITERATION, not last path in a sort.  A run that was aborted --
+    # a duplicate started by an overlapping plan, killed after it had written
+    # its first checkpoint -- leaves a directory whose name sorts after the
+    # real one and whose newest checkpoint is model_1500, the *unadapted*
+    # weights.  `ls -1v | tail -1` picked exactly that once, and the resulting
+    # "oracle" measured 42.8 objects/min in the target and 56.1 in the nominal
+    # domain: the numbers of a policy that had not been trained at all.
+    ADAPTED=$(ls -1 logs/rsl_rl/piperx_pick_place_vision/*wm1_"$TAG"/model_*.pt \
+              2>/dev/null \
+              | sed -E 's#.*/model_([0-9]+)\.pt$#\1 &#' \
+              | sort -k1,1n | tail -1 | cut -d' ' -f2-)
     [ -n "$ADAPTED" ] || { echo "!!! $TAG produced no checkpoint" >&2; exit 6; }
+    WANT="model_$((ITERS - 1)).pt"
+    case "$ADAPTED" in
+      *"$WANT") ;;
+      *) echo "!!! $TAG: newest checkpoint is $ADAPTED, expected $WANT; "\
+              "training did not reach $ITERS iterations" >&2; exit 7 ;;
+    esac
     echo "$ADAPTED" > "$OUT/$TAG.ckpt"
   fi
   echo $$ > "$LOCK"

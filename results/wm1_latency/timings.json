@@ -1,0 +1,65 @@
+{
+ "offline": {
+  "dataset": {
+   "cal": {
+    "files": 5,
+    "arm_seconds": 24000.0,
+    "bytes": 957600000,
+    "wall_clock_s": 0.0
+   },
+   "calh": {
+    "files": 5,
+    "arm_seconds": 24000.0,
+    "bytes": 957600000,
+    "wall_clock_s": 0.0
+   },
+   "test": {
+    "files": 5,
+    "arm_seconds": 48000.0,
+    "bytes": 1915200000,
+    "wall_clock_s": 0.0
+   },
+   "train": {
+    "files": 10,
+    "arm_seconds": 38400.0,
+    "bytes": 1532160000,
+    "wall_clock_s": 0.0
+   },
+   "val": {
+    "files": 5,
+    "arm_seconds": 9600.0,
+    "bytes": 383040000,
+    "wall_clock_s": 0.0
+   },
+   "valh": {
+    "files": 5,
+    "arm_seconds": 9600.0,
+    "bytes": 383040000,
+    "wall_clock_s": 0.0
+   }
+  },
+  "dataset_generation_s": 9418.363870716232,
+  "dataset_generation": {
+   "files": 35,
+   "seconds": 9418.363870716232,
+   "hours": 2.6162121863100642
+  },
+  "world_model_train_s": 349.24113726615906,
+  "world_model_windows": 118602,
+  "classifier_train_s": 21.804375886917114
+ },
+ "online": {
+  "target_data_collection_s": 60.0,
+  "inference_per_session_s": 0.245407501856486,
+  "inference_breakdown_s": {
+   "world_model_scores_s": 0.245407501856486,
+   "classifier_s": 0.09447964032491048,
+   "b1b_ridge_s": 0.043595075607299805,
+   "b1a_xcorr_s": 0.011332035064697266,
+   "n_windows_60s": 120
+  },
+  "ppo_per_run_s": null,
+  "ppo_runs": {}
+ },
+ "online_total_s": null
+}
