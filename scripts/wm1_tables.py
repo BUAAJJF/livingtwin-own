@@ -177,7 +177,10 @@ def anchors() -> str:
   out = ["| condition | repeats | obj/min | 95% CI | trips/h | events | dispersion |",
          "|---|---|---|---|---|---|---|"]
   for name in sorted(an["groups"]):
-    if "equivalence" not in name:
+    # The anchors are named for the condition, not the directory: the analysis
+    # runs over the digest, so the group prefix is `runs/` and not
+    # `equivalence/`.
+    if name.split("/")[-1] not in ("nominal", "zeroshot"):
       continue
     g = an["groups"][name]
     b, t = g["throughput"]["bootstrap"], g["trips"]
