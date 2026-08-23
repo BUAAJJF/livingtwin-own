@@ -349,13 +349,13 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
     # joint5, joint6) plus the gripper, so SceneEntityCfg's joint-name
     # matching returns six indices into a list of five and raises.
     import dataclasses
-    robot = env_cfg.scene.entities["robot"]
+    art = env_cfg.scene.entities["robot"].articulation
     scaled = []
-    for act in robot.actuators:
+    for act in art.actuators:
       is_gripper = any("gripper" in e for e in act.target_names_expr)
       scaled.append(act if is_gripper else dataclasses.replace(
         act, damping=act.damping * mm.servo_damping_scale))
-    robot.actuators = tuple(scaled)
+    art.actuators = tuple(scaled)
 
   # -- contact ---------------------------------------------------------------
   if "pad_friction_scale" in applied:
