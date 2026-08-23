@@ -377,7 +377,88 @@ is exactly what distinguishes it from matching every parameter equally well.
 
 ## 6. Stage S3 — interaction
 
-*(pending)*
+Two grasp-side axes, chosen because they are mechanistically coupled: a slower
+gripper and less pad friction both degrade the same event. 3 × 3 cells, three
+repeats each, full formal protocol. The reference is the (1.0, 1.0) cell,
+55.80 obj/min (sd 0.27) — which agrees with the S2 nominal's 55.86 to within a
+tenth, an incidental but welcome cross-check.
+
+The question is **not** whether the corner is bad. It is whether the corner is
+*predictable from the two edges*. If it is, single-axis calibration composes
+and each parameter can be estimated on its own. If it is not, a
+one-at-a-time posterior is wrong in a way more data does not fix.
+
+### 6.1 The grid
+
+Throughput, objects/min. Rows `gripper_rate_scale`, columns
+`pad_friction_scale`:
+
+| | 0.6 | 0.8 | 1.0 |
+|---|---:|---:|---:|
+| **0.5** | **11.23** | 24.60 | 30.30 |
+| **0.7** | 23.11 | 39.42 | 44.16 |
+| **1.0** | 34.92 | 52.06 | **55.80** |
+
+### 6.2 Neither composition rule predicts the corner
+
+| cell | observed | additive | multiplicative | obs − mult |
+|---|---:|---:|---:|---:|
+| 0.5, 0.6 | 11.23 | 9.42 | 18.96 | **−7.73** |
+| 0.5, 0.8 | 24.60 | 26.57 | 28.27 | −3.67 |
+| 0.7, 0.6 | 23.11 | 23.28 | 27.63 | −4.52 |
+| 0.7, 0.8 | 39.42 | 40.42 | 41.20 | −1.78 |
+
+The natural null for two independent degradations of a *rate* is the
+multiplicative one, and **it over-predicts every cell** — by 7.73 objects/min
+at the corner, which is 69% of the observed value there. All four cells fall
+outside the observed cell's confidence interval. (That interval covers only
+the observed cell's repeat spread, not the edges', so this is a conservative
+comparison in one direction and should not be read as a formal interaction
+test.)
+
+### 6.3 The marginal effect of an axis depends on the other axis
+
+The same numbers, read as "what does halving the gripper rate cost?":
+
+| pad friction | gripper 1.0 → 0.5 |
+|---|---:|
+| 1.0 (nominal) | −45.7% |
+| 0.8 | −52.7% |
+| 0.6 | **−67.8%** |
+
+and symmetrically, "what does dropping pad friction to 0.6 cost?":
+
+| gripper rate | friction 1.0 → 0.6 |
+|---|---:|
+| 1.0 (nominal) | −37.4% |
+| 0.7 | −47.7% |
+| 0.5 | **−62.9%** |
+
+**Each axis's marginal effect grows substantially as the other degrades.**
+Measuring the gripper-rate effect on a well-calibrated table understates it by
+a third relative to the same measurement on a slippery one.
+
+### 6.4 What this means for the method
+
+This is a constraint on WM1, and a useful one:
+
+* **A per-axis posterior is not sufficient** for coupled parameters. The
+  discrepancy has to be evaluated on a *joint* parameter vector, at least
+  within a coupled group. Fitting gripper rate with friction held at its prior
+  mean gives a biased estimate.
+* **It does not condemn the approach** — it argues for the decision-aware
+  formulation over a state-matching one. A discrepancy defined on policy
+  consequences sees the compounded effect directly; a per-parameter state
+  error would not, because each parameter's own residual can look small while
+  their joint effect on the grasp is large.
+* **The coupled group is small.** Grasp physics couples; there is no evidence
+  here that camera yaw couples to servo damping. So the joint fit needs to be
+  joint over a handful of related parameters, not over all seventeen.
+
+One caveat kept in view: only *one* pair was tested, chosen because coupling
+was expected. That it interacts is evidence about grasp physics, not a general
+claim that every pair of axes does. Testing camera × latency, which S1's
+levels also support, is a cheap follow-up and is in the commands in §10.
 
 ## 7. Reward-free identifiability
 
