@@ -440,7 +440,51 @@ engineering problem from the signature being absent.
 
 ## 8. Oracle ceiling and recoverability
 
-*(pending)*
+### 8.1 What the oracle is and is not
+
+The oracle is **handed the target parameter**. It is not a method; it is the
+bound a method would be trying to reach. Four quantities:
+
+| | |
+|---|---|
+| `J_zero_shot` | the deployed policy in the target domain, unadapted |
+| `J_oracle` | the same policy fine-tuned *in* the target domain with θ known, measured there |
+| `J_retention` | that fine-tuned policy back in the nominal domain |
+| `J_nominal` | the deployed policy in the nominal domain — 55.86 obj/min |
+
+A learned calibration is later scored as
+
+```
+recovery = (J_adapted − J_zero_shot) / (J_oracle − J_zero_shot)
+```
+
+so **if `J_oracle` does not clear `J_zero_shot`, there is no ceiling to aim at**
+and the direction is answered in the negative for that domain, regardless of
+how well the parameter could be identified. Phase WM0 measures only the two
+ends; there is no learned calibration yet.
+
+Fine-tuning starts from `f3/model_1500` with `--resume`, not `--student`: it
+is a PPO checkpoint and already carries a trained critic, so there is no
+randomly initialised value function to destroy the actor with. Hyperparameters
+are `finetune.py`'s fine-tuning defaults, which exist because the
+from-scratch ones destroyed a distilled policy in a single optimiser step.
+
+### 8.2 Cost, and why it is the interesting part
+
+The observed rate is **≈ 8.5 s per PPO iteration** at 512 environments on one
+RTX 6000D with the camera in the loop. 600 iterations is therefore about
+**85 minutes of GPU time for one domain**.
+
+That is worth stating plainly because the README's target is a **≤ 60 minute
+total adaptation budget**, and the oracle — which is given the answer for
+free — only just fits inside it. Any real method has to pay for data
+collection and posterior fitting *as well*, out of the same hour. So the
+budget constraint is not slack: it is close to binding before a single line of
+world model has been written, and WM1 should be designed against a
+fine-tuning budget of roughly 300–450 iterations rather than an open-ended
+one.
+
+*(results pending)*
 
 ## 9. Gate verdict
 
