@@ -1,0 +1,109 @@
+{
+  "_": "Fill in what you actually bought.  Sizes in mm, mass in grams.  long_mm is the widest horizontal extent -- the one the pads see.  surface: textured | white | black | specular.  Leave an entry out entirely if you could not find it.",
+  "objects": [
+    {
+      "id": 1,
+      "class": "box",
+      "target": "28 x 28 x 30",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "class": "box",
+      "target": "40 x 40 x 40",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 3,
+      "class": "box",
+      "target": "45 x 45 x 25",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 4,
+      "class": "cylinder",
+      "target": "D34 x 62",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 5,
+      "class": "cylinder",
+      "target": "D32 x 66",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 6,
+      "class": "stepped",
+      "target": "42 x 42 x 50",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 7,
+      "class": "l_shape",
+      "target": "40 x 40 x 40",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    },
+    {
+      "id": 8,
+      "class": "capped",
+      "target": "D38 x 60",
+      "name": "",
+      "long_mm": null,
+      "short_mm": null,
+      "height_mm": null,
+      "mass_g": null,
+      "surface": "",
+      "slides_freely": false,
+      "notes": ""
+    }
+  ]
+}

@@ -51,6 +51,12 @@ def main() -> int:
                       "object is a new object), 'episode' (one object per "
                       "episode, re-posed), or a comma-separated subset of "
                       "shape,mass,friction.  Unset leaves the task alone.")
+  p.add_argument("--sensor", default="measured",
+                 choices=("measured", "clean"),
+                 help="depth realism to train under.  'measured' is the fitted "
+                      "D405 model in piper_push.depth_noise; 'clean' turns it "
+                      "off entirely and is the control that says how much of "
+                      "the difference the model is responsible for")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
   a = p.parse_args()
@@ -76,6 +82,17 @@ def main() -> int:
     env_cfg.commands["pick"].redraw_on_place = redraw
     env_cfg.commands["pick"].reshape_on_place = bool(redraw)
     print(f"[INFO] training cadence: redraw_on_place={redraw}")
+  if a.sensor == "clean":
+    # The control.  Not "less noise" -- none, so that the comparison is
+    # between a policy that was shown the sensor and one that was not, rather
+    # than between two guesses about it.
+    import dataclasses as _dc
+    term = env_cfg.observations["camera"].terms["scene"]
+    term.params["noise_cfg"] = _dc.replace(term.params["noise_cfg"],
+                                           strength=0.0)
+    term.params["mask_jitter_px"] = 0
+  print(f"[INFO] depth realism: {a.sensor}")
+
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger

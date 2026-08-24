@@ -1,0 +1,427 @@
+"""Where the camera is, measured rather than assumed.
+
+Everything else in this directory is checked against the simulator by
+``selftest.py``.  This is not, and cannot be: it is the one measurement that
+connects the two, and if it is wrong every downstream number is wrong in the
+same consistent way and nothing complains.  So it is written to be checked
+against itself instead -- residuals reported per pose, the worst pose named,
+and a refusal to write the result when the poses do not span enough of the
+workspace to constrain it.
+
+The setup is eye-to-hand: the camera is fixed to the world and the board is
+carried by the gripper.  ``calibrate_hand_eye`` below solves ``AX = XB`` for
+the camera's pose in the robot base frame, given the arm's forward kinematics
+at each pose and the board's pose in the camera at each pose.  It is written
+out rather than called from OpenCV because OpenCV 5 removed the binding.
+
+Two things are easy to get backwards and both are silent.
+
+*Eye-to-hand is not eye-in-hand.*  For a camera mounted on the arm, the
+routine is called with the gripper pose in the base frame and returns the
+camera in the gripper frame.  For a camera fixed to the world -- this one --
+the same routine is called with the **inverse** poses, base-in-gripper, and
+returns the camera in the base frame.  Passing the un-inverted poses produces a
+transform that looks plausible and is wrong by the whole arm.
+
+*The board pose has a sign.*  ``solvePnP`` returns the board in the camera, and
+hand-eye wants exactly that, not its inverse.
+
+The table plane is measured at the same time, from the depth image, because
+``mask.py`` needs it and because it is a free check: a table that comes out
+tilted by more than a degree in the base frame means the calibration is wrong,
+the robot is not bolted down, or the table is not the table.
+
+    python -m hardware.deploy.calibrate --collect     # move the arm, press enter
+    python -m hardware.deploy.calibrate --solve
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import sys
+
+import cv2
+import numpy as np
+
+from . import config
+
+HERE = pathlib.Path(__file__).resolve().parent
+POSES_FILE = HERE / "calib_poses.json"
+
+BOARD_SQUARES = (5, 5)
+BOARD_SQUARE_M = 0.033
+BOARD_MARKER_M = 0.025
+BOARD_DICT = cv2.aruco.DICT_5X5_100
+"""The board ``hardware/depth_bench/targets/make_board.py`` prints.  Same
+board, same numbers -- there is no reason for the rig to own a second one, and
+one board that both files agree about is one fewer thing to get wrong."""
+
+MIN_POSES = 8
+MIN_ROT_SPAN_DEG = 30.0
+"""Hand-eye is only determined by rotation.  Poses that differ by translation
+alone leave the rotation unconstrained and the solver returns something anyway;
+this is the guard that makes that a refusal rather than a silent answer."""
+
+
+def make_board():
+  d = cv2.aruco.getPredefinedDictionary(BOARD_DICT)
+  return cv2.aruco.CharucoBoard(BOARD_SQUARES, BOARD_SQUARE_M, BOARD_MARKER_M, d)
+
+
+def detect_board(gray: np.ndarray, K: np.ndarray, dist: np.ndarray):
+  """Board pose in the camera frame, or None.
+
+  Corner refinement is on.  The bench measured what it buys on this board: the
+  pose error fell from 0.92 mm to 0.71 mm, and the calibration residual is the
+  thing this whole file is trying to keep small.
+  """
+  board = make_board()
+  params = cv2.aruco.DetectorParameters()
+  params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+  det = cv2.aruco.CharucoDetector(board, cv2.aruco.CharucoParameters(), params)
+  corners, ids, _, _ = det.detectBoard(gray)
+  if ids is None or len(ids) < 6:
+    return None
+  obj, img = board.matchImagePoints(corners, ids)
+  ok, rvec, tvec = cv2.solvePnP(obj, img, K, dist,
+                                flags=cv2.SOLVEPNP_ITERATIVE)
+  if not ok:
+    return None
+  proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
+  rms = float(np.sqrt(((proj.reshape(-1, 2) - img.reshape(-1, 2)) ** 2)
+                      .sum(1).mean()))
+  return {"rvec": rvec, "tvec": tvec, "n_corners": int(len(ids)),
+          "reproj_rms_px": rms}
+
+
+def _rt(rvec, tvec) -> np.ndarray:
+  T = np.eye(4)
+  T[:3, :3] = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64))[0]
+  T[:3, 3] = np.asarray(tvec, dtype=np.float64).ravel()
+  return T
+
+
+def _angle_between(Ra, Rb) -> float:
+  c = (np.trace(Ra.T @ Rb) - 1.0) / 2.0
+  return float(np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
+
+
+def calibrate_hand_eye(R_a, t_a, R_b, t_b, min_angle_deg: float = 5.0):
+  """Solve ``A X = X B`` for X, by Park and Martin's method.
+
+  Written out rather than called, because ``cv2.calibrateHandEye`` does not
+  exist in OpenCV 5 -- the constants ``CALIB_HAND_EYE_*`` are still exported
+  and the function is gone -- and this environment has OpenCV 5 because
+  ultralytics pulled it in.  Twenty-five lines is a better dependency than a
+  binding that can disappear under the one measurement everything else is
+  built on.  ``tests/test_deploy.py`` checks it recovers a known pose to under
+  a millimetre and a twentieth of a degree.
+
+  Rotation first, in closed form: with ``alpha = log(R_A)`` and
+  ``beta = log(R_B)`` as axis-angle vectors, ``R_X`` is the orthogonal matrix
+  closest to the one that maps every beta onto its alpha, which is
+  ``(M^T M)^{-1/2} M^T`` for ``M = sum beta alpha^T``.  Then translation, as a
+  least-squares solve of ``(R_A - I) t_X = R_X t_B - t_A`` stacked over pairs.
+
+  Pairs that barely rotate are dropped: their alpha and beta are noise with a
+  direction, and they pull the sum towards it.
+  """
+  n = len(R_a)
+  M = np.zeros((3, 3))
+  rows, rhs = [], []
+  eps = np.radians(min_angle_deg)
+  for i in range(n):
+    for j in range(i + 1, n):
+      Ta = _compose(R_a[j], t_a[j], inv=True) @ _compose(R_a[i], t_a[i])
+      Tb = _compose(R_b[j], t_b[j]) @ _compose(R_b[i], t_b[i], inv=True)
+      alpha = cv2.Rodrigues(Ta[:3, :3])[0].ravel()
+      beta = cv2.Rodrigues(Tb[:3, :3])[0].ravel()
+      if np.linalg.norm(alpha) < eps or np.linalg.norm(beta) < eps:
+        continue
+      M += np.outer(beta, alpha)
+      rows.append((Ta, Tb))
+  if not rows:
+    raise RuntimeError(
+      "no pose pair rotates by more than "
+      f"{min_angle_deg} degrees; hand-eye is undetermined"
+    )
+
+  w, V = np.linalg.eigh(M.T @ M)
+  R_x = V @ np.diag(1.0 / np.sqrt(np.maximum(w, 1e-12))) @ V.T @ M.T
+  # Nearest rotation, in case the square root left it a hair off orthogonal.
+  U, _, Vt = np.linalg.svd(R_x)
+  R_x = U @ Vt
+  if np.linalg.det(R_x) < 0:
+    U[:, -1] *= -1
+    R_x = U @ Vt
+
+  A, b = [], []
+  for Ta, Tb in rows:
+    A.append(Ta[:3, :3] - np.eye(3))
+    rhs = R_x @ Tb[:3, 3] - Ta[:3, 3]
+    b.append(rhs)
+  t_x, *_ = np.linalg.lstsq(np.vstack(A), np.concatenate(b), rcond=None)
+  return R_x, t_x.reshape(3, 1)
+
+
+def _compose(R, t, inv: bool = False) -> np.ndarray:
+  T = np.eye(4)
+  T[:3, :3] = np.asarray(R, dtype=np.float64)
+  T[:3, 3] = np.asarray(t, dtype=np.float64).ravel()
+  return np.linalg.inv(T) if inv else T
+
+
+def solve(records: list[dict], gripper_site: str = "grasp_site"):
+  """Camera pose in the base frame, plus a residual per pose.
+
+  The residual is the thing to read.  ``calibrateHandEye`` will return a
+  transform for any input; what says whether to believe it is that the
+  board's pose in the base frame, computed through the solution, lands in the
+  same place from every viewpoint.  It is a fixed thing held in a moving hand,
+  so its pose in the *gripper* frame is constant, and the spread of that is the
+  error.
+  """
+  from .proprio import Kinematics
+
+  kin = Kinematics(site_name=gripper_site)
+  R_bg, t_bg, R_cb, t_cb = [], [], [], []
+  for r in records:
+    kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
+    T_bg = np.eye(4)
+    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
+    # Eye-to-hand: hand the solver the inverse poses and it returns the camera
+    # in the base frame instead of the camera in the gripper frame.
+    T_gb = np.linalg.inv(T_bg)
+    R_bg.append(T_gb[:3, :3])
+    t_bg.append(T_gb[:3, 3])
+    T_cb_i = _rt(r["rvec"], r["tvec"])
+    R_cb.append(T_cb_i[:3, :3])
+    t_cb.append(T_cb_i[:3, 3])
+
+  spans = [_angle_between(R_bg[i], R_bg[j])
+           for i in range(len(R_bg)) for j in range(i + 1, len(R_bg))]
+  rot_span = max(spans) if spans else 0.0
+  if rot_span < MIN_ROT_SPAN_DEG:
+    # Return rather than raise, so the caller can print the number and say what
+    # to do about it.  There is nothing to solve: with no rotation the equation
+    # is satisfied by any X, and a solver handed this returns one.
+    return {"T_base_cam": None, "rot_span_deg": rot_span,
+            "n_poses": len(records), "residual_mm": float("nan"),
+            "worst_mm": float("nan"), "worst_pose": -1, "per_pose_mm": []}
+
+  R, t = calibrate_hand_eye(R_bg, t_bg, R_cb, t_cb)
+  T_base_cam = np.eye(4)
+  T_base_cam[:3, :3] = R
+  T_base_cam[:3, 3] = np.asarray(t).ravel()
+
+  # The board in the gripper frame, from every pose.  Constant if the solution
+  # is right.
+  in_gripper = []
+  for r, Rc, tc in zip(records, R_cb, t_cb):
+    kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
+    T_bg = np.eye(4)
+    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
+    T_cb_i = np.eye(4)
+    T_cb_i[:3, :3], T_cb_i[:3, 3] = Rc, tc
+    in_gripper.append(np.linalg.inv(T_bg) @ T_base_cam @ T_cb_i)
+
+  origins = np.stack([T[:3, 3] for T in in_gripper])
+  centre = origins.mean(axis=0)
+  per_pose_mm = np.linalg.norm(origins - centre, axis=1) * 1000
+  return {
+    "T_base_cam": T_base_cam,
+    "residual_mm": float(np.sqrt((per_pose_mm ** 2).mean())),
+    "worst_mm": float(per_pose_mm.max()),
+    "worst_pose": int(per_pose_mm.argmax()),
+    "per_pose_mm": per_pose_mm.tolist(),
+    "rot_span_deg": rot_span,
+    "n_poses": len(records),
+  }
+
+
+def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
+  """Height and tilt of the table in the base frame, from one depth frame."""
+  from . import rectify
+
+  rig = config.Rig(T_base_cam=T_base_cam, K=K)
+  reproj = rectify.Reprojector(rig)
+  pts = reproj.points_base(depth, rig)
+  (xlo, xhi), (ylo, yhi), _ = config.WORKSPACE
+  sel = ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
+         & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
+         & (np.abs(pts[:, 2] - config.TABLE_Z_M) < 0.08))
+  if sel.sum() < 5000:
+    raise RuntimeError(
+      f"only {int(sel.sum())} points near the expected table height.  Either "
+      "the extrinsic is wrong or the camera is not looking at the table."
+    )
+  q = pts[sel]
+  w = np.ones(q.shape[0])
+  for _ in range(4):
+    mu = (q * w[:, None]).sum(0) / w.sum()
+    cov = ((q - mu) * w[:, None]).T @ (q - mu) / w.sum()
+    n = np.linalg.eigh(cov)[1][:, 0]
+    if n[2] < 0:
+      n = -n
+    r = (q - mu) @ n
+    s = 1.4826 * np.median(np.abs(r)) + 1e-4
+    w = 1.0 / (1.0 + (r / (2.5 * s)) ** 2)
+  return {
+    "table_z": float(mu[2]),
+    "tilt_deg": float(np.degrees(np.arccos(np.clip(n[2], -1, 1)))),
+    "flatness_mm": float(1.4826 * np.median(np.abs((q - mu) @ n)) * 1000),
+    "n_points": int(sel.sum()),
+  }
+
+
+# ---------------------------------------------------------------------------
+
+
+def collect(args) -> int:
+  """Walk through poses by hand, saving one record each time.
+
+  Deliberately manual.  An automatic sweep needs a trusted extrinsic to know
+  where to point the board, which is the thing being measured, and a scripted
+  arm carrying a printed board towards a fixed camera is a way to put a hole in
+  a printed board.
+  """
+  from . import robot, sensor
+
+  reader = sensor.Reader(serial=args.serial)
+  reader.wait_for_first()
+  arm = robot.PiperArm(args.can) if not args.dry_run else None
+  if arm is not None:
+    arm.connect()
+
+  records = json.loads(POSES_FILE.read_text()) if POSES_FILE.exists() else []
+  print(f"{len(records)} pose(s) already recorded.  Move the arm so the board "
+        "is fully visible, then press enter.  'q' to stop.")
+  print("Vary the ORIENTATION, not just the position: hand-eye is determined "
+        f"by rotation and this needs at least {MIN_ROT_SPAN_DEG:.0f} degrees "
+        "of spread.")
+  try:
+    while True:
+      if input(f"[{len(records)}] > ").strip().lower() == "q":
+        break
+      frame = reader.latest()
+      if frame is None:
+        print("  no frame")
+        continue
+      pose = detect_board(frame.gray, reader.K, np.zeros(5))
+      if pose is None:
+        print("  board not found -- move it into view or add light")
+        continue
+      if arm is None:
+        print("  --dry-run: no arm to read, pose not recorded")
+        continue
+      st = arm.read()
+      records.append({
+        "joint_pos": [*st.q.tolist(), st.gripper, -st.gripper],
+        "rvec": np.asarray(pose["rvec"]).ravel().tolist(),
+        "tvec": np.asarray(pose["tvec"]).ravel().tolist(),
+        "n_corners": pose["n_corners"],
+        "reproj_rms_px": pose["reproj_rms_px"],
+      })
+      POSES_FILE.write_text(json.dumps(records, indent=2))
+      print(f"  recorded: {pose['n_corners']} corners, "
+            f"reprojection {pose['reproj_rms_px']:.2f} px")
+  finally:
+    reader.close()
+    if arm is not None:
+      arm.close()
+  return 0
+
+
+def run_solve(args) -> int:
+  if not POSES_FILE.exists():
+    print(f"no poses at {POSES_FILE}; run --collect first")
+    return 1
+  records = json.loads(POSES_FILE.read_text())
+  if len(records) < MIN_POSES:
+    print(f"{len(records)} poses is not enough; {MIN_POSES} is the minimum")
+    return 1
+
+  out = solve(records)
+  print(f"poses            {out['n_poses']}")
+  print(f"rotation spread  {out['rot_span_deg']:.1f} deg")
+  if out["T_base_cam"] is None:
+    print(f"\nREFUSING to solve: the poses span {out['rot_span_deg']:.1f} "
+          f"degrees of rotation and hand-eye needs {MIN_ROT_SPAN_DEG:.0f}.  "
+          "With no rotation the equation is satisfied by any answer.  Collect "
+          "more poses with the board TILTED differently, not just moved.")
+    return 1
+  print(f"residual         {out['residual_mm']:.2f} mm rms, "
+        f"{out['worst_mm']:.2f} mm worst (pose {out['worst_pose']})")
+  T = out["T_base_cam"]
+  print(f"camera position  {np.round(T[:3, 3], 4).tolist()} m")
+  nominal = config.sim_camera_extrinsic()
+  d_pos = float(np.linalg.norm(T[:3, 3] - nominal[:3, 3])) * 1000
+  d_rot = _angle_between(T[:3, :3], nominal[:3, :3])
+  print(f"vs the simulator {d_pos:.1f} mm and {d_rot:.2f} deg away")
+
+  if out["rot_span_deg"] < MIN_ROT_SPAN_DEG:
+    print(f"\nREFUSING to write: the poses span {out['rot_span_deg']:.1f} "
+          f"degrees of rotation and hand-eye needs {MIN_ROT_SPAN_DEG:.0f}.  "
+          "Collect more with the board tilted differently, not just moved.")
+    return 1
+  if out["residual_mm"] > args.max_residual_mm:
+    print(f"\nREFUSING to write: {out['residual_mm']:.2f} mm residual is over "
+          f"the {args.max_residual_mm:.1f} mm limit.  Pose "
+          f"{out['worst_pose']} is the worst; drop it and try again, or "
+          "check the board is rigid on the gripper.")
+    return 1
+  # The camera pose jitter the policy was trained with is 20 mm and 2 degrees,
+  # so a calibration further out than that is outside what it has seen.
+  if d_pos > 25.0 or d_rot > 3.0:
+    print("\nWARNING: the mount is outside the randomisation envelope the "
+          "policy was trained with (20 mm, 2 deg).  The pipeline resamples "
+          "into the simulator's camera so the image will still be right, but "
+          "the parallax is not something it has seen.  Consider moving the "
+          "mount.")
+
+  rig = config.Rig(T_base_cam=T, residual_mm=out["residual_mm"])
+  if args.table:
+    from . import sensor
+    reader = sensor.Reader(serial=args.serial)
+    frame = reader.wait_for_first()
+    reader.close()
+    rig.K = reader.K
+    table = fit_table(frame.depth, T, reader.K)
+    print(f"table            z = {table['table_z'] * 1000:+.1f} mm, tilt "
+          f"{table['tilt_deg']:.2f} deg, flatness "
+          f"{table['flatness_mm']:.1f} mm over {table['n_points']} points")
+    if table["tilt_deg"] > 1.5:
+      print("WARNING: the table is more than 1.5 degrees off level in the "
+            "base frame.  Either it is, or the calibration is wrong.")
+    rig.table_z = table["table_z"]
+  rig.save()
+  print(f"\nwrote {config.RIG_FILE}")
+  return 0
+
+
+def main() -> int:
+  p = argparse.ArgumentParser()
+  p.add_argument("--collect", action="store_true")
+  p.add_argument("--solve", action="store_true")
+  p.add_argument("--table", action="store_true", default=True,
+                 help="also measure the table plane (default on)")
+  p.add_argument("--no-table", dest="table", action="store_false")
+  p.add_argument("--serial", default=None)
+  p.add_argument("--can", default=config.CAN_INTERFACE)
+  p.add_argument("--dry-run", action="store_true")
+  p.add_argument("--max-residual-mm", type=float, default=4.0)
+  a = p.parse_args()
+  if a.collect:
+    return collect(a)
+  if a.solve:
+    return run_solve(a)
+  p.print_help()
+  return 1
+
+
+if __name__ == "__main__":
+  sys.exit(main())

@@ -170,11 +170,9 @@ def test_noise_is_correlated_over_the_measured_distance():
 
 
 def test_flat_surfaces_are_nearly_full():
-  c = make(surface_fill=(1.0, 1.0), hole_dilate=False)
+  c = make(surface_fill=(0.97, 0.97), shadow_mrad=0.0)
   _, valid = c(flat(0.7))
-  assert valid.float().mean().item() == pytest.approx(
-    depth_noise.EDGE_P_FLAT, abs=0.02
-  )
+  assert valid.float().mean().item() == pytest.approx(0.97, abs=0.02)
 
 
 def test_holes_concentrate_on_depth_edges():
@@ -183,30 +181,47 @@ def test_holes_concentrate_on_depth_edges():
   Built as a step from 0.65 m to 0.75 m, which is roughly what the top of a
   40 mm object against the table behind it looks like from this camera.
   """
-  c = make(surface_fill=(1.0, 1.0), hole_dilate=False)
-  d = flat(0.7, num_envs=32)
+  c = make(surface_fill=(0.97, 0.97), shadow_mrad=0.0, num_envs=256)
+  d = flat(0.7, num_envs=256)
   d[..., W // 2:] = 0.62
   _, valid = c(d)
   edge = valid[..., W // 2 - 1:W // 2 + 1].float().mean().item()
   interior = valid[..., 8:W // 2 - 8].float().mean().item()
-  assert interior == pytest.approx(depth_noise.EDGE_P_FLAT, abs=0.02)
+  assert interior == pytest.approx(0.97, abs=0.02)
 
-  g = 0.08 / 0.7 * F_PX_PER_RAD
-  predicted = depth_noise.EDGE_P_FLAT / (
+  # Half the step, because the gradient is a central difference -- the same one
+  # ``np.gradient`` takes, which is what the threshold was fitted against.  An
+  # earlier version took one-sided differences, which return the whole step and
+  # would therefore have dropped twice as much of every silhouette in the scene
+  # as the sensor does.
+  g = 0.5 * 0.08 / 0.7 * F_PX_PER_RAD
+  predicted = 0.97 / (
     1.0 + (g / depth_noise.EDGE_G50_PER_RAD) ** depth_noise.EDGE_EXP
   )
-  assert edge == pytest.approx(predicted, abs=0.05)
-  assert edge < 0.75 * interior
+  assert edge == pytest.approx(predicted, abs=0.06)
+  assert edge < interior - 0.15
 
 
-def test_dilation_widens_the_occlusion_shadow():
-  c = make(surface_fill=(1.0, 1.0), hole_dilate=True)
-  d = flat(0.7)
-  assert c(d)[1].float().mean().item() < depth_noise.EDGE_P_FLAT
+def test_the_shadow_widens_the_hole_but_does_not_multiply_it():
+  """The occlusion shadow spreads a hole; it must not create a field of them.
+
+  The first implementation dilated the drawn holes instead of the gradient that
+  causes them.  On a flat surface with 6% dropout, a 3x3 dilation of
+  independently drawn pixels leaves 43% -- seven times the sensor's rate, and
+  on flat ground where the sensor has no shadow at all.
+  """
+  d = flat(0.7, num_envs=256)
+  d[..., W // 2:] = 0.62
+  off = make(surface_fill=(0.97, 0.97), shadow_mrad=0.0, num_envs=256)(d)[1]
+  on = make(surface_fill=(0.97, 0.97), shadow_mrad=depth_noise.SHADOW_MRAD, num_envs=256)(d)[1]
+  near = slice(W // 2 - 4, W // 2 + 4)
+  assert on[..., near].float().mean() < off[..., near].float().mean()
+  far = slice(8, W // 2 - 16)
+  assert on[..., far].float().mean().item() == pytest.approx(0.97, abs=0.03)
 
 
 def test_surface_fill_reaches_flat_regions():
-  c = make(surface_fill=(0.5, 0.5), hole_dilate=False)
+  c = make(surface_fill=(0.5, 0.5), shadow_mrad=0.0)
   assert c(flat(0.7))[1].float().mean().item() == pytest.approx(0.5, abs=0.02)
 
 

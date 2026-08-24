@@ -892,6 +892,7 @@ class CameraScene:
     min_depth: float = 0.05,
     noise_cfg: "depth_noise.DepthNoiseCfg | None" = None,
     mask_jitter_px: int = 1,
+    featureless_objects_only: bool = True,
   ) -> torch.Tensor:
     sensor = env.scene[sensor_name]
     depth = sensor.data.depth
@@ -914,11 +915,20 @@ class CameraScene:
     if cfg.strength > 0.0:
       if self._corr is None:
         self._build(sensor_name, depth.shape, depth.device, cfg, mask_jitter_px)
+      # Which pixels the camera has nothing to match on.  The objects, and not
+      # the table: the rig puts a textured mat down, so the table's quality is
+      # a deployment decision that has been taken, while an object's is not.
+      # Blurred by a pixel so the boundary is not a step -- the sensor's
+      # matching window straddles it and its quality there is somewhere
+      # between the two.
+      featureless = mask if not featureless_objects_only else \
+        torch.ones_like(mask)
+      featureless = F.avg_pool2d(featureless, 3, 1, 1)
       # Clamp before corrupting, not after: the far plane is the sky, and the
       # relative gradient at the horizon of an unclamped depth buffer is
       # enormous and entirely fictional.
       clean = depth.clamp(min=min_depth, max=cutoff_distance)
-      depth, valid = self._corr(clean)
+      depth, valid = self._corr(clean, featureless=featureless)
       # A hole reads as the far plane.  It has to read as *something*, and this
       # is the convention hardware/deploy/obs.py maps the driver's zero onto,
       # so the two pipelines agree about what "no data" looks like.

@@ -31,6 +31,14 @@ run on hardware.**
 | Task | continuous tabletop tidying, single object and three-object clutter |
 | Deployment | ONNX and TorchScript export verified to 3e-6 over 8 recurrent steps; explicit hidden state, no stateful ops in the graph |
 
+The depth sensor is no longer a guess. Two placeholder constants in
+`camera.py` have been replaced by a model fitted to a RealSense D405 on a
+bench, and the pipeline that feeds the policy from a real one is in
+[`hardware/deploy/`](hardware/deploy/README.md), checked stage by stage against
+the simulator with no hardware attached. What was measured, what it changed,
+and what it invalidates:
+[`docs/depth_sensor_and_deployment.md`](docs/depth_sensor_and_deployment.md).
+
 Measured results and their caveats are in
 [`docs/results.md`](docs/results.md), and the audit that re-measured them —
 including **two findings in that file which it retracts** — is in
@@ -211,6 +219,7 @@ micromamba run -n mjlab python -m pytest tests -q
 ```
 src/piper_push/
 ├── robot.py, objects.py, shapes.py, camera.py   scene and randomisation
+├── depth_noise.py                               the measured D405, in simulation
 ├── actions.py                                   rate-limited joint action + plant model
 ├── perturb.py                                   opt-in session mismatch (WM0)
 ├── models.py, distill.py, checkpoints.py        policy, DAgger, export
@@ -220,5 +229,9 @@ scripts/
 ├── check_cadence.py, check_perturb.py           in-sim plumbing checks
 ├── sweep_plan.py, run_sim2real_sweep.sh         WM0 sweep
 ├── analyze_sweep.py, analyze_novelty.py         tables and figures, from JSON only
-└── probe_hidden.py, trip_phase.py               diagnostics
+├── probe_hidden.py, trip_phase.py               diagnostics
+└── export_obs_spec.py, plot_depth_model.py      what the actor expects; the figure
+hardware/
+├── depth_bench/                                 choosing and characterising the camera
+└── deploy/                                      D405 + PiPER-X -> the trained policy
 ```

@@ -1,5 +1,16 @@
 # Phase WM0: is there a sim-to-real gap worth calibrating?
 
+> **The three depth axes in this document have been superseded.** Every number
+> here was produced against the old sensor model — 4 mm of i.i.d. Gaussian
+> noise and 2% of uniformly scattered dropout, both placeholders that said so.
+> That model has been replaced by one fitted to a RealSense D405
+> (`piper_push.depth_noise`), and the "in distribution / out of distribution"
+> labels for `depth_scale`, `depth_bias_m` and `depth_dropout` no longer hold:
+> scale and offset are randomised during training now, and the dropout is
+> correlated and concentrated on depth discontinuities rather than scattered.
+> The other fourteen axes are unaffected. See
+> [`depth_sensor_and_deployment.md`](depth_sensor_and_deployment.md).
+
 Phase WM0 exists to decide whether to build the parameter-conditioned latent
 world model the README describes, **before** building it. It asks four
 questions and answers them in simulation only:

@@ -628,9 +628,10 @@ def make_pick_place_env_cfg(
             # clean -- it is the opposite -- but because a recorded rollout
             # has to show what the policy did, and a run whose depth was
             # corrupted differently from the last one cannot be compared to
-            # it.  ``scripts/record_vision.py --sensor real`` turns it back
-            # on when the question is what the camera does rather than what
-            # the policy does.
+            # it.  ``scripts/record_vision.py --sensor real`` turns it back on
+            # when the question is what the camera does rather than what the
+            # policy does, and ``piper_push.perturb`` turns individual axes of
+            # it back on for an evaluation that names them.
             "noise_cfg": dataclasses.replace(
               camera.DEPTH_NOISE, strength=0.0 if play else 1.0
             ),

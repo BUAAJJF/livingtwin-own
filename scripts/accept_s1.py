@@ -137,6 +137,21 @@ def main() -> int:
                    help="seconds after a grasp ends before it counts as dropped")
     p.add_argument("--lift-clear", type=float, default=0.010,
                    help="metres of clearance that make a pad contact a grasp")
+    p.add_argument("--camera", default="real",
+                   choices=("real", "blank", "shuffled"),
+                   help="ablate the camera channel before the policy sees it.  "
+                        "'blank' zeroes it, which is out of distribution and "
+                        "tells you little; 'shuffled' hands each environment "
+                        "another environment's image -- a real, correctly "
+                        "normalised picture of the wrong table -- and a policy "
+                        "that scores the same on it is not using the camera.")
+    p.add_argument("--sensor", default="clean", choices=("clean", "measured"),
+                   help="depth realism to EVALUATE under.  'clean' is the "
+                        "protocol every number in docs/results.md was measured "
+                        "with and stays the default, so old and new runs "
+                        "remain comparable.  'measured' turns on the fitted "
+                        "D405 model from piper_push.depth_noise, which is the "
+                        "only setting that says anything about the robot.")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=None,
                    help="seeds the whole rollout.  Note that this makes a run "
@@ -183,6 +198,17 @@ def main() -> int:
     a = p.parse_args()
 
     env_cfg = load_env_cfg(a.task, play=True)
+    if a.sensor == "measured":
+        # ``play`` turns the sensor model off so that two recordings of the
+        # same policy can be compared; an evaluation that is asking what the
+        # robot will do has to turn it back on.
+        import dataclasses as _dc
+
+        from piper_push import camera as _camera
+        term = env_cfg.observations["camera"].terms["scene"]
+        term.params["noise_cfg"] = _dc.replace(_camera.DEPTH_NOISE,
+                                               strength=1.0)
+        term.params["mask_jitter_px"] = _camera.MASK_JITTER_PX
     agent_cfg = load_rl_cfg(a.task)
     env_cfg.scene.num_envs = a.num_envs
     if a.seed is not None:
@@ -339,9 +365,21 @@ def main() -> int:
     has_cleanup = "table_clears" in pick.metrics
     sim_seconds = 0.0
 
+    # The camera ablation, applied to the observation the policy is about to
+    # read.  Rolled by one so no environment can be handed back its own image.
+    cam_perm = torch.randperm(n, device=dev).roll(1)
+
+    def seen(o):
+        if a.camera == "real":
+            return o
+        o = o.clone()
+        o["camera"] = (torch.zeros_like(o["camera"]) if a.camera == "blank"
+                       else o["camera"][cam_perm])
+        return o
+
     with torch.inference_mode():
         for _ in range(a.steps):
-            out = env.step(policy(obs))
+            out = env.step(policy(seen(obs)))
             obs, dones = out[0], out[2]
             if recurrent:
                 policy.reset(dones)
@@ -671,6 +709,7 @@ def main() -> int:
                 # what was asked for on the command line.
                 "redraw_on_place": list(pick.redraw_on_place),
                 "cadence_arg": a.cadence,
+                "camera": a.camera,
                 "reset_hidden_on_respawn": bool(a.reset_hidden_on_respawn),
                 "recurrent": recurrent,
                 "sim_seconds": sim_seconds,

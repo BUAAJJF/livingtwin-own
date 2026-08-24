@@ -21,12 +21,14 @@ range" and "at the tail of it" are different claims about the same number.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import asdict, dataclass, fields
 
 import torch
 
 from piper_push import camera as cam
+from piper_push import depth_noise
 
 
 @dataclass(frozen=True)
@@ -61,21 +63,36 @@ AXES: dict[str, Axis] = {
   "cam_pos_z_m": Axis(
     "cam_pos_z_m", "m", 0.0, "camera", (-0.02, 0.02),
     "camera raised or lowered on its post"),
+  # The three depth axes below were written against a sensor model that was
+  # two constants and said so.  That model has been replaced by one fitted to
+  # the camera (``piper_push.depth_noise``), and the trained ranges here have
+  # moved with it -- scale and offset are now randomised during training, and
+  # the dropout is structured rather than i.i.d.  Numbers in
+  # docs/sim2real_sweep_phase_wm0.md were produced under the old model and
+  # their "in distribution / out of distribution" labels for these three axes
+  # no longer hold.
   "depth_scale": Axis(
-    "depth_scale", "x", 1.0, "camera", None,
+    "depth_scale", "x", 1.0, "camera", (0.967, 1.007),
     "stereo baseline or focal-length error: every depth reading multiplied "
-    "by a constant.  A 2% error at 0.8 m is 16 mm"),
+    "by a constant.  A 2% error at 0.8 m is 16 mm.  Measured on the D405 at "
+    "-1.3%, and randomised +-2% around it in training"),
   "depth_bias_m": Axis(
-    "depth_bias_m", "m", 0.0, "camera", None,
-    "constant range offset from the sensor's own calibration"),
+    "depth_bias_m", "m", 0.0, "camera", (-0.013, 0.003),
+    "constant range offset from the sensor's own calibration.  Measured at "
+    "-5 mm and randomised +-8 mm around it"),
   "depth_dropout": Axis(
-    "depth_dropout", "fraction", cam.DEPTH_DROPOUT, "camera", (0.0, 0.02),
-    "share of pixels returning no range.  The trained model is i.i.d. "
-    "Bernoulli; a real sensor drops whole regions"),
+    "depth_dropout", "fraction", 1.0 - 0.5 * sum(depth_noise.SURFACE_FILL),
+    "camera", (1.0 - depth_noise.SURFACE_FILL[1], 1.0 - depth_noise.SURFACE_FILL[0]),
+    "share of pixels returning no range on a FLAT surface, on top of the "
+    "edge dropout the sensor model already applies.  Drawn per surface in "
+    "training from the measured 0.88-0.995 fill"),
   "depth_dropout_blob": Axis(
     "depth_dropout_blob", "fraction", 0.0, "camera", None,
-    "STRUCTURED no-return: contiguous patches rather than salt-and-pepper, "
-    "which is what dark, thin and specular surfaces actually produce"),
+    "EXTRA structured no-return, on top of the sensor model's own.  The "
+    "trained model already loses whole regions -- its dropout is drawn from a "
+    "field correlated over 8.5 sensor pixels, and concentrated on depth "
+    "discontinuities -- so this axis now asks about more of it, not about the "
+    "existence of it"),
   "obs_latency_steps": Axis(
     "obs_latency_steps", "control steps", 0.0, "camera", None,
     "camera exposure, transport and inference delay.  One step is 20 ms; a "
@@ -147,10 +164,7 @@ class SessionMismatchCfg:
       if v is None:
         continue
       nom = AXES[f.name].nominal if f.name in AXES else f.default
-      if f.name == "depth_dropout":
-        if abs(v - cam.DEPTH_DROPOUT) > 1e-12:
-          out[f.name] = v
-      elif abs(float(v) - float(nom)) > 1e-12:
+      if abs(float(v) - float(nom)) > 1e-12:
         out[f.name] = v
     return out
 
@@ -191,7 +205,7 @@ class PerturbedCameraScene:
   def __init__(self, cfg, env):
     from piper_push.tasks.pick_place import mdp as pick_mdp
 
-    self._inner = pick_mdp.camera_scene
+    self._inner = pick_mdp.CameraScene(cfg, env)
     p = cfg.params
     self._scale = float(p.get("depth_scale", 1.0))
     self._bias = float(p.get("depth_bias_m", 0.0))
@@ -206,7 +220,7 @@ class PerturbedCameraScene:
 
   def __call__(self, env, sensor_name: str, command_name: str,
                cutoff_distance: float = 1.5, min_depth: float = 0.05,
-               noise_m: float = 0.0, dropout: float = 0.0,
+               noise_cfg=None, mask_jitter_px: int = 0,
                depth_scale: float = 1.0, depth_bias_m: float = 0.0,
                depth_dropout_blob: float = 0.0,
                obs_latency_steps: int = 0) -> torch.Tensor:
@@ -230,7 +244,7 @@ class PerturbedCameraScene:
 
     try:
       obs = self._inner(env, sensor_name, command_name, cutoff_distance,
-                        min_depth, noise_m, dropout)
+                        min_depth, noise_cfg, mask_jitter_px)
     finally:
       if restore is not None:
         sensor.data.depth = restore
@@ -238,15 +252,26 @@ class PerturbedCameraScene:
     return obs
 
   def reset(self, env_ids=None) -> None:
-    """Nothing to flush -- the delay buffer is the manager's and it resets it.
+    """Forward to the wrapped term, which does have state.
 
-    Kept because its presence is what registers this term as a class term:
+    It did not used to: the delay buffer is the manager's, and this hook only
+    existed because its presence is what registers a term as a class term --
     ``ObservationManager._prepare_terms`` files a term under
     ``_group_obs_class_term_cfgs`` iff its func has a callable ``reset``, and
-    :class:`piper_push.latency.LatencyScene`, which wraps this one, needs that
-    hook to redraw its per-environment lag at the episode boundary.
+    :class:`piper_push.latency.LatencyScene`, which wraps this one, needs that.
+
+    The wrapped term now holds a sensor: a frozen noise field and a per-surface
+    quality drawn at reset.  Swallowing the reset here would leave one
+    environment's fixed-pattern error in place for the whole run, and the
+    policy would learn it.
+
+    Guarded because the tests replace ``_inner`` with a bare probe function to
+    watch what this writes onto the depth buffer.  The constructor always
+    builds a real term, so on any real path the hook is there.
     """
-    del env_ids
+    inner_reset = getattr(self._inner, "reset", None)
+    if callable(inner_reset):
+      inner_reset(env_ids)
 
 
 def _blob_dropout(depth: torch.Tensor, frac: float, far: float) -> torch.Tensor:
@@ -317,7 +342,27 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
     term = grp.terms["scene"]
     params = dict(term.params)
     if mm.depth_dropout is not None:
-      params["dropout"] = mm.depth_dropout
+      # The axis is "share of flat-surface pixels returning nothing", and in
+      # the fitted model that is one minus the per-surface fill.  Pinned to a
+      # single value rather than a range: a session's mismatch is a fixed
+      # property of that session, which is the whole point of the axis.
+      base = params.get("noise_cfg") or cam.DEPTH_NOISE
+      f = 1.0 - float(mm.depth_dropout)
+      if base.strength > 0.0:
+        params["noise_cfg"] = dataclasses.replace(base, surface_fill=(f, f))
+      else:
+        # The sensor model is switched off, which is what ``play`` does.  This
+        # axis still has to bite: it is one named perturbation being applied
+        # deliberately, not part of the training distribution, and an
+        # evaluation that asked for 20% dropout and silently got none would
+        # report that dropout does not matter.  So the model is switched on
+        # with everything except the dropout zeroed, which is exactly what the
+        # axis says it is.
+        params["noise_cfg"] = dataclasses.replace(
+          base, strength=1.0, surface_fill=(f, f),
+          sigma_static_per_m=0.0, sigma_temporal_per_m=0.0,
+          bias_scale=0.0, bias_offset_m=0.0,
+          bias_scale_jitter=0.0, bias_offset_jitter_m=0.0)
     params.update(depth_scale=mm.depth_scale, depth_bias_m=mm.depth_bias_m,
                   depth_dropout_blob=mm.depth_dropout_blob,
                   obs_latency_steps=mm.obs_latency_steps)
@@ -349,7 +394,6 @@ def apply_session_mismatch(env_cfg, mm: SessionMismatchCfg) -> dict:
     # it is; and the arm's actuators are four *groups* (joint[1-3], joint4,
     # joint5, joint6) plus the gripper, so SceneEntityCfg's joint-name
     # matching returns six indices into a list of five and raises.
-    import dataclasses
     art = env_cfg.scene.entities["robot"].articulation
     scaled = []
     for act in art.actuators:

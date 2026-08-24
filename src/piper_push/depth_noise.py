@@ -88,16 +88,43 @@ EDGE_P_FLAT = 0.97
 EDGE_G50_PER_RAD = 29.4
 EDGE_EXP = 0.99
 """``p_valid = p_flat / (1 + (g/g50)^n)`` against relative depth gradient per
-radian.  Fit RMS 0.024 over seven decades-wide bins."""
+radian.  Fit RMS 0.024 over seven decades-wide bins.  ``p_flat`` is not used at
+runtime: it is the fill rate of the flat parts of that particular desk, and the
+runtime draws that per surface from ``SURFACE_FILL`` instead.  It is kept here
+because the other two constants are meaningless without the normalisation they
+were fitted alongside."""
+
+SHADOW_MRAD = 5.8
+"""How far a hole spreads beyond the discontinuity that causes it, in
+milliradians -- an angle, like the correlation length, and for the same reason:
+it is a property of the stereo matching window and not of whatever grid the
+model happens to be evaluated on.  It was a pixel of the policy's image, which
+is 5.8 mrad; stated that way it was 2.7 times wider in angle when the same
+model ran on the sensor's own grid, and the two paths disagreed on the hole
+rate by a factor of 2.3 as a result.  A stereo hole is an occlusion shadow -- the strip the second
+camera cannot see is wider than the step that casts it -- and the measurement
+shows it directly: in the 2.2-4.3 per-radian bin fill is still 0.87 but 48% of
+those pixels flicker, against 19% on flat ground.  Implemented by widening the
+*gradient* rather than by dilating the holes, which is both what physically
+happens and the only version that does not inflate the hole rate: dilating
+independently drawn holes by 3x3 turns 6% into 43%."""
 
 TEXTURE_PENALTY = (1.0, 2.1)
-"""Noise multiplier drawn per object-surface.  1.0 is the textured target,
-2.0 the blank white patch (0.0405/0.0203), 1.7 the black one."""
+"""Noise multiplier.  1.0 is the textured target, 2.0 the blank white patch
+(0.0405/0.0203), 1.7 the black one."""
 
-SURFACE_FILL = (0.88, 1.0)
-"""Steady fill rate drawn per surface.  Measured means: textured 0.996, black
+SURFACE_FILL = (0.88, 0.995)
+"""Steady fill rate on a flat surface.  Measured means: textured 0.996, black
 0.989, blank white 0.881 -- and 0.419 in the worst single shot, which is what
-the low end of the noise scale is for rather than this range."""
+the low end of the range is reaching towards rather than matching.
+
+Both of these are drawn **once per environment**, not per object.  The
+simulator renders untextured geometry, so there is nothing to key a per-object
+quality off, and one draw for the whole scene says "everything in this
+environment is as featureless as a blank sheet" a fraction of the time.  That
+is the conservative reading of the measurement rather than the faithful one --
+a real table has a textured mat and one white object on it -- and it is the
+obvious thing to refine if the policy turns out to be over-cautious."""
 
 BIAS_SCALE = -0.013
 BIAS_OFFSET_M = -0.005
@@ -123,7 +150,6 @@ class DepthNoiseCfg:
   sigma_static_per_m: float = SIGMA_STATIC_PER_M
   sigma_temporal_per_m: float = SIGMA_TEMPORAL_PER_M
   corr_len_native_px: float = CORR_LEN_NATIVE_PX
-  edge_p_flat: float = EDGE_P_FLAT
   edge_g50_per_rad: float = EDGE_G50_PER_RAD
   edge_exp: float = EDGE_EXP
   texture_penalty: tuple[float, float] = TEXTURE_PENALTY
@@ -132,11 +158,7 @@ class DepthNoiseCfg:
   bias_offset_m: float = BIAS_OFFSET_M
   bias_scale_jitter: float = BIAS_SCALE_JITTER
   bias_offset_jitter_m: float = BIAS_OFFSET_JITTER_M
-  hole_dilate: bool = True
-  """Grow each hole by one pixel.  A stereo hole is an occlusion shadow: the
-  region the second camera cannot see is wider than the discontinuity that
-  casts it, and the measured flicker fraction next to an edge (0.48 in the
-  2.2-4.3 bin, where fill is still 0.87) is that shadow breathing."""
+  shadow_mrad: float = SHADOW_MRAD
 
 
 class DepthCorruption:
@@ -174,6 +196,7 @@ class DepthCorruption:
     )
     self._lo_h = max(2, int(round(height / self.corr_px)))
     self._lo_w = max(2, int(round(width / self.corr_px)))
+    self.shadow_px = int(round(self.cfg.shadow_mrad * 1e-3 * self.f_px_per_rad))
 
     # Bilinear upsampling of white noise is a low-pass filter, so the result
     # does not have unit variance.  Measure the loss once rather than deriving
@@ -229,25 +252,48 @@ class DepthCorruption:
     """Local depth step as a fraction of range, per radian.
 
     Per radian rather than per pixel so the threshold measured on the sensor's
-    own 848x480 grid means the same thing here.  Forward and backward
-    differences are taken separately and the larger kept: at a silhouette the
-    step is on one side only, and averaging the two halves it and puts the
-    object's outline in the wrong bin.
+    own 848x480 grid means the same thing here.
+
+    A central difference, matching ``np.gradient``, because that is what the
+    threshold was fitted with.  A one-sided difference is a defensible choice
+    on its own -- at a silhouette the step really is on one side -- but it
+    returns twice as much at a step edge as the central difference does, so
+    used against a threshold fitted the other way it would double the dropout
+    on every object outline in the scene.
+
+    Pad once and slice, rather than convolve with a difference kernel.  The
+    convolution is the obvious way to write it and it is fifteen times slower
+    here -- 4.6 ms against 0.3 -- because cuDNN has no good plan for one input
+    channel and two output channels, and picks a general one.  At 512
+    environments that difference is 4 ms of every control step.
     """
-    d = depth
-    sx = (d[..., :, 1:] - d[..., :, :-1]).abs()
-    sy = (d[..., 1:, :] - d[..., :-1, :]).abs()
-    dx = torch.maximum(F.pad(sx, (1, 0)), F.pad(sx, (0, 1)))
-    dy = torch.maximum(F.pad(sy, (0, 0, 1, 0)), F.pad(sy, (0, 0, 0, 1)))
-    return torch.sqrt(dx * dx + dy * dy) / d.clamp_min(1e-3) * self.f_px_per_rad
+    d = F.pad(depth, (1, 1, 1, 1), mode="replicate")
+    gx = d[..., 1:-1, 2:] - d[..., 1:-1, :-2]
+    gy = d[..., 2:, 1:-1] - d[..., :-2, 1:-1]
+    return torch.sqrt(gx * gx + gy * gy) * (0.5 * self.f_px_per_rad) \
+      / depth.clamp_min(1e-3)
 
   def __call__(
-    self, depth: torch.Tensor, generator: torch.Generator | None = None
+    self, depth: torch.Tensor, generator: torch.Generator | None = None,
+    featureless: torch.Tensor | None = None,
   ) -> tuple[torch.Tensor, torch.Tensor]:
     """Corrupt a clean depth image.
 
     Args:
       depth: ``(B, 1, H, W)`` metres, already clamped to the far plane.
+      featureless: optional ``(B, 1, H, W)`` in [0, 1] saying which pixels the
+        camera has nothing to match on.  1 gets this environment's drawn
+        surface quality, 0 gets a textured one.  Omitted, the whole frame gets
+        the drawn quality, which is the pessimistic reading -- it says every
+        surface in the scene is as bad as the worst one.
+
+        The distinction is worth making because the deployment can arrange half
+        of it.  The table gets a textured mat, so it is a 0; the objects are
+        whatever they are, so they are 1s.  With the whole frame at the drawn
+        quality the simulator spends a good fraction of its episodes claiming
+        the *table* is a blank white sheet, and the measured consequence is not
+        small: it is most of the reason a purely geometric segmenter reports
+        phantoms across the tablecloth.
 
     Returns:
       ``(depth, valid)`` -- metres and a boolean of the same shape.  The caller
@@ -260,14 +306,26 @@ class DepthCorruption:
       return depth, torch.ones_like(depth, dtype=torch.bool)
 
     b = depth.shape[0]
-    scale = c.strength * self.texture[:b] * depth * depth
 
-    static = self._smooth(self.static_field[:b]) * self._gain
-    temporal = self._smooth(
-      torch.randn(b, 1, self._lo_h, self._lo_w, device=depth.device,
-                  dtype=depth.dtype, generator=generator)
+    # All three correlated fields in one upsample.  They are the frozen error,
+    # this frame's error, and the variate that decides where the holes go; they
+    # are independent but they share a correlation length, so they share the
+    # filter that gives them one.
+    fresh = torch.randn(b, 2, self._lo_h, self._lo_w, device=depth.device,
+                        dtype=depth.dtype, generator=generator)
+    fields = self._smooth(
+      torch.cat([self.static_field[:b].to(depth.dtype), fresh], dim=1)
     ) * self._gain
+    static, temporal, w = fields[:, 0:1], fields[:, 1:2], fields[:, 2:3]
 
+    if featureless is None:
+      texture, fill = self.texture[:b], self.fill[:b]
+    else:
+      q = featureless.to(depth.dtype).clamp(0.0, 1.0)
+      texture = 1.0 + (self.texture[:b] - 1.0) * q
+      fill = c.surface_fill[1] + (self.fill[:b] - c.surface_fill[1]) * q
+
+    scale = (c.strength * texture) * depth * depth
     out = depth + scale * (
       static * c.sigma_static_per_m + temporal * c.sigma_temporal_per_m
     )
@@ -279,10 +337,15 @@ class DepthCorruption:
     # the occlusion shadow; letting the noise decide where the edges are would
     # put holes in the middle of flat surfaces.
     g = self.relative_gradient(depth)
-    p = c.edge_p_flat / (1.0 + (g / c.edge_g50_per_rad).pow(c.edge_exp))
-    p = p * (self.fill[:b] / c.edge_p_flat).clamp(max=1.0)
-    valid = torch.rand(depth.shape, device=depth.device, dtype=depth.dtype,
-                       generator=generator) < p
-    if c.hole_dilate:
-      valid = ~(F.max_pool2d((~valid).to(depth.dtype), 3, 1, 1) > 0.5)
-    return out, valid
+    if self.shadow_px > 0:
+      k = 2 * self.shadow_px + 1
+      g = F.max_pool2d(g, k, 1, self.shadow_px)
+    p = fill / (1.0 + (g / c.edge_g50_per_rad).pow(c.edge_exp))
+
+    # The draw is correlated over the same distance as the noise, because holes
+    # come in blobs.  Passive stereo fails over a region -- a patch with no
+    # texture, a strip in occlusion shadow -- and never one isolated pixel at a
+    # time.  Drawn as a smoothed normal put through its own CDF, which is a
+    # correlated uniform, so the marginal probability is still exactly ``p``.
+    u = 0.5 * (1.0 + torch.erf(w * 0.70710678118654752))
+    return out, u < p

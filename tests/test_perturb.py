@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from piper_push import camera as cam
+from piper_push import depth_noise
 from piper_push import perturb
 from piper_push.actions import RateLimitedJointPositionActionCfg
 
@@ -53,8 +54,15 @@ def test_nominal_matches_the_dataclass_default():
   mm = perturb.SessionMismatchCfg()
   for f in fields(perturb.SessionMismatchCfg):
     got = getattr(mm, f.name)
-    if got is None:  # depth_dropout means "leave the task's value"
-      assert perturb.AXES[f.name].nominal == cam.DEPTH_DROPOUT
+    if got is None:
+      # depth_dropout defaults to None, meaning "leave the task's value".  The
+      # task's value is no longer a constant -- the fitted sensor model draws a
+      # per-surface fill rate from a measured range -- so the axis's nominal is
+      # the middle of that range and there is nothing in the dataclass to
+      # compare it against.
+      assert f.name == "depth_dropout"
+      assert perturb.AXES[f.name].nominal == pytest.approx(
+        1.0 - 0.5 * sum(depth_noise.SURFACE_FILL))
       continue
     assert float(got) == pytest.approx(perturb.AXES[f.name].nominal)
 

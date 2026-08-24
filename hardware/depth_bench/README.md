@@ -20,6 +20,14 @@ So the bench has two jobs, and the second is the one that matters:
 2. produce the noise and dropout model that replaces those two constants, for
    whichever one wins.
 
+**Both are done for the D405.** `model/fit_noise.py` turns the captures in
+`results/` into `model/d405_noise.json`, `src/piper_push/depth_noise.py`
+implements it, and the two constants above are gone. What was measured and what
+it changed:
+[`docs/depth_sensor_and_deployment.md`](../../docs/depth_sensor_and_deployment.md).
+The pipeline that runs the policy on that camera is in
+[`hardware/deploy/`](../deploy/README.md).
+
 ## The target
 
 `targets/target_a4.pdf` — one A4 sheet carrying three regions.
