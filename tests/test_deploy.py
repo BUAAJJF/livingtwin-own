@@ -220,7 +220,7 @@ def test_the_slew_limit_starts_from_where_the_arm_is():
 
   from hardware.deploy import proprio, robot
 
-  spec = json.loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+  spec = __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
   m = robot.ActionMapper(spec)
   q = np.asarray(spec["default_joint_pos"], dtype=np.float64) + 0.5
   m.reset(q)
@@ -236,7 +236,7 @@ def test_targets_stay_inside_the_safety_envelope():
 
   from hardware.deploy import proprio, robot
 
-  spec = json.loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+  spec = __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
   m = robot.ActionMapper(spec)
   m.reset()
   rng = np.random.default_rng(0)
@@ -539,3 +539,128 @@ def test_the_two_things_the_simulator_cannot_express_are_reported():
   got = mod.decompose(_sim_extrinsic(dy=0.03))
   assert abs(got["cam_pos_y_m"] - 0.03) < 1e-9
   assert abs(got["cam_pos_x_m"]) < 1e-9 and abs(got["cam_pos_z_m"]) < 1e-9
+
+
+class _RecordingIface:
+  """Stands in for ``C_PiperInterface_V2`` and remembers what it was told.
+
+  Every method exists and returns None, so a call that ``PiperArm`` makes and
+  this does not anticipate is recorded rather than raising -- the point is to
+  capture the arguments, not to model the SDK.
+  """
+
+  def __init__(self):
+    self.calls = []
+
+  def __getattr__(self, name):
+    def f(*a, **kw):
+      self.calls.append((name, a, kw))
+    return f
+
+
+def test_every_can_message_passes_the_sdk_s_own_validator():
+  """What ``PiperArm.command`` sends, handed to the SDK's constructors.
+
+  This exists because ``PiperArm`` was written from documentation against no
+  hardware, and the first thing it found when the SDK was finally installed was
+  that the gripper effort was out of range by 2x: the code sent
+  ``int(GRIPPER_FORCE_N * 1000)`` = 10000 for a field ``ArmMsgGripperCtrl``
+  documents as 0-5000 and validates on construction.  Every gripper command
+  would have raised, on the robot, in the control loop.
+
+  So the messages are built for real -- same classes, same arguments -- and the
+  SDK's own range checks decide.  No CAN, no arm, and it runs in CI.
+
+  ``JointCtrl`` has no validator at all, which is the more dangerous half: a
+  units error there is a number the drives will try to achieve.  Those are
+  checked against the envelope instead.
+  """
+  pytest.importorskip("piper_sdk")
+  from piper_sdk.piper_msgs.msg_v2.transmit import (ArmMsgGripperCtrl,
+                                                    ArmMsgJointCtrl,
+                                                    ArmMsgMotionCtrl_2)
+  from piper_push import robot as sim_robot
+
+  from hardware.deploy import robot
+
+  spec = __import__("json").loads(pathlib.Path(
+    pathlib.Path(__file__).resolve().parents[1] / "hardware" / "deploy"
+    / "obs_spec.json").read_text())
+  mapper = robot.ActionMapper(spec)
+  mapper.reset()
+
+  arm = robot.PiperArm.__new__(robot.PiperArm)
+  arm._iface = _RecordingIface()
+  arm.gripper_torque_nm = robot.GRIPPER_TORQUE_NM
+  arm.connected = True
+  arm._prev = None
+
+  rng = np.random.default_rng(0)
+  for _ in range(200):
+    arm.command(mapper(rng.uniform(-1.5, 1.5, 7)))       # over-range on purpose
+
+  seen = set()
+  for name, a, kw in arm._iface.calls:
+    seen.add(name)
+    if name == "GripperCtrl":
+      ArmMsgGripperCtrl(*a, **kw)                        # raises if out of range
+    elif name == "MotionCtrl_2":
+      ArmMsgMotionCtrl_2(*a, **kw)
+    elif name == "JointCtrl":
+      ArmMsgJointCtrl(*a, **kw)
+      for j, mdeg in zip(robot.ARM_JOINTS, a):
+        lo, hi = sim_robot.SAFE_TARGET_CLIP[j]
+        rad = mdeg / robot.PiperArm.RAD_TO_MDEG
+        assert lo - 1e-6 <= rad <= hi + 1e-6, (
+          f"{j} commanded {np.degrees(rad):.1f} deg, envelope "
+          f"{np.degrees(lo):.1f} to {np.degrees(hi):.1f}")
+  assert seen == {"MotionCtrl_2", "JointCtrl", "GripperCtrl"}, seen
+
+
+def test_the_sdk_still_has_every_field_the_arm_reads():
+  """The feedback path, checked the same way as the command path.
+
+  ``read`` walks four attribute chains into SDK message objects.  A rename in
+  any of them is an ``AttributeError`` at 50 Hz on a moving robot, and there is
+  no other place it would show up first -- ``selftest.py`` runs against the
+  simulator and never touches these.
+  """
+  sdk = pytest.importorskip("piper_sdk")
+  p = sdk.C_PiperInterface_V2("can0", judge_flag=False, can_auto_init=False)
+
+  j = p.GetArmJointMsgs().joint_state
+  for i in range(1, 7):
+    assert isinstance(getattr(j, f"joint_{i}"), int)     # 0.001 deg
+
+  g = p.GetArmGripperMsgs().gripper_state
+  assert hasattr(g, "grippers_angle") and hasattr(g, "grippers_effort")
+
+  low = p.GetArmLowSpdInfoMsgs()
+  for i in range(1, 7):
+    assert hasattr(getattr(low, f"motor_{i}").foc_status,
+                   "driver_enable_status")
+
+  # The units the conversions assume, from the SDK's own docstrings rather
+  # than from memory: joints 0.001 deg, gripper stroke 0.001 mm.
+  from piper_sdk.piper_msgs.msg_v2.feedback.arm_feedback_joint_states import (
+    ArmMsgFeedBackJointStates)
+  from piper_sdk.piper_msgs.msg_v2.transmit.arm_gripper_ctrl import (
+    ArmMsgGripperCtrl)
+
+  from hardware.deploy import robot
+
+  # The SDK carries each unit twice, once in Chinese and once in English, and
+  # only the first is the class's ``__doc__``.  Either spelling will do; what
+  # is being guarded is that the unit did not change under the conversions.
+  jdoc = ArmMsgFeedBackJointStates.__doc__ or ""
+  assert "0.001度" in jdoc or "0.001 degrees" in jdoc, (
+    "the SDK no longer says joint feedback is in 0.001 degrees, and "
+    "PiperArm.RAD_TO_MDEG assumes it is")
+  gdoc = ArmMsgGripperCtrl.__doc__ or ""
+  assert "0.001mm" in gdoc or "0.001 mm" in gdoc, (
+    "the SDK no longer says gripper stroke is in 0.001 mm, and "
+    "PiperArm.M_TO_UM assumes it is")
+  assert "0-5000" in gdoc, (
+    "the gripper torque range moved; PiperArm.command clamps to 0-5000")
+  assert abs(robot.PiperArm.RAD_TO_MDEG - 180.0 / np.pi * 1000.0) < 1e-9
+  assert robot.PiperArm.M_TO_UM == 1e6

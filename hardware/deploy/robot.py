@@ -43,6 +43,36 @@ from .proprio import JointFeedback
 ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 GRIPPER_JOINT = "gripper_joint1"
 
+GRIPPER_TORQUE_NM = 1.5
+"""What to ask the PiPER's gripper for, in its own units.
+
+Deliberately not derived from ``sim_robot.GRIPPER_FORCE_N``.  That constant is
+10 N -- a *force*, the URDF's effort limit on a prismatic finger joint -- and
+the CAN message wants a *torque*, in 0.001 N.m over a documented range of
+0-5000.  The two are not convertible without the gripper's internal lever arm,
+which is not published, so the previous code's ``int(force_n * 1000)`` was not
+a wrong conversion so much as no conversion: it produced 10000, which is twice
+the maximum the SDK accepts, and ``ArmMsgGripperCtrl`` raises ``ValueError`` on
+construction.  Every gripper command would have thrown.
+
+1.5 N.m is 30% of the drive's range and a starting point, not a measurement.
+The number that would justify itself is a force-vs-command curve measured on
+the rig, which ``piper_push.robot`` already asks for in its own note about
+``GRIPPER_STIFFNESS``; until that exists this is a rig parameter to turn up
+until objects stop slipping and no further.
+"""
+
+GRIPPER_TORQUE_MAX_NM = 5.0
+"""``arm_gripper_ctrl.py``: "Range 0-5000, corresponse 0-5N/m"."""
+
+GRIPPER_JAW_GAP_M = 2.0 * sim_robot.GRIPPER_OPEN_M
+"""The simulator's jaw gap, 100 mm, which ``piper_push.robot`` records as
+measured.  The PiPER's own maximum stroke is a *configured* value and the SDK's
+default is 70 -- see ``PiperArm.check_gripper_range``, because a 70 mm arm
+running a 100 mm policy saturates over the top 30% of the command range and
+reports a gripper opening the policy has never seen.
+"""
+
 
 class ActionMapper:
   """The policy's action to a joint target, exactly as in training.
@@ -197,7 +227,7 @@ class PiperArm:
   M_TO_UM = 1e6
 
   def __init__(self, can: str = config.CAN_INTERFACE,
-               gripper_force_n: float = sim_robot.GRIPPER_FORCE_N):
+               gripper_torque_nm: float = GRIPPER_TORQUE_NM):
     try:
       from piper_sdk import C_PiperInterface_V2
     except ImportError as e:                       # pragma: no cover
@@ -207,7 +237,8 @@ class PiperArm:
         "shows it before trying again."
       ) from e
     self._iface = C_PiperInterface_V2(can)
-    self.gripper_force_n = float(gripper_force_n)
+    self.gripper_torque_nm = float(
+      np.clip(gripper_torque_nm, 0.0, GRIPPER_TORQUE_MAX_NM))
     self.connected = False
     self._prev: tuple[float, np.ndarray, float] | None = None
 
@@ -268,18 +299,64 @@ class PiperArm:
         gripper_vel = (gripper - g_prev) / dt
     self._prev = (now, q.copy(), gripper)
 
-    effort = float(g.grippers_effort) / 1000.0 / max(self.gripper_force_n, 1e-6)
+    # Reported in 0.001 N.m, the same unit as the command, so the ratio is
+    # dimensionless and 1.0 means "the drive is doing what it was told".  The
+    # channel it feeds is ``pad_contact``, whose deployable content is one bit
+    # -- the drive is loaded -- so what matters is that the scale is stable and
+    # in the right kind of unit, not that it is a force.
+    effort = float(g.grippers_effort) / 1000.0 / max(self.gripper_torque_nm,
+                                                     1e-6)
     return ArmState(q=q, dq=dq, gripper=gripper, gripper_vel=gripper_vel,
                     gripper_effort=effort, stamp=now)
 
   def command(self, target: np.ndarray, dt: float = 1.0 / config.CONTROL_HZ) -> None:
+    """The last thing before the motors, so it clamps rather than trusts.
+
+    ``ActionMapper`` already clips to ``SAFE_TARGET_CLIP`` and slew-limits, and
+    this repeats the clip anyway.  ``ArmMsgJointCtrl`` has no range check of
+    its own -- unlike the gripper message, which does -- so a units error
+    upstream reaches the drives as a number they will try to achieve.  Six
+    comparisons is a cheap thing to put between that and the table.
+    """
     del dt
-    q = (np.asarray(target[:6], dtype=np.float64) * self.RAD_TO_MDEG).astype(int)
+    lo = np.array([sim_robot.SAFE_TARGET_CLIP[j][0] for j in ARM_JOINTS])
+    hi = np.array([sim_robot.SAFE_TARGET_CLIP[j][1] for j in ARM_JOINTS])
+    q = np.clip(np.asarray(target[:6], dtype=np.float64), lo, hi)
+    q = np.round(q * self.RAD_TO_MDEG).astype(int)
     self._iface.MotionCtrl_2(0x01, 0x01, 100, 0x00)
     self._iface.JointCtrl(*q.tolist())
-    opening = int(float(target[6]) * 2.0 * self.M_TO_UM)
-    self._iface.GripperCtrl(abs(opening), int(self.gripper_force_n * 1000),
-                            0x01, 0)
+    # The policy's gripper value is one finger; the CAN message is the jaw gap.
+    opening = float(np.clip(target[6] * 2.0, 0.0, GRIPPER_JAW_GAP_M))
+    effort = int(round(self.gripper_torque_nm * 1000.0))
+    self._iface.GripperCtrl(int(round(opening * self.M_TO_UM)),
+                            int(np.clip(effort, 0, 5000)), 0x01, 0)
+
+  def check_gripper_range(self, timeout_s: float = 1.0) -> tuple[float, bool]:
+    """The jaw gap this arm is configured for, against the one trained.
+
+    ``GripperTeachingPendantParamConfig``'s ``max_range_config`` defaults to 70
+    in the SDK and the simulator's measured gap is 100.  On a 70 mm arm the top
+    30% of the policy's gripper command does nothing and the opening it reads
+    back never exceeds 70 -- so the policy commands a gap it never observes,
+    which is not a failure any log would name.  Returns the configured gap in
+    metres and whether it matches.
+    """
+    # The feedback frame is not periodic -- it is answered on request, and the
+    # request is enquiry 0x04 ("query gripper/teaching pendant parameter
+    # index").  Reading the accessor without asking first returns the SDK's
+    # zero-initialised message, which is indistinguishable from an arm that
+    # says its jaw gap is zero.
+    self._iface.ArmParamEnquiryAndConfig(param_enquiry=0x04)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+      fb = self._iface.GetGripperTeachingPendantParamFeedback()
+      mm = float(getattr(fb, "max_range_config", 0.0) or 0.0)
+      if mm > 0.0:
+        return mm / 1000.0, abs(mm / 1000.0 - GRIPPER_JAW_GAP_M) < 1e-3
+      time.sleep(0.05)
+    # Firmware before V1.5-2 does not answer this enquiry at all, which is not
+    # the same as a wrong gap -- so it is reported as unknown, not as a fault.
+    return float("nan"), False
 
   def hold(self) -> None:
     """Stop moving but stay enabled.  What to do when the loop falls behind."""

@@ -173,6 +173,44 @@ Measured over the dataset's 2496 sessions and 35.2 arm-hours:
 confirming WM0's ×89. The counter-direction candidate is *safer* than nominal,
 which is why 1.5 is a control and not a second target.
 
+### 2.4 The anchors, measured rather than reconstructed
+
+Phase WM0 ran the known-parameter fine-tune for the latency axis only. For
+damping it recorded the zero-shot penalty as "-4.5% throughput, ×89 trips" and
+left the ceiling command in its report unrun, so recovery and the safety gate
+had nothing to be measured against except a percentage borrowed from a
+different axis. `scripts/wm1b_anchor.sh` measures both the same way every
+adapted run is measured -- 512 environments, 2400 steps, the same three
+evaluation seeds -- so the comparison is paired rather than assembled from two
+recipes:
+
+| anchor | obj/min | trips/arm-hour |
+|---|---|---|
+| `nominal` — deployed policy, source domain | 55.78 | 2.78 |
+| `zeroshot` — same weights, damping 0.75, no adaptation | **53.39** | **209.08** |
+
+A throughput fall of **4.3%** and a trip multiplier of **75×**, against WM0's
+4.5% and ×89 measured independently a phase earlier. The axis is what it was
+said to be.
+
+**And this is what makes WM1-B a different problem from WM1-A.** There, the
+zero-shot policy lost 24% of its throughput and adaptation's job was to win it
+back. Here it loses 4.3%, so there is very little throughput to recover and
+essentially the entire mismatch is the tail. The first completed run makes the
+consequence concrete — broad domain randomisation, one training seed:
+
+| | obj/min | trips/arm-hour |
+|---|---|---|
+| zero-shot in target | 53.39 | 209.08 |
+| broad DR adapted, in target | **50.20** | **92.82** |
+
+Adaptation on this axis **buys safety with throughput** rather than recovering
+throughput: trips more than halve and objects per minute fall by 6%. So `C4`
+in §7 is not "did it recover throughput" — there is none to recover — but "did
+it pay less than 5% more than the comparator it is being judged against". A
+method could otherwise pass the safety criteria by learning to move slowly, and
+a policy that never moves trips nothing.
+
 ---
 
 ## 3. The dataset

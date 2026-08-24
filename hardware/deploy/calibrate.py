@@ -151,6 +151,26 @@ class Board:
   def to_dict(self) -> dict:
     return dataclasses.asdict(self)
 
+  def n_corners(self) -> int:
+    nx, ny = self.squares
+    return (nx - 1) * (ny - 1) if self.kind == "charuco" else nx * ny
+
+  def suggested_poses(self) -> int:
+    """How many poses this board needs, from the measurement in the README.
+
+    Not a formula.  The table there was produced by projecting each pattern
+    through this camera with 0.2 px of corner noise and solving; what it shows
+    is that corner count dominates, and that a 16-corner board wants two to
+    three times the poses a 48-corner one does to reach the same 4 mm gate.
+    Rounded to the three cases that table actually covers, because
+    interpolating between six synthetic points would dress a lookup up as a
+    model.
+    """
+    n = self.n_corners()
+    if n < 8:
+      return 999            # a single marker; no pose count rescues it
+    return 30 if n < 24 else (16 if n < 48 else 12)
+
   def describe(self) -> str:
     n = f"{self.squares[0]}x{self.squares[1]}"
     if self.kind == "charuco":
@@ -610,7 +630,17 @@ def collect(args) -> int:
       if arm is not None:
         arm.close()
       return 1
-  print(f"board: {board.describe()}")
+  print(f"board: {board.describe()}, {board.n_corners()} corners")
+  want = board.suggested_poses()
+  if want > 100:
+    print("This target has four corners.  Measured, a single marker gives a "
+          "camera position\nwrong by ~100 mm and does not improve with more "
+          "poses -- see the table in\nREADME.md.  --solve will refuse it.  "
+          "Use a ChArUco board.")
+  else:
+    print(f"Plan on about {want} poses for this board (README.md has the "
+          f"measurement).\n{MIN_POSES} is only the minimum the solver will "
+          f"accept, not the number that makes it good.")
   print(f"{len(records)} pose(s) already recorded.  Move the arm so the board "
         "is fully visible, then press enter.  'q' to stop.")
   print("The arm is connected but NOT enabled -- move it by hand.")

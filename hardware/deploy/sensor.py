@@ -113,12 +113,31 @@ class Reader:
     f = self.latest()
     return float("inf") if f is None else time.time() - f.stamp
 
-  def wait_for_first(self, timeout: float = 10.0) -> Frame:
+  SETTLE_S = 1.5
+  """How long to keep taking frames after the first one arrives.
+
+  The D405's auto-exposure has not converged when the first frame lands, and
+  the frames before it does are dark enough to be useless without being
+  obviously broken.  What that cost, once: ``calibrate --preview`` reported
+  "board not found" on twelve consecutive frames with the board squarely in
+  view and perfectly detectable a second later, which sends you looking at the
+  dictionary, the square size and the mounting -- everything except the
+  exposure.  1.5 s is about 45 frames at 30 Hz; Intel's own guidance is to
+  discard the first 30.
+  """
+
+  def wait_for_first(self, timeout: float = 10.0,
+                     settle_s: float | None = None) -> Frame:
+    settle = self.SETTLE_S if settle_s is None else float(settle_s)
     deadline = time.time() + timeout
+    first = None
     while time.time() < deadline:
       f = self.latest()
       if f is not None:
-        return f
+        if first is None:
+          first = time.time()
+        if time.time() - first >= settle:
+          return f
       time.sleep(0.02)
     raise RuntimeError(
       f"no frame from the D405 within {timeout} s.  Check `rs-enumerate-devices` "

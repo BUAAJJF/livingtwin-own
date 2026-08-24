@@ -75,6 +75,16 @@ $M -m hardware.deploy.simrecord --frames 240 --out recordings/sim
 $M -m hardware.deploy.run --policy /tmp/vision_policy --replay recordings/sim \
     --allow-nominal --seconds 20
 
+# 3b. the arm's CAN link.  Needs root and the system's can-utils, so it is
+#     not something this pipeline can do for itself:
+#       sudo apt install can-utils
+#       sudo bash $(python -c "import piper_sdk,os;print(os.path.dirname(piper_sdk.__file__))")/can_activate.sh can0 1000000
+#       ip -details link show can0     # must say UP and bitrate 1000000
+#     Then confirm the arm is actually talking before trusting anything else:
+$M -m hardware.deploy.jointcheck --joint 1 --dry-run   # the script works
+$M -c "from hardware.deploy import robot; a=robot.PiperArm(); a.connect(); \
+       print(a.read()); print('jaw gap', a.check_gripper_range())"
+
 # 4. mount the camera near the nominal pose, then measure where it really is.
 #    The board goes ON THE GRIPPER -- see "Calibration" below for why, and for
 #    what to pass if it is not the sheet in hardware/depth_bench/targets.
@@ -382,9 +392,30 @@ that would then fight ultralytics.
 
 ## Known gaps
 
-* `robot.PiperArm` has never been executed. Units are the trap: the SDK takes
-  0.001 degrees and 0.001 mm, everything above it is radians and metres, and a
-  missed conversion is a factor of 57000. Check one joint at a time.
+* `robot.PiperArm` has still never driven an arm, but it is no longer
+  unverified. `piper_sdk` 0.6.2 is installed, and
+  `tests/test_deploy.py` now builds every CAN message the command path emits —
+  same classes, same arguments — and lets the SDK's own constructors validate
+  them. That found one real bug on its first run: the gripper effort was sent
+  as `int(GRIPPER_FORCE_N * 1000)` = 10000, for a field documented and
+  validated as 0–5000, so **every gripper command would have raised inside the
+  control loop**. The cause was a unit *kind* error, not a scale one — the
+  simulator's 10 N is a force on a prismatic finger joint and the CAN field is
+  a torque in 0.001 N·m, and the two are not convertible without a lever arm
+  the vendor does not publish. `GRIPPER_TORQUE_NM` is now its own deployment
+  constant at 1.5 N·m, which is a starting point and not a measurement.
+* `JointCtrl` has **no** range validation of its own, unlike the gripper
+  message. `PiperArm.command` therefore re-clips to `SAFE_TARGET_CLIP` at the
+  CAN boundary even though `ActionMapper` already did — it is the last six
+  comparisons before the drives, and a units error upstream is a number they
+  will try to achieve.
+* **The gripper's jaw gap has to be configured.** The simulator's is 100 mm
+  (`piper_push.robot.GRIPPER_OPEN_M`, measured); the SDK's
+  `GripperTeachingPendantParamConfig` defaults `max_range_config` to 70. On a
+  70 mm arm the top 30% of the policy's gripper command does nothing and the
+  opening it reads back never exceeds 70 — the policy commands a gap it never
+  observes, and no log names that. `PiperArm.check_gripper_range()` reads back
+  what the arm is set to.
 * `pad_contact` is reconstructed from the gripper drive's load, because the two
   contact sensors it reads in simulation do not exist. Both channels carry the
   same bit. The threshold (`ProprioBuilder.contact_effort`) is a guess until
