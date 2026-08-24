@@ -414,6 +414,41 @@ def test_calibration_motion_is_rest_to_rest_and_speed_limited():
   assert sess._motion_cancel.is_set()
 
 
+def test_same_arm_pose_with_a_moved_board_is_rejected_before_rough_solve():
+  import cv2
+
+  from hardware.deploy.calibgui import Session
+
+  q = [0.0] * 8
+  a = {"joint_pos": q, "rvec": [0.0, 0.0, 0.0],
+       "tvec": [0.0, 0.0, 0.7]}
+  R = cv2.Rodrigues(np.array([0.0, 0.2, 0.0]))[0]
+  b = {"joint_pos": q, "rvec": cv2.Rodrigues(R)[0].ravel().tolist(),
+       "tvec": [0.03, 0.0, 0.7]}
+  assert Session._conflicting_stationary_poses([a, b]) == [[0, 1]]
+
+  # Repeated observations that agree are merely redundant, not contradictory.
+  c = dict(a)
+  c["tvec"] = [0.001, 0.0, 0.7]
+  assert Session._conflicting_stationary_poses([a, c]) == []
+
+
+def test_rough_guidance_does_not_assume_the_simulators_camera_mounting_side():
+  import cv2
+
+  from hardware.deploy.calibgui import _plausible_camera_transform
+
+  # A camera across the real table and yawed 90 degrees is still a perfectly
+  # valid extrinsic.  The residual, not distance to a simulated mount, decides
+  # whether it can guide nearby relative moves.
+  T = np.eye(4)
+  T[:3, :3] = cv2.Rodrigues(np.array([0.0, 0.0, np.pi / 2]))[0]
+  T[:3, 3] = [-0.48, 0.73, 0.50]
+  assert _plausible_camera_transform(T)
+  T[:3, 3] = [0.0, 0.0, 3.0]
+  assert not _plausible_camera_transform(T)
+
+
 def test_next_pose_planner_keeps_the_board_in_the_d405_gray_image():
   from hardware.deploy import calibrate, config, proprio, rectify
   from hardware.deploy.calibgui import NextPosePlanner

@@ -18,7 +18,7 @@ nearly harmless.
 
 | # | asked | answer |
 |---|---|---|
-| 1 | restore the engineering baseline | done — 275 tests green before any experiment ran (§1) |
+| 1 | restore the engineering baseline | done — the suite was green before any experiment ran, and is at **293 tests** now (§1) |
 | 2 | correct WM1-A's wording | done — `oracle` is `known-parameter target-only adaptation` everywhere, in the gate's constants as well as the prose, and the safety gate is reported as failed (§1.3) |
 | 3 | extend WM1-A to ≥8 training seeds with a count model | 8 seeds on the known-parameter reference, negative binomial and cluster-robust Poisson, both clustered on the training seed (§1.4) |
 | 4 | target 0.75, nominal 1.0, counter 1.5 | verified against WM0's config path to bitwise-identical `kd` (§2.2) |

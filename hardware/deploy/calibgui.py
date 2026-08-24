@@ -125,6 +125,24 @@ def _ang(Ra: np.ndarray, Rb: np.ndarray) -> float:
   return calibrate._angle_between(Ra, Rb)
 
 
+def _plausible_camera_transform(T: np.ndarray) -> bool:
+  """Basic physical validity, without assuming the simulator's mounting side.
+
+  The real rig may legitimately put the camera across the table and rotated
+  90 degrees from the training scene.  A rough solve is guidance for relative
+  nearby moves, so consistency and a finite table-scale camera distance are
+  the relevant checks; proximity to ``sim_camera_extrinsic`` is not.
+  """
+  T = np.asarray(T, dtype=np.float64)
+  if T.shape != (4, 4) or not np.isfinite(T).all():
+    return False
+  R, p = T[:3, :3], T[:3, 3]
+  return bool(0.15 < np.linalg.norm(p) < 2.0
+              and -0.30 < p[2] < 2.0
+              and np.allclose(R @ R.T, np.eye(3), atol=1e-3)
+              and np.linalg.det(R) > 0.99)
+
+
 def _joint_trajectory(q0: np.ndarray, q1: np.ndarray,
                       speed_rad_s: float = AUTO_SPEED_RAD_S,
                       rate_hz: float = AUTO_RATE_HZ) -> np.ndarray:
@@ -349,6 +367,7 @@ class Session:
     self.note = ""
     self.guidance_T: np.ndarray | None = None
     self.guidance: dict | None = None
+    self.guidance_failure = ""
     self.next_target: dict | None = None
     self.motion: dict = {"status": "idle", "progress": 0.0}
     self._motion_thread: threading.Thread | None = None
@@ -485,6 +504,7 @@ class Session:
 
     live["still"], live["still_detail"] = self._still()
     live["novel"], live["novel_detail"] = self._novel(T_cb)
+    live["arm_novel"], live["arm_novel_detail"] = False, "no arm feedback"
 
     st = None
     if self.arm is not None:
@@ -494,6 +514,7 @@ class Session:
         "q_deg": [round(float(x), 2) for x in np.degrees(st.q)],
         "gripper_mm": round(st.gripper * 1000, 1),
       }
+      live["arm_novel"], live["arm_novel_detail"] = self._arm_novel(st)
       if T_cb is not None:
         live["on_gripper"] = self._on_gripper(st, T_cb)
 
@@ -544,24 +565,98 @@ class Session:
     return False, (f"too close to a recorded pose ({best_a:.0f} deg, "
                    f"{best_d:.0f} mm) -- turn the board, do not just move it")
 
+  def _arm_novel(self, st) -> tuple[bool, str]:
+    """Require the arm, not merely the detected board, to have moved.
+
+    Hand-eye assumes one rigid board-to-gripper transform.  If the operator
+    holds the board and changes its image pose while the arm stays still, the
+    old image-only novelty gate accepts mutually impossible measurements.
+    """
+    with self.lock:
+      records = list(self.records)
+    if not records:
+      return True, "first arm pose"
+    q = np.array([*st.q, st.gripper, -st.gripper], dtype=np.float64)
+    with self.kin_lock:
+      self.kin.update(q)
+      p = self.kin.data.site_xpos[self.kin.site_id].copy()
+      R = self.kin.data.site_xmat[self.kin.site_id].reshape(3, 3).copy()
+      nearest = None
+      for i, r in enumerate(records):
+        self.kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
+        rp = self.kin.data.site_xpos[self.kin.site_id].copy()
+        rR = self.kin.data.site_xmat[self.kin.site_id].reshape(3, 3).copy()
+        d = float(np.linalg.norm(p - rp)) * 1000.0
+        a = _ang(R, rR)
+        score = max(d / 15.0, a / 5.0)
+        if nearest is None or score < nearest[0]:
+          nearest = (score, i, d, a)
+    _, i, d, a = nearest
+    if d < 15.0 and a < 5.0:
+      return False, (f"arm matches pose #{i} ({d:.1f} mm, {a:.1f} deg); "
+                     "move the arm with the board rigidly clamped")
+    return True, f"arm moved ({d:.0f} mm, {a:.0f} deg from nearest #{i})"
+
+  @staticmethod
+  def _conflicting_stationary_poses(records: list[dict]) -> list[list[int]]:
+    """Groups where one arm pose reports incompatible board poses."""
+    bad: list[list[int]] = []
+    used: set[int] = set()
+    for i, a in enumerate(records):
+      if i in used:
+        continue
+      qa = np.asarray(a["joint_pos"][:6], dtype=np.float64)
+      Ta = calibrate._rt(a["rvec"], a["tvec"])
+      group = [i]
+      conflict = False
+      for j in range(i + 1, len(records)):
+        qb = np.asarray(records[j]["joint_pos"][:6], dtype=np.float64)
+        if np.max(np.abs(qa - qb)) > math.radians(0.5):
+          continue
+        group.append(j)
+        Tb = calibrate._rt(records[j]["rvec"], records[j]["tvec"])
+        if (np.linalg.norm(Ta[:3, 3] - Tb[:3, 3]) > 0.005
+            or _ang(Ta[:3, :3], Tb[:3, :3]) > 2.0):
+          conflict = True
+      if conflict:
+        bad.append(group)
+        used.update(group)
+    return bad
+
   def _update_guidance_from_records(self) -> None:
     """Promote the current manual seed poses to a navigation-only extrinsic."""
     with self.lock:
       records = list(self.records)
     if len(records) < GUIDANCE_MIN_POSES:
+      self.guidance_failure = (
+        f"need {GUIDANCE_MIN_POSES - len(records)} more distinct arm pose(s)")
+      return
+    conflicts = self._conflicting_stationary_poses(records)
+    if conflicts:
+      labels = ", ".join("/".join(f"#{i}" for i in g) for g in conflicts)
+      self.guidance_failure = (
+        f"same arm pose has different board detections at {labels}; "
+        "drop those records and keep the board rigidly clamped")
       return
     try:
       out = calibrate.solve(
         records, board=self.board,
         min_rotation_span_deg=GUIDANCE_MIN_ROT_SPAN_DEG)
-    except (RuntimeError, np.linalg.LinAlgError, ValueError):
+    except (RuntimeError, np.linalg.LinAlgError, ValueError) as e:
+      self.guidance_failure = f"rough solve failed: {e}"
       return
     T = out.get("T_base_cam")
     if T is None or not np.isfinite(T).all():
+      self.guidance_failure = (
+        f"arm rotation spread {out.get('rot_span_deg', 0.0):.1f} deg; "
+        f"need {GUIDANCE_MIN_ROT_SPAN_DEG:.0f} deg")
       return
     # A rough solution is allowed to be visibly worse than the final 4 mm
     # calibration, but not so incoherent that it cannot guide a small move.
     if not np.isfinite(out["residual_mm"]) or out["residual_mm"] > 35.0:
+      self.guidance_failure = (
+        f"rough residual {out['residual_mm']:.1f} mm exceeds 35 mm; "
+        "drop inconsistent poses")
       return
     guidance_T = np.asarray(T, dtype=np.float64)
     guidance = {
@@ -572,9 +667,10 @@ class Session:
       "residual_mm": round(float(out["residual_mm"]), 2),
       "rotation_span_deg": round(float(out["rot_span_deg"]), 1),
     }
-    nominal = config.sim_camera_extrinsic()
-    if (np.linalg.norm(guidance_T[:3, 3] - nominal[:3, 3]) > 0.40
-        or _ang(guidance_T[:3, :3], nominal[:3, :3]) > 35.0):
+    if not _plausible_camera_transform(guidance_T):
+      self.guidance_failure = (
+        "rough camera transform is not a finite table-scale rigid pose; "
+        "collect more varied rigid arm poses")
       return
     with self.lock:
       # Do not install a result computed across a pose that was dropped while
@@ -582,6 +678,7 @@ class Session:
       if len(self.records) == len(records):
         self.guidance_T = guidance_T
         self.guidance = guidance
+        self.guidance_failure = ""
 
   def _maybe_plan(self, T_cb: np.ndarray | None, st) -> None:
     if T_cb is None or st is None:
@@ -726,6 +823,7 @@ class Session:
                 for i, r in enumerate(records)],
       "solution": self.solution,
       "guidance": self.guidance,
+      "guidance_failure": self.guidance_failure,
       "next_target": target,
       "motion": motion,
       "image_source": "D405 gray",
@@ -755,6 +853,9 @@ class Session:
       return {"ok": False, "why": live.get("still_detail", "moving")}
     if not live.get("novel"):
       return {"ok": False, "why": live.get("novel_detail", "not a new pose")}
+    if not live.get("arm_novel"):
+      return {"ok": False, "why": live.get(
+        "arm_novel_detail", "arm pose has not changed")}
     if st is None:
       return {"ok": False, "why": "no arm; poses cannot be recorded"}
     rec = {
@@ -821,8 +922,7 @@ class Session:
       "T_base_cam": T.tolist(),
     }
     guide_ok = (out["residual_mm"] <= 35.0
-                and np.linalg.norm(T[:3, 3] - nominal[:3, 3]) <= 0.40
-                and _ang(T[:3, :3], nominal[:3, :3]) <= 35.0)
+                and _plausible_camera_transform(T))
     with self.lock:
       self._invalidate_target()
       if guide_ok:
@@ -835,6 +935,7 @@ class Session:
           "residual_mm": self.solution["residual_mm"],
           "rotation_span_deg": self.solution["rot_span_deg"],
         }
+        self.guidance_failure = ""
       elif self.guidance and self.guidance.get("session"):
         self.guidance_T = None
         self.guidance = None

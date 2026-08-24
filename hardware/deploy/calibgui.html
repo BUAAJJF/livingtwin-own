@@ -161,6 +161,9 @@ function preflight(s) {
       : "q = " + (L.arm ? L.arm.q_deg.map(x => x.toFixed(0)).join(", ") + "°"
                         : "…")));
 
+  out.push(row(!!L.arm_novel, false, "arm pose changed",
+    L.arm_novel_detail || "move the arm; moving the board alone is invalid"));
+
   out.push(row(!!L.detected, false, "board detected",
     L.detected ? `${L.n_corners} corners · ${L.reproj_px} px · ${L.range_mm} mm · ${s.image_source}`
                : `not found in ${s.image_source}, or the board description is wrong`));
@@ -212,20 +215,22 @@ function render(s) {
 
   const L = s.live || {}, sol = s.solution;
   const moving = s.motion && s.motion.status === "moving";
-  const can = !!(L.detected && L.still && L.novel && s.has_arm && !moving);
+  const can = !!(L.detected && L.still && L.novel && L.arm_novel &&
+                s.has_arm && !moving);
   $("rec").disabled = !can;
   $("why").textContent = can ? ""
     : (moving ? "arm is moving"
        : !s.has_arm ? "no arm connected"
        : !L.detected ? "board not detected"
-       : !L.still ? L.still_detail : L.novel_detail);
+       : !L.still ? L.still_detail
+       : !L.arm_novel ? L.arm_novel_detail : L.novel_detail);
 
   const g = s.guidance, t = s.next_target, m = s.motion || {status:"idle"};
   let targetHtml = "";
   if (!g) {
     targetHtml = row(false, true, "rough extrinsic needed",
-      `record at least ${s.guidance_min_poses} manual poses spanning ` +
-      `${s.guidance_min_rotation_span_deg}°; final solve still uses ${s.min_rotation_span_deg}°`);
+      s.guidance_failure || (`record at least ${s.guidance_min_poses} manual poses spanning ` +
+      `${s.guidance_min_rotation_span_deg}°; final solve still uses ${s.min_rotation_span_deg}°`));
   } else {
     targetHtml += row(true, !!g.rough, g.rough ? "rough guidance ready" : "calibrated guidance ready",
       `${g.source}` + (g.residual_mm != null ? ` · ${g.residual_mm} mm rms` : ""));
