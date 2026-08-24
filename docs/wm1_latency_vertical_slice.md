@@ -702,6 +702,46 @@ reproducible across seeds; safety recovery is not. Reporting 5.24 against a
 6.00 threshold and calling it a pass would be exactly the mistake section 8.2
 was written about.
 
+#### 6.4.1 What eight training seeds did to this table
+
+Phase WM1-B extended the most important configurations from three training
+seeds to eight and re-analysed the counts with the **training seed as the
+cluster** - repeats summed inside a seed, then a negative binomial whose
+`alpha` is the seed-to-seed heterogeneity, with a cluster-robust Poisson
+sandwich beside every ratio (`piper_push.count`, `scripts/wm1_seeds.py`).
+
+The dispersion above was estimated over *process repeats*, which agree closely,
+and then used to speak about *training seeds*, which do not. That is the wrong
+denominator, and correcting it moves the point estimates as well as the
+intervals:
+
+| configuration | seeds | trips/arm-h | NB 95% CI | recovery |
+|---|---|---|---|---|
+| known-parameter target-only | 3 -> **8** | 4.56 -> **8.54** | [5.83, 12.50] | 0.55 -> **0.32** |
+| decision-aware, alpha = 0.75 | 3 -> **5** | 5.24 -> **6.21** | [4.51, 8.53] | 0.56 -> **0.42** |
+| broad posterior (B1b), alpha = 0.75 | 3 | 4.43 | [3.93, 4.99] | 0.55 |
+
+Three conclusions, none of which soften the verdict:
+
+1. **The original three seeds were an optimistic draw on safety**, and
+   consistently so rather than in one configuration. The decision-aware run's
+   trip rate rose from 5.24 to 6.21 and its recovery fell from 0.56 to 0.42.
+2. **G3 still fails, and now unambiguously.** The quasi-Poisson upper bound was
+   6.83 against a 5.99 ceiling - a narrow miss. The seed-clustered interval is
+   [4.51, **8.53**].
+3. **The gate's own anchor moved.** G3's ceiling is derived from
+   `TRIPS_KNOWN_PARAM = 4.83`, measured on three seeds; at eight the same
+   configuration trips at **7.22**/arm-hour, which would put the threshold at
+   **7.59** rather than 6.00 and turn this failure into a pass. **The threshold
+   has not been recomputed.** Moving a gate to clear it is repairing a result by
+   redefining the measurement; the constant in `scripts/wm1_gate.py` carries the
+   arithmetic so the size of the effect is visible without the gate having
+   moved.
+
+The one configuration whose safety *is* reproducible across seeds remains
+`B1b` - a badly identified, broad posterior, which is to say domain
+randomisation.
+
 ### 6.5 Does decision-awareness earn its place? (G5)
 
 The phase specification named four places it could, and G5 is decided on those
