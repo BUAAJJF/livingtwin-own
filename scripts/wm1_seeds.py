@@ -128,6 +128,8 @@ def main() -> int:
   p.add_argument("--out", default="results/wm1_latency/adapt/seed_counts.json")
   p.add_argument("--gate-trips", type=float, default=5.99,
                  help="G3's ceiling on the target-domain trip rate")
+  p.add_argument("--analysis", default="results/wm1_latency/analysis.json",
+                 help="source of the `nominal` and `zeroshot` anchors")
   p.add_argument("--min-seeds", type=int, default=8,
                  help="the specification's floor; configurations below it are "
                       "printed with their count and excluded from the "
@@ -172,6 +174,50 @@ def main() -> int:
       "throughput_over_seeds": thr,
       "quasi_poisson_would_have_said": _quasi(by_seed),
     }
+
+  # -- throughput and retention, also over seeds -----------------------------
+  anchors = {}
+  try:
+    an = json.loads(Path(a.analysis).read_text())
+    for k, g in an.get("groups", {}).items():
+      leaf = k.split("/")[-1]
+      if leaf in ("nominal", "zeroshot"):
+        anchors[leaf] = {
+          "throughput": g["throughput"]["bootstrap"]["mean"],
+          "trips": g["trips"]["rate"]}
+  except (OSError, json.JSONDecodeError, KeyError):
+    pass
+  report["anchors"] = anchors
+
+  print()
+  if anchors.get("nominal") and anchors.get("zeroshot"):
+    n, z = anchors["nominal"]["throughput"], anchors["zeroshot"]["throughput"]
+    print(f"  Throughput over seeds.  Recovery is (adapted - {z:.2f}) / "
+          f"({n:.2f} - {z:.2f}); retention\n  loss is against the "
+          f"{n:.2f} obj/min source nominal.  Both intervals are over training\n"
+          f"  seeds, so a configuration with many repeats of few seeds cannot "
+          f"look better\n  resolved than one with many seeds.")
+  else:
+    print("  Throughput over seeds (no anchors found; recovery not computed)")
+  print()
+  print(f"  {'configuration':44s} {'dom':9s} {'seeds':>5s} {'obj/min':>8s} "
+        f"{'95% CI over seeds':>20s} {'recovery':>9s} {'loss':>7s}")
+  for (key, alpha, domain), r in sorted(rows.items()):
+    t = r["throughput"]
+    rec = loss = float("nan")
+    if anchors.get("nominal") and anchors.get("zeroshot"):
+      n, z = anchors["nominal"]["throughput"], anchors["zeroshot"]["throughput"]
+      if domain == "target" and abs(n - z) > 1e-9:
+        rec = (t["mean"] - z) / (n - z)
+      if domain == "retention":
+        loss = (n - t["mean"]) / n
+    ci = (f"[{t['ci'][0]:.2f}, {t['ci'][1]:.2f}]"
+          if t["ci"][0] == t["ci"][0] else "(one seed)")
+    print(f"  {(r['name'] + f' a={alpha:.2f}')[:44]:44s} {domain:9s} "
+          f"{t['n']:5d} {t['mean']:8.2f} {ci:>20s} "
+          f"{rec:9.2f} {100 * loss:6.1f}%")
+    report["configurations"][f"{key}|a{alpha}|{domain}"].update(
+      {"recovery": rec, "retention_loss": loss})
 
   # -- the gate, re-decided on the seed-level interval -----------------------
   print()
