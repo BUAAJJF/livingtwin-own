@@ -307,6 +307,82 @@ def test_hand_eye_recovers_a_known_camera_pose():
   assert out["residual_mm"] < 0.5
 
 
+def test_stable_board_frames_are_fused_before_pnp():
+  import cv2
+
+  from hardware.deploy import calibrate, rectify
+
+  rng = np.random.default_rng(17)
+  board = calibrate.Board(squares=(6, 5), square_m=0.028,
+                          marker_m=0.022, dictionary="DICT_4X4_50")
+  obj = board._charuco().getChessboardCorners().astype(np.float64)
+  K = rectify._default_d405_K()
+  rvec = np.array([0.16, -0.09, 0.03])
+  tvec = np.array([0.01, -0.02, 0.46])
+  exact, _ = cv2.projectPoints(obj, rvec, tvec, K, np.zeros(5))
+  exact = exact.reshape(-1, 2)
+  detections = []
+  for i in range(12):
+    uv = exact + rng.normal(0.0, 0.28, exact.shape)
+    if i == 2:
+      uv[3] += [5.0, -4.0]       # one bad sub-pixel refinement
+    detections.append({"object_points": obj, "image_points": uv})
+  fused = calibrate.fuse_detections(
+    detections, K, np.zeros(5), board, min_frames=8)
+  assert fused is not None
+  assert fused["fusion_frames"] == 12
+  assert fused["n_corners"] == board.n_corners()
+  assert np.linalg.norm(np.asarray(fused["tvec"]).ravel() - tvec) < 0.002
+  assert fused["reproj_rms_px"] < 0.2
+
+
+def test_joint_corner_refinement_improves_pose_level_hand_eye():
+  import cv2
+
+  from hardware.deploy import calibrate, config, proprio, rectify
+
+  rng = np.random.default_rng(8)
+  kin = proprio.Kinematics()
+  default = np.asarray(
+    __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+    ["default_joint_pos"], dtype=np.float64)
+  board = calibrate.Board(squares=(6, 5), square_m=0.028,
+                          marker_m=0.022, dictionary="DICT_4X4_50")
+  obj = board._charuco().getChessboardCorners().astype(np.float64)
+  K = rectify._default_d405_K()
+  T_base_cam = config.sim_camera_extrinsic()
+  T_cam_base = np.linalg.inv(T_base_cam)
+  T_grip_board = np.eye(4)
+  T_grip_board[:3, :3] = cv2.Rodrigues(
+    np.array([0.3, -0.2, 0.15]))[0]
+  T_grip_board[:3, 3] = [0.02, -0.01, 0.06]
+  records = []
+  for _ in range(12):
+    q = default.copy()
+    q[:6] += rng.uniform(-0.55, 0.55, 6)
+    kin.update(q)
+    T_bg = np.eye(4)
+    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
+    T_cb = T_cam_base @ T_bg @ T_grip_board
+    uv, _ = cv2.projectPoints(obj, cv2.Rodrigues(T_cb[:3, :3])[0],
+                              T_cb[:3, 3], K, np.zeros(5))
+    uv = uv.reshape(-1, 2) + rng.normal(0.0, 0.25, (len(obj), 2))
+    ok, rvec, tvec = cv2.solvePnP(obj, uv, K, np.zeros(5))
+    assert ok
+    records.append({
+      "joint_pos": q.tolist(), "rvec": rvec.ravel().tolist(),
+      "tvec": tvec.ravel().tolist(), "object_points": obj.tolist(),
+      "image_points": uv.tolist(), "camera_K": K.tolist(),
+      "camera_dist": [0.0] * 5,
+    })
+  out = calibrate.solve(records, board=board, K=K, dist=np.zeros(5))
+  assert out["joint_refined"]
+  assert out["reprojection_rms_px"] < out["reprojection_before_px"] * 0.5
+  assert np.linalg.norm(out["T_base_cam"][:3, 3]
+                        - T_base_cam[:3, 3]) < 0.003
+
+
 def test_hand_eye_refuses_poses_that_do_not_rotate():
   """Hand-eye is determined by rotation.  Translation alone leaves it free, and
   the solver returns something anyway -- which is the failure this guard is
@@ -473,7 +549,32 @@ def test_next_pose_planner_keeps_the_board_in_the_d405_gray_image():
   uv = np.asarray(target["polygon_px"])
   assert (uv[:, 0] > 0).all() and (uv[:, 0] < config.D405_WIDTH).all()
   assert (uv[:, 1] > 0).all() and (uv[:, 1] < config.D405_HEIGHT).all()
-  assert target["motion_deg"] <= math.degrees(0.42) + 0.1
+  # Merely intersecting the image is not enough: the old planner produced a
+  # 180x10 px edge-on sliver which was geometrically in frame but impossible
+  # for ChArUco to detect.  Keep enough projected area and two-dimensional
+  # shape for the actual D405 gray detector.
+  assert target["projected_area_px2"] >= 2500
+  assert target["projected_shape"] >= 0.12
+  assert target["facing_cos"] >= 0.28
+  assert target["motion_deg"] <= 12.1
+
+
+def test_board_recovery_refuses_a_stale_distant_pose():
+  import threading
+  from types import SimpleNamespace
+
+  from hardware.deploy.calibgui import Session
+
+  sess = Session.__new__(Session)
+  sess.lock = threading.Lock()
+  sess.arm = object()
+  sess.motion = {"status": "idle", "progress": 0.0}
+  sess.recovery_q = np.zeros(6)
+  sess._last = (None, SimpleNamespace(
+    q=np.array([math.radians(31.0), 0, 0, 0, 0, 0]), gripper=0.0))
+  out = sess.return_visible()
+  assert not out["ok"]
+  assert "refusing automatic recovery" in out["why"]
 
 
 def test_a_bought_board_is_described_and_detected():
@@ -505,6 +606,37 @@ def test_a_bought_board_is_described_and_detected():
   # exists to make impossible to hit silently.
   assert calibrate.detect_board(img, K, np.zeros(5)) is None or \
     calibrate.detect_board(img, K, np.zeros(5))["n_corners"] < 6
+
+
+def test_compact_v2_print_asset_matches_its_board_description():
+  import cv2
+
+  from hardware.deploy import calibrate
+
+  target = pathlib.Path(
+    "hardware/depth_bench/targets/calib_compact_v2")
+  board = calibrate.Board.load(target.with_suffix(".json"))
+  image = cv2.imread(str(target.with_suffix(".png")), cv2.IMREAD_GRAYSCALE)
+  found = board.detect(image)
+  assert board.squares == (6, 5)
+  assert board.dictionary == "DICT_4X4_50"
+  assert board.square_m == pytest.approx(0.028)
+  assert board.marker_m == pytest.approx(0.022)
+  assert found is not None and len(found[0]) == 20
+
+  # The inkjet edition is deliberately a different board identity.  Its
+  # detector enables white/inverted markers and must recover all the same
+  # geometric corners from the separately named print asset.
+  white = pathlib.Path(
+    "hardware/depth_bench/targets/calib_compact_white_v2")
+  white_board = calibrate.Board.load(white.with_suffix(".json"))
+  white_image = cv2.imread(str(white.with_suffix(".png")),
+                           cv2.IMREAD_GRAYSCALE)
+  white_found = white_board.detect(white_image)
+  assert white_board.inverted
+  assert white_board != board
+  assert white_found is not None and len(white_found[0]) == 20
+  assert np.mean(white_image < 128) < 0.25
 
 
 def test_the_square_size_is_stored_with_the_poses():
@@ -690,6 +822,28 @@ class _RecordingIface:
     def f(*a, **kw):
       self.calls.append((name, a, kw))
     return f
+
+
+def test_closing_the_can_client_holds_and_never_disables_by_default():
+  from hardware.deploy import robot
+
+  arm = robot.PiperArm.__new__(robot.PiperArm)
+  arm._iface = _RecordingIface()
+  arm.connected = True
+  held = []
+  arm.hold = lambda: held.append(True)
+  arm.close()
+  names = [name for name, _, _ in arm._iface.calls]
+  assert held == [True]
+  assert "DisconnectPort" in names
+  assert "DisableArm" not in names
+  assert not arm.connected
+
+  # Power removal exists, but cannot happen through an ordinary context exit.
+  arm.connected = True
+  arm.close(disable=True)
+  names = [name for name, _, _ in arm._iface.calls]
+  assert "DisableArm" in names
 
 
 def test_every_can_message_passes_the_sdk_s_own_validator():

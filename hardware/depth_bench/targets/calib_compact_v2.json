@@ -1,0 +1,20 @@
+{
+  "kind": "charuco",
+  "dictionary": "DICT_4X4_50",
+  "squares_x": 6,
+  "squares_y": 5,
+  "square_m": 0.028,
+  "marker_m": 0.022,
+  "min_corners": 8,
+  "page_mm": [
+    180.0,
+    152.0
+  ],
+  "pattern_mm": [
+    168.0,
+    140.0
+  ],
+  "margin_mm": 6.0,
+  "px_per_mm": 20,
+  "print": "100% / actual size; matte; keep the 6 mm white border"
+}

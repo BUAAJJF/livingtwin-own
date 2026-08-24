@@ -204,19 +204,19 @@ class DryRunArm:
   def hold(self) -> None:
     pass
 
-  def close(self) -> None:
+  def close(self, disable: bool = False) -> None:
+    del disable
     self.connected = False
 
 
 class PiperArm:
   """The AgileX PiPER over CAN.
 
-  UNVERIFIED AGAINST HARDWARE.  There is no arm on the machine this was written
-  on and no CAN interface in ``ip link``, so every line below is from the SDK's
-  documented interface and none of it has been executed.  Treat the first run
-  as a bring-up: ``python -m hardware.deploy.jointcheck --joint 1`` moves one
-  joint five degrees and prints what came back, which is the smallest motion
-  that can tell a working conversion from a broken one.
+  The message conversions were originally written from the SDK documentation;
+  the calibration GUI is now running against the real arm.  That bring-up
+  exposed one safety-critical lifecycle fact: ``DisableArm`` removes holding
+  torque and must never be an ordinary software-close operation.  ``close``
+  therefore holds and disconnects unless deliberate disable is requested.
 
   Units are the trap.  The SDK takes joint angles in units of 0.001 degrees and
   the gripper in 0.001 mm, while everything above this line is radians and
@@ -363,11 +363,34 @@ class PiperArm:
     st = self.read()
     self.command(np.concatenate([st.q, [st.gripper]]))
 
-  def close(self) -> None:
+  def close(self, disable: bool = False) -> None:
+    """Release CAN without dropping gravity support.
+
+    ``DisableArm(7)`` makes every joint lose holding torque immediately.  The
+    old unconditional call here was observed on the real rig as the arm
+    falling whenever calibgui exited or restarted.  Closing a software client
+    is not authorization to remove actuator power: by default command the
+    measured pose once, then disconnect the SDK while the drives remain
+    enabled.  Deliberate power-down must be explicit with ``disable=True`` and
+    should only be used while the arm is physically supported or parked.
+    """
+    if not self.connected:
+      return
     try:
-      self._iface.DisableArm(7)
+      if disable:
+        self._iface.DisableArm(7)
+      else:
+        try:
+          self.hold()
+        except Exception:
+          # A failed final read/hold must still never fall through to disable.
+          # The drive retains its last position target.
+          pass
     finally:
-      self.connected = False
+      try:
+        self._iface.DisconnectPort()
+      finally:
+        self.connected = False
 
 
 def feedback(state: ArmState, target: np.ndarray) -> JointFeedback:

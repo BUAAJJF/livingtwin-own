@@ -8,18 +8,54 @@ only configuration in this phase that fails the retention criterion. Calling it
 an oracle implies a ceiling that it is not, and the recovery fractions below
 would then read as impossible.
 
-**Verdict: YELLOW — five of six criteria. The safety criterion (G3) does not
-pass.** The loop closes on throughput and on retention. On safety it does not:
-the trip rate's point estimate clears the threshold and its interval does not,
-and nothing in this report should be read as the safety half having been
-recovered.
+> ## ⚠ Verdict revised to RED after the seed extension
+>
+> Everything below §5 was measured on **three** training seeds. Phase WM1-B
+> re-ran the three most important configurations on **eight**, clustering the
+> counts on the training seed rather than on the process repeat, and the
+> adaptation half of this report does not survive it. See **§6.4.1** for the
+> full table.
+>
+> | | 3 seeds | 8 seeds |
+> |---|---|---|
+> | decision-aware, target throughput | 49.89 | **46.59** |
+> | decision-aware, recovery | 1.02 | **0.58** |
+> | decision-aware, trips/arm-h | 5.24 | **6.77** [5.42, 8.45] |
+> | decision-aware, retention loss | 2.8% | **6.5%** |
+>
+> * **G3 fails for every configuration**, none close: the best upper bound is
+>   8.45 against a 5.99 ceiling.
+> * **G4 now fails too** — all three exceed the 5% retention budget (6.5%,
+>   7.0%, 11.0%).
+> * **The orderings this report drew are inside seed noise.** At eight seeds no
+>   pair of the three differs significantly on target-domain trips (largest
+>   ratio 1.31, p = 0.24). Both "unexpected results" below are withdrawn: the
+>   mixture does *not* reliably beat known-parameter adaptation, and B1b's broad
+>   posterior is *not* reliably the safest.
+>
+> **What survives is §5.** Identification was never a seed-dependent quantity:
+> the latent identifies the delay at ceiling from one second of arm time, and
+> every control sits at chance. The claim that the domain is identifiable from
+> reward-free deployable data stands. The claim that acting on that
+> identification recovers the deployment loss does not.
+>
+> The original text is left below unedited, with §6.4.1 inserted where the
+> correction belongs. A report whose conclusions were overturned is more useful
+> intact than quietly rewritten.
 
-Two results the phase did not expect. Mixing a quarter of the source prior back
-in beats known-parameter target-only adaptation in *both* domains. And a
-three-millisecond ridge regression whose posterior puts 0.235 of its mass on
-the truth recovers as much of the gap as a world model whose posterior puts
-1.000 there — and is safer — so **the world model's identification advantage
-did not become an adaptation advantage over a broad posterior**.
+**Verdict as originally written: YELLOW — five of six criteria.** The safety
+criterion (G3) does not pass. The loop closes on throughput and on retention.
+On safety it does not: the trip rate's point estimate clears the threshold and
+its interval does not, and nothing in this report should be read as the safety
+half having been recovered.
+
+Two results the phase did not expect — **both since withdrawn, see the box
+above**. Mixing a quarter of the source prior back in beats known-parameter
+target-only adaptation in *both* domains. And a three-millisecond ridge
+regression whose posterior puts 0.235 of its mass on the truth recovers as much
+of the gap as a world model whose posterior puts 1.000 there — and is safer —
+so **the world model's identification advantage did not become an adaptation
+advantage over a broad posterior**.
 
 ## 0. What this phase asked
 
@@ -704,43 +740,83 @@ was written about.
 
 #### 6.4.1 What eight training seeds did to this table
 
-Phase WM1-B extended the most important configurations from three training
-seeds to eight and re-analysed the counts with the **training seed as the
-cluster** - repeats summed inside a seed, then a negative binomial whose
+Phase WM1-B extended the three most important configurations from three
+training seeds to eight and re-analysed the counts with the **training seed as
+the cluster** — repeats summed inside a seed, then a negative binomial whose
 `alpha` is the seed-to-seed heterogeneity, with a cluster-robust Poisson
 sandwich beside every ratio (`piper_push.count`, `scripts/wm1_seeds.py`).
 
-The dispersion above was estimated over *process repeats*, which agree closely,
-and then used to speak about *training seeds*, which do not. That is the wrong
-denominator, and correcting it moves the point estimates as well as the
-intervals:
+The dispersion in the table above was estimated over *process repeats*, which
+agree closely, and then used to speak about *training seeds*, which do not.
+That is the wrong denominator. Correcting it does not merely widen the
+intervals — it moves every headline number in this section, and it removes
+every ordering the section claimed.
 
-| configuration | seeds | trips/arm-h | NB 95% CI | recovery |
+**Target domain, eight seeds, 24 evaluations each:**
+
+| configuration | trips/arm-h (3 seeds → 8) | NB 95% CI at 8 | obj/min | recovery |
 |---|---|---|---|---|
-| known-parameter target-only | 3 -> **8** | 4.56 -> **8.54** | [5.83, 12.50] | 0.55 -> **0.32** |
-| decision-aware, alpha = 0.75 | 3 -> **5** | 5.24 -> **6.21** | [4.51, 8.53] | 0.56 -> **0.42** |
-| broad posterior (B1b), alpha = 0.75 | 3 | 4.43 | [3.93, 4.99] | 0.55 |
+| known-parameter target-only | 4.56 → **8.87** | [6.07, 12.95] | 46.53 | 0.58 |
+| decision-aware, α = 0.75 | 5.24 → **6.77** | [5.42, 8.45] | 46.59 | 0.58 |
+| broad posterior B1b, α = 0.75 | 4.43 → **7.55** | [5.65, 10.10] | 46.15 | 0.53 |
 
-Three conclusions, none of which soften the verdict:
+**Source domain (retention), against 55.86 obj/min:**
 
-1. **The original three seeds were an optimistic draw on safety**, and
-   consistently so rather than in one configuration. The decision-aware run's
-   trip rate rose from 5.24 to 6.21 and its recovery fell from 0.56 to 0.42.
-2. **G3 still fails, and now unambiguously.** The quasi-Poisson upper bound was
-   6.83 against a 5.99 ceiling - a narrow miss. The seed-clustered interval is
-   [4.51, **8.53**].
-3. **The gate's own anchor moved.** G3's ceiling is derived from
-   `TRIPS_KNOWN_PARAM = 4.83`, measured on three seeds; at eight the same
-   configuration trips at **7.22**/arm-hour, which would put the threshold at
-   **7.59** rather than 6.00 and turn this failure into a pass. **The threshold
-   has not been recomputed.** Moving a gate to clear it is repairing a result by
-   redefining the measurement; the constant in `scripts/wm1_gate.py` carries the
-   arithmetic so the size of the effect is visible without the gate having
-   moved.
+| configuration | obj/min | retention loss | trips/arm-h |
+|---|---|---|---|
+| known-parameter target-only | 49.71 | **11.0%** | 9.59 |
+| decision-aware, α = 0.75 | 52.23 | **6.5%** | 7.07 |
+| broad posterior B1b, α = 0.75 | 51.95 | **7.0%** | 6.14 |
 
-The one configuration whose safety *is* reproducible across seeds remains
-`B1b` - a badly identified, broad posterior, which is to say domain
-randomisation.
+Four conclusions, and none of them is kind to §6.3.
+
+**1. The three original seeds were an optimistic draw on everything, not only
+on safety.** The decision-aware run was reported at 49.89 obj/min in the target
+domain and 54.32 in the source; over eight seeds it is **46.59** and **52.23**.
+Its recovery falls from **1.02 to 0.58**.
+
+**2. Every configuration fails G3, and none is close.** The ceiling is 5.99
+trips per arm-hour on the interval's upper bound. The best of the three has an
+upper bound of **8.45**.
+
+**3. Every configuration also blows the 5% retention budget** — 6.5%, 7.0% and
+11.0%. G4 was passed at three seeds and is not passed at eight.
+
+**4. The orderings this report drew are inside seed noise.** At eight seeds no
+pair of the three differs significantly on target-domain trips, by either
+model:
+
+| comparison | rate ratio | NB 95% CI | p (NB) | p (robust) |
+|---|---|---|---|---|
+| known-parameter / decision-aware | 1.31 | [0.84, 2.04] | 0.241 | 0.290 |
+| known-parameter / B1b | 1.17 | [0.73, 1.89] | 0.515 | 0.489 |
+| decision-aware / B1b | 0.90 | [0.62, 1.29] | 0.561 | 0.684 |
+
+So **§6.3's finding that the posterior-guided run beats the known-parameter
+reference does not survive, and neither does §6.4's finding that B1b's broad,
+badly-identified posterior is the safest of the three.** B1b was reported at
+4.43 trips per arm-hour with a dispersion of 0.22 and an interval entirely
+under the threshold; at eight seeds it is 7.55 [5.65, 10.10] and is not
+distinguishable from the other two. Three seeds produced an apparent ordering
+that eight seeds erase.
+
+What survives is the identification result of §5, which was never a
+seed-dependent quantity: the latent identifies the delay at ceiling from one
+second of arm time, and the controls sit at chance.
+
+**A consequence for G3 that is recorded and not acted on.** G3's ceiling is
+derived from `TRIPS_KNOWN_PARAM = 4.83`, measured on three seeds. Over eight
+the same configuration trips at **8.87** per arm-hour, which would put the
+threshold at **7.53** instead of **6.00** and turn two of these three failures
+into passes. **The threshold has not been recomputed.** Moving a gate until the
+result clears it is not a measurement. The constant in `scripts/wm1_gate.py`
+carries the arithmetic so the size of the effect is visible without the gate
+having moved.
+
+*(B1b's eight-seed row rests on 23 of its 24 evaluations; the last was still
+running when this table was written and the numbers will be refreshed when it
+lands. The remaining evaluation cannot change a conclusion drawn from
+intervals this wide.)*
 
 ### 6.5 Does decision-awareness earn its place? (G5)
 

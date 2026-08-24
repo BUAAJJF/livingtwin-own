@@ -239,6 +239,24 @@ Detection is not the limit and should not be confused with it: a 40 mm marker
 at 0.70 m is 26 px on a side and decodes 100% of the time. It is found
 perfectly and located uselessly.
 
+For the real rig the recommended target is now
+[`calib_compact_v2.pdf`](../depth_bench/targets/calib_compact_v2.pdf): a
+180x152 mm finished sheet with a 168x140 mm, 6x5 ChArUco pattern, 28 mm
+squares, 22 mm `DICT_4X4_50` markers and 20 interpolated corners.  It is much
+smaller than A4, has more constraints than the old 5x5 board, and its shorter
+4x4 code is easier to decode at 30--50 cm.  Print **100% / actual size** on
+matte stock, retain the 6 mm white border, verify a 28 mm square with calipers,
+and bond it flat to a rigid plate.  Its machine-readable description is the
+adjacent `calib_compact_v2.json`.
+
+For an inkjet printer prefer the separately named
+[`calib_compact_white_v2.pdf`](../depth_bench/targets/calib_compact_white_v2.pdf).
+It is the exact geometric inverse, reducing measured black coverage from 63%
+to 23%, and its adjacent JSON sets `inverted: true` so the detector enables
+white-marker decoding.  Do not use the normal JSON with the white print: board
+polarity is stored as part of pose-file identity specifically to prevent that
+mix-up.
+
 **Motion-capture spheres**, measured the same way — the same arm poses, the
 same 0.2 px of feature noise, only the target geometry changed:
 
@@ -314,9 +332,26 @@ the ones already recorded — and draws the fourth, the rotation spread, as a
 disc of where each recorded pose faces. Spreading those dots *is* the task, and
 a picture of where they are not beats a number that says 24°.
 
-The GUI detector deliberately reads **`frame.gray`, the D405 grayscale image**,
-not the optional left-IR stream.  That keeps calibration on the same image path
-as deployment.  The workflow is now assisted after the manual bootstrap:
+The GUI's calibration stream is deliberately different from deployment's
+depth-aligned preview.  It opens depth plus the D405's **raw, unwarped left Y8
+imager at 1280x720**.  That imager defines the depth optical frame, so no
+colour-to-depth warp or extra extrinsic is needed; deployment stays at its
+characterised 848x480 mode.  A recorded pose is the median of matching corner
+IDs across at least eight settled frames, not one lucky PnP result.  The final
+closed-form Park--Martin result is then jointly refined against every saved
+corner pixel with a robust loss, sharing one camera pose and one rigid
+board-to-gripper pose across the session.
+
+Start a fresh, independent session for the compact board (the old pose file is
+left untouched):
+
+```bash
+micromamba run -a "" -n mjlab python -u -m hardware.deploy.calibgui \
+  --board hardware/depth_bench/targets/calib_compact_white_v2.json \
+  --poses hardware/deploy/calib_poses_compact_white_v2.json
+```
+
+The assisted workflow after the manual bootstrap is:
 
 1. Move and record five visibly different poses by hand, including at least
    15° of rotation spread.
@@ -324,14 +359,15 @@ as deployment.  The workflow is now assisted after the manual bootstrap:
    the final solver: it still refuses below eight poses and 30°.
 3. Using the current board detection, the rough extrinsic and the robot's own
    MuJoCo kinematics, it searches nearby joint poses.  Candidates outside the
-   D405 image, inside a joint-limit margin, too similar to existing samples, or
-   introducing a new model self-collision are rejected.
+   D405 image, below 22 projected marker pixels at 1280 width, too edge-on,
+   inside a joint-limit margin, too similar to existing samples, or introducing
+   a new model self-collision are rejected.
 4. The chosen pose appears as a cyan predicted board outline over the live
    grayscale image, with joint angles and grasp-site position in the page.
    Clicking **move arm to the previewed target** is the confirmation: the arm
    enables, follows a 0.22 rad/s rest-to-rest joint trajectory, and stops on a
    feedback tracking error.  **stop and hold** cancels an in-progress stream
-   and commands the measured pose.  Once the normal stillness ring turns
+   and commands the measured pose.  Once the multi-frame fusion gate turns
    green, record the pose and the next target is generated.
 
 An existing `rig.json` can seed guidance immediately; as soon as the current
@@ -339,6 +375,12 @@ session has enough bootstrap poses, its rough solve supersedes that old result.
 Automatic motion checks the model and the camera view, not the physical room:
 the operator must still keep the real swept volume clear and confirm every
 move from the page.
+
+Exiting the GUI **holds the measured joint position and disconnects CAN; it
+does not disable the drives**.  On the real PiPER, `DisableArm(7)` removes
+holding torque immediately and the arm can fall.  Intentional drive disable is
+available only as the explicit `PiperArm.close(disable=True)` API and must be
+done with the arm physically supported or safely parked.
 
 Its preflight also answers the question that is expensive to get wrong: **is the
 board on the gripper at all.** It runs forward kinematics on the live joint

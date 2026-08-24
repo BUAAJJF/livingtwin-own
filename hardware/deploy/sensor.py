@@ -53,7 +53,9 @@ class Frame:
   depth: np.ndarray
   """``(480, 848)`` metres, 0 where the sensor returned nothing."""
   gray: np.ndarray
-  """``(480, 848)`` uint8, resampled into the depth frame by the driver."""
+  """uint8 depth-grid grayscale.  In calibration ``gray_source='left_ir'``
+  makes this the unwarped raw left imager; deployment keeps the historical
+  depth-aligned colour stream."""
   stamp: float
   index: int
   ir: np.ndarray | None = None
@@ -76,9 +78,11 @@ class Reader:
     overrides.setdefault("infrared", infrared)
     self._d405 = _bench_backend()
     self._infrared = bool(overrides.get("infrared", False))
+    self._gray_source = str(overrides.get("gray_source", "aligned_color"))
     args = _Args(serial=serial, **overrides)
     self._stream = self._d405.Stream(args)
     self.K = self._stream.K
+    self.dist = self._stream.dist
     self.meta = self._stream.meta
     self.serial = self.meta.get("serial")
 
@@ -107,7 +111,10 @@ class Reader:
             self._stream.close()
             self._d405.reset(self.serial)
             self._stream = self._d405.Stream(
-              _Args(serial=self.serial, infrared=self._infrared))
+              _Args(serial=self.serial, infrared=self._infrared,
+                    gray_source=self._gray_source,
+                    width=int(self.meta["resolution"][0]),
+                    height=int(self.meta["resolution"][1])))
             self._errors = 0
           except Exception:
             time.sleep(0.5)
@@ -164,6 +171,9 @@ class Reader:
     self._thread.join(timeout=2.0)
     self._stream.close()
 
+  def intrinsics(self, width: int, height: int) -> np.ndarray:
+    return self._stream.intrinsics(width, height)
+
 
 @dataclasses.dataclass
 class _Args:
@@ -176,6 +186,8 @@ class _Args:
   depth_units: float = 1e-4
   infrared: bool = False
   """Also stream the raw left infrared imager; see ``Frame.ir``."""
+  gray_source: str = "aligned_color"
+  """``left_ir`` is the direct unwarped D405 grayscale used for calibration."""
   filters: bool = False
   """Raw, because the noise model was fitted to raw.  Turning the stock spatial
   and temporal filters on here would make the robot's depth quieter than the

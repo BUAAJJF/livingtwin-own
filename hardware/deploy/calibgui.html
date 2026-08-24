@@ -87,6 +87,7 @@
       <h2>Next automatic target</h2>
       <div id="target"></div>
       <button id="move" class="big auto" disabled>move arm to the previewed target</button>
+      <button id="back" class="big" disabled>return to last board-visible pose</button>
       <button id="stop" class="big stop" disabled>stop and hold</button>
       <div class="why" id="movewhy"></div>
       <p class="hint">The cyan outline in the D405 grayscale image is the
@@ -168,6 +169,10 @@ function preflight(s) {
     L.detected ? `${L.n_corners} corners · ${L.reproj_px} px · ${L.range_mm} mm · ${s.image_source}`
                : `not found in ${s.image_source}, or the board description is wrong`));
 
+  const fused = (L.fusion_frames || 0) >= (L.fusion_required || 8);
+  out.push(row(fused, !fused, "multi-frame corner fusion",
+    `${L.fusion_frames || 0}/${L.fusion_required || 8} stable detections ready`));
+
   const g = L.on_gripper;
   out.push(row(g ? g.ok : false, !g, "board is on the gripper",
     !g ? "needs the arm and a detected board"
@@ -234,10 +239,14 @@ function render(s) {
   } else {
     targetHtml += row(true, !!g.rough, g.rough ? "rough guidance ready" : "calibrated guidance ready",
       `${g.source}` + (g.residual_mm != null ? ` · ${g.residual_mm} mm rms` : ""));
-    if (t && t.available) {
+    if (t && t.available && t.recovery) {
+      targetHtml += row(true, true, "returning to visible pose",
+        `joint target ${t.q_deg.join(", ")}° · max move ${t.motion_deg}°`);
+    } else if (t && t.available) {
       targetHtml += `<div class="kv"><span>grasp site xyz</span><b>${t.ee_position_m.join(", ")} m</b></div>` +
         `<div class="kv"><span>joint target</span><b>${t.q_deg.join(", ")}°</b></div>` +
-        `<div class="kv"><span>predicted board</span><b>${t.center_px.join(", ")} px · ${t.range_mm} mm</b></div>` +
+        `<div class="kv"><span>predicted board</span><b>${t.center_px.join(", ")} px · ${t.range_mm} mm` +
+        (t.projected_marker_px != null ? ` · marker ${t.projected_marker_px} px` : "") + `</b></div>` +
         `<div class="kv"><span>coverage gain</span><b>${t.normal_novelty_deg}° face · ${t.nearest_rotation_deg}° wrist</b></div>`;
     } else {
       targetHtml += row(false, true, "no safe visible proposal",
@@ -257,13 +266,18 @@ function render(s) {
   const canMove = !!(s.has_arm && t && t.available && t.status === "ready" && !moving);
   $("move").disabled = !canMove;
   $("stop").disabled = !moving;
+  $("back").disabled = moving || !(s.recovery && s.recovery.available);
   $("movewhy").textContent = canMove ? ""
-    : (moving ? "motion in progress" : (t && t.why) || (!g ? "rough extrinsic not ready" : "no ready target"));
+    : (moving ? "motion in progress" : (t && t.why) ||
+       (s.recovery && s.recovery.why) ||
+       (!g ? "rough extrinsic not ready" : "no ready target"));
 
   const worst = sol && sol.ok ? sol.worst_pose : -1;
   $("list").innerHTML = (s.poses || []).map(p =>
     `<li class="${p.i === worst ? 'worst' : ''}"><span class="n">${p.i}</span>` +
     `<span class="r">${p.n_corners} corners · ${p.reproj_px} px` +
+    (p.fusion_frames ? ` · ${p.fusion_frames} frames` : "") +
+    (p.corner_spread_px != null ? ` · spread ${p.corner_spread_px} px` : "") +
     (sol && sol.ok && sol.per_pose_mm ? ` · <b>${sol.per_pose_mm[p.i]} mm</b>` : "") +
     `</span><button onclick="drop(${p.i})">drop</button></li>`).join("")
     || `<li style="color:var(--dim)">none yet</li>`;
@@ -282,6 +296,9 @@ function render(s) {
       `${sol.residual_mm} mm rms</b></div>` +
       `<div class="kv"><span>worst pose</span><b>#${sol.worst_pose} · ${sol.worst_mm} mm</b></div>` +
       `<div class="kv"><span>rotation spread</span><b>${sol.rot_span_deg}°</b></div>` +
+      (sol.joint_refined
+        ? `<div class="kv"><span>joint pixel refinement</span><b>${sol.reprojection_before_px} → ${sol.reprojection_rms_px} px · ${sol.n_corner_observations} corners</b></div>`
+        : `<div class="kv"><span>joint pixel refinement</span><b>unavailable for legacy single-frame poses</b></div>`) +
       `<div class="kv"><span>camera</span><b>${sol.position_m.join(", ")} m</b></div>` +
       `<div class="kv"><span>vs the simulator</span><b>${sol.vs_sim_mm} mm · ${sol.vs_sim_deg}°</b></div>` +
       (sol.n_flipped ? `<p class="hint">${sol.n_flipped} pose(s) came back rotated 180° and were corrected.</p>` : "") +
@@ -327,6 +344,11 @@ $("move").onclick = async () => {
   tick();
 };
 $("stop").onclick = async () => { await post("/stop-motion"); tick(); };
+$("back").onclick = async () => {
+  const r = await post("/return-visible");
+  if (!r.ok) $("movewhy").textContent = r.why;
+  tick();
+};
 addEventListener("keydown", e => {
   if (e.code === "Space" && !$("rec").disabled) { e.preventDefault(); $("rec").click(); }
 });

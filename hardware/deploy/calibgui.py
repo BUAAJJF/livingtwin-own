@@ -74,11 +74,6 @@ from piper_push import robot as sim_robot
 
 HERE = Path(__file__).resolve().parent
 
-RING = 8
-"""Frames the stillness test looks back over.  At ~15 Hz that is half a second
--- long enough that a settling arm has not finished, short enough that holding
-a pose deliberately does not feel like waiting."""
-
 STILL_MM = 6.0
 STILL_DEG = 1.0
 """How far the board's pose may wander across the ring and still count as still.
@@ -116,9 +111,25 @@ will move towards, which is all the automatic collector asks of it."""
 AUTO_SPEED_RAD_S = 0.22
 AUTO_RATE_HZ = 30.0
 AUTO_TRACKING_ERROR_RAD = 0.45
+RECOVERY_MAX_MOTION_RAD = math.radians(30.0)
 """Conservative joint-space motion for calibration.  The page asks before
 every move; these constants then keep that confirmed move slow and abort if
-feedback falls far behind the streamed target."""
+feedback falls far behind the streamed target.  A recovery pose is also
+refused if any joint is more than 30 degrees away: recovery is only meant to
+reverse the immediately preceding small next-pose move, never to navigate
+from an unknown arm configuration."""
+
+CALIB_WIDTH, CALIB_HEIGHT = 1280, 720
+FUSION_WINDOW = 24
+FUSION_MIN_FRAMES = 8
+MIN_PROJECTED_MARKER_PX = 22.0
+"""Calibration-only acquisition settings.  Deployment remains 848x480.
+
+At roughly 15 GUI ticks/s the fusion window covers 1.6 seconds.  Eight valid
+frames are enough to reject a one-frame decode while keeping the record button
+responsive.  Twenty-two pixels per marker keeps a 4x4 code above about 3.5
+pixels per module including its black border.
+"""
 
 
 def _ang(Ra: np.ndarray, Rb: np.ndarray) -> float:
@@ -230,7 +241,7 @@ class NextPosePlanner:
     out = []
     # Deliberate single- and two-axis wrist tilts make early coverage
     # predictable; random combinations fill the view-constrained gaps.
-    for amount in np.radians((10.0, 16.0, 22.0)):
+    for amount in np.radians((7.0, 10.0, 12.0)):
       for j in (3, 4, 5):
         for sign in (-1.0, 1.0):
           d = np.zeros(6)
@@ -242,8 +253,8 @@ class NextPosePlanner:
           d[3], d[4] = s4 * amount, s5 * amount
           out.append(q[:6] + d)
     rng = np.random.default_rng(seed)
-    scale = np.array([0.12, 0.10, 0.10, 0.25, 0.25, 0.30])
-    cap = np.array([0.22, 0.18, 0.18, 0.38, 0.38, 0.42])
+    scale = np.array([0.07, 0.06, 0.06, 0.12, 0.12, 0.14])
+    cap = np.array([0.12, 0.10, 0.10, 0.19, 0.19, 0.21])
     random = np.clip(rng.normal(size=(700, 6)) * scale, -cap, cap)
     out.extend(q[:6] + d for d in random)
     return [np.clip(x, self.lo, self.hi) for x in out]
@@ -268,8 +279,20 @@ class NextPosePlanner:
 
     current_contacts = self._contacts(q7)
     options = []
-    margin = 34.0
+    margin = 42.0
     image_centre = np.array([self.width / 2.0, self.height / 2.0])
+    current_projected = self._project(T_cam_board)
+    if current_projected is None:
+      return {"available": False,
+              "why": "current detected board cannot be projected"}
+    current_uv, _ = current_projected
+    current_area = abs(float(cv2.contourArea(current_uv.astype(np.float32))))
+    current_max_edge = max(float(np.linalg.norm(
+      current_uv[(i + 1) % 4] - current_uv[i])) for i in range(4))
+    current_shape = current_area / max(current_max_edge ** 2, 1.0)
+    n_now = T_cam_board[:3, :3] @ np.array([0.0, 0.0, 1.0])
+    n_now /= np.linalg.norm(n_now)
+    current_facing = abs(float(n_now[2]))
     for qc in self._candidates(q7, seed=7919 + len(records) * 104729):
       motion = float(np.linalg.norm(qc - q7[:6]))
       if motion < np.radians(7.0):
@@ -285,20 +308,39 @@ class NextPosePlanner:
           or uv[:, 1].min() < margin or uv[:, 1].max() > self.height - margin):
         continue
       area = abs(float(cv2.contourArea(uv.astype(np.float32))))
-      if area < 500.0:
+      max_edge = max(float(np.linalg.norm(uv[(i + 1) % 4] - uv[i]))
+                     for i in range(4))
+      shape = area / max(max_edge ** 2, 1.0)
+      nx, ny = self.board.squares
+      horizontal = min(float(np.linalg.norm(uv[1] - uv[0])),
+                       float(np.linalg.norm(uv[2] - uv[3]))) / max(nx, 1)
+      vertical = min(float(np.linalg.norm(uv[2] - uv[1])),
+                     float(np.linalg.norm(uv[3] - uv[0]))) / max(ny, 1)
+      marker_px = (min(horizontal, vertical)
+                   * self.board.marker_m / self.board.square_m
+                   if self.board.kind == "charuco"
+                   else min(horizontal, vertical))
+      # A polygon can be completely inside the image and still be an
+      # undetectable sliver.  Preserve a substantial fraction of the currently
+      # detected board's pixel support and projected thickness.
+      if (area < max(2500.0, 0.50 * current_area)
+          or shape < max(0.12, 0.55 * current_shape)
+          or marker_px < (MIN_PROJECTED_MARKER_PX
+                          * self.width / CALIB_WIDTH)):
         continue
       # Do not turn the printed face away from the camera in one move.
-      n_now = T_cam_board[:3, :3] @ np.array([0.0, 0.0, 1.0])
       n_new = T_cb[:3, :3] @ np.array([0.0, 0.0, 1.0])
-      if float(np.dot(n_now, n_new)) < math.cos(math.radians(42.0)):
+      n_new /= np.linalg.norm(n_new)
+      facing = abs(float(n_new[2]))
+      if (float(np.dot(n_now, n_new)) < math.cos(math.radians(20.0))
+          or facing < max(0.28, 0.65 * current_facing)):
         continue
 
       nearest_a = min((_ang(T_bg[:3, :3], R) for R in recorded_R),
                       default=180.0)
       nearest_mm = min((float(np.linalg.norm(T_bg[:3, 3] - p)) * 1000
                         for p in recorded_p), default=1000.0)
-      nn = n_new / np.linalg.norm(n_new)
-      normal_a = min((math.degrees(math.acos(float(np.clip(np.dot(nn, n),
+      normal_a = min((math.degrees(math.acos(float(np.clip(np.dot(n_new, n),
                                                                -1.0, 1.0))))
                       for n in recorded_n), default=90.0)
       if records and nearest_a < NOVEL_DEG and nearest_mm < NOVEL_MM:
@@ -306,11 +348,12 @@ class NextPosePlanner:
       centre_cost = float(np.linalg.norm(
         (centre - image_centre) / np.array([self.width, self.height])))
       boundary = float(np.min(np.minimum(qc - self.lo, self.hi - qc)))
-      score = (1.8 * normal_a + nearest_a + 0.018 * nearest_mm
+      score = (0.7 * normal_a + 0.7 * nearest_a + 0.018 * nearest_mm
                + 4.0 * min(boundary, 0.3) - 12.0 * centre_cost
-               - 4.0 * motion)
+               - 4.0 * motion + 30.0 * facing + 20.0 * shape)
       options.append((score, c7, T_bg, T_cb, uv, centre, nearest_a,
-                      nearest_mm, normal_a, current_contacts))
+                      nearest_mm, normal_a, area, shape, facing, marker_px,
+                      current_contacts))
 
     if not options:
       return {"available": False,
@@ -324,7 +367,7 @@ class NextPosePlanner:
       return {"available": False,
               "why": "all visible novel poses have a model collision on their path"}
     (_, c7, T_bg, T_cb, uv, centre, nearest_a, nearest_mm, normal_a,
-     _allowed) = best
+     area, shape, facing, marker_px, _allowed) = best
     return {
       "available": True,
       "q": c7.tolist(),
@@ -338,6 +381,10 @@ class NextPosePlanner:
       "nearest_rotation_deg": round(nearest_a, 1),
       "nearest_translation_mm": round(nearest_mm, 0),
       "normal_novelty_deg": round(normal_a, 1),
+      "projected_area_px2": round(area, 0),
+      "projected_shape": round(shape, 3),
+      "facing_cos": round(facing, 3),
+      "projected_marker_px": round(marker_px, 1),
       "status": "ready",
     }
 
@@ -356,7 +403,11 @@ class Session:
 
   def __init__(self, board: calibrate.Board, serial: str | None,
                can: str, no_arm: bool, poses_file: Path,
-               still_mm: float = STILL_MM, still_deg: float = STILL_DEG):
+               still_mm: float = STILL_MM, still_deg: float = STILL_DEG,
+               recovery_q: np.ndarray | None = None,
+               calib_width: int = CALIB_WIDTH,
+               calib_height: int = CALIB_HEIGHT,
+               raw_gray: bool = True):
     self.board = board
     self.still_mm, self.still_deg = float(still_mm), float(still_deg)
     self.poses_file = poses_file
@@ -370,6 +421,8 @@ class Session:
     self.guidance_failure = ""
     self.next_target: dict | None = None
     self.motion: dict = {"status": "idle", "progress": 0.0}
+    self.recovery_q = (None if recovery_q is None else
+                       np.asarray(recovery_q, dtype=np.float64).reshape(6))
     self._motion_thread: threading.Thread | None = None
     self._motion_cancel = threading.Event()
     self._last_plan_attempt = 0.0
@@ -381,7 +434,7 @@ class Session:
     self._stop = threading.Event()
     self._jpeg = b""
     self._live: dict = {"detected": False}
-    self._ring: deque = deque(maxlen=RING)
+    self._ring: deque = deque(maxlen=FUSION_WINDOW)
     self.error = ""
 
     if poses_file.exists():
@@ -389,6 +442,13 @@ class Session:
       if stored == board:
         self.records = recs
         self.note = f"resumed {len(recs)} pose(s) from {poses_file.name}"
+        # The most recent sample is, by definition, a pose where the board was
+        # detected.  It is useful after a GUI restart, but the 30-degree gate
+        # in ``return_visible`` still prevents stale files from causing a
+        # large move.
+        if self.recovery_q is None and recs:
+          self.recovery_q = np.asarray(
+            recs[-1]["joint_pos"][:6], dtype=np.float64).copy()
       else:
         self.note = (f"{poses_file.name} holds poses from a different board "
                      f"({stored.describe()}); they are not loaded")
@@ -397,9 +457,14 @@ class Session:
     # The deployed perception path is the D405's grayscale stream.  Calibration
     # uses that exact image too; using the optional raw IR stream here would
     # make the GUI validate a different optical path from the one deployed.
-    print("calibgui: opening D405 grayscale stream ...", flush=True)
+    source = "raw left grayscale" if raw_gray else "depth-aligned grayscale"
+    print(f"calibgui: opening D405 {source} at "
+          f"{calib_width}x{calib_height} ...", flush=True)
     try:
-      self.reader = sensor.Reader(serial=serial, infrared=False)
+      self.reader = sensor.Reader(
+        serial=serial, infrared=False,
+        width=int(calib_width), height=int(calib_height),
+        gray_source="left_ir" if raw_gray else "aligned_color")
     except RuntimeError as e:
       if "VIDIOC_S_FMT" in str(e) or "Input/output error" in str(e):
         raise RuntimeError(
@@ -424,7 +489,8 @@ class Session:
         raise
     self.kin = proprio.Kinematics()
     self.planner = NextPosePlanner(
-      board, self.reader.K, (config.D405_WIDTH, config.D405_HEIGHT))
+      board, self.reader.K,
+      tuple(int(x) for x in self.reader.meta["resolution"]))
 
     if config.RIG_FILE.exists():
       try:
@@ -473,19 +539,10 @@ class Session:
     gray = np.asarray(frame.gray, dtype=np.uint8)
     # Detected once and reused by the overlay: the detection is the expensive
     # part of the tick and doing it twice halves the preview rate.
-    found = self.board.detect(gray)
-    pose = None
-    if found is not None:
-      obj, img = found
-      ok, rvec, tvec = cv2.solvePnP(obj, img, self.reader.K, np.zeros(5),
-                                    flags=cv2.SOLVEPNP_ITERATIVE)
-      if ok:
-        proj, _ = cv2.projectPoints(obj, rvec, tvec, self.reader.K,
-                                    np.zeros(5))
-        pose = {"rvec": rvec, "tvec": tvec, "n_corners": int(len(img)),
-                "reproj_rms_px": float(np.sqrt(
-                  ((proj.reshape(-1, 2) - img.reshape(-1, 2)) ** 2)
-                  .sum(1).mean()))}
+    pose = calibrate.detect_board(
+      gray, self.reader.K, self.reader.dist, self.board)
+    found = (pose["object_points"], pose["image_points"]) \
+      if pose is not None else None
 
     live: dict = {
       "detected": pose is not None,
@@ -498,11 +555,25 @@ class Session:
                   reproj_px=round(pose["reproj_rms_px"], 3),
                   range_mm=round(float(np.linalg.norm(T_cb[:3, 3])) * 1000, 1),
                   normal=self._normal(T_cb))
-      self._ring.append((time.time(), T_cb))
-    else:
-      self._ring.clear()
+    self._ring.append((time.time(), pose))
+
+    # A confirmed recovery move has done its job as soon as the board is
+    # visible again.  Clear it so the ordinary planner may use this recovered
+    # view without requiring a duplicate sample at the old pose.
+    with self.lock:
+      recovered = bool(T_cb is not None and self.next_target is not None
+                       and self.next_target.get("recovery")
+                       and self.next_target.get("status") == "reached")
+      if recovered:
+        self.next_target = None
+        self.recovery_q = None
+        self.motion = {"status": "idle", "progress": 0.0,
+                       "why": "board visible again"}
 
     live["still"], live["still_detail"] = self._still()
+    valid_fusion = sum(p is not None for _, p in self._ring)
+    live["fusion_frames"] = valid_fusion
+    live["fusion_required"] = FUSION_MIN_FRAMES
     live["novel"], live["novel_detail"] = self._novel(T_cb)
     live["arm_novel"], live["arm_novel_detail"] = False, "no arm feedback"
 
@@ -517,6 +588,13 @@ class Session:
       live["arm_novel"], live["arm_novel_detail"] = self._arm_novel(st)
       if T_cb is not None:
         live["on_gripper"] = self._on_gripper(st, T_cb)
+        # Keep the last *settled* visible configuration.  During a move the
+        # board may flash through a barely detectable edge view; using that as
+        # the retreat point would defeat the recovery button's purpose.
+        with self.lock:
+          if (live["still"]
+              and self.motion.get("status") != "moving"):
+            self.recovery_q = st.q.copy()
 
     self._maybe_plan(T_cb, st)
     with self.lock:
@@ -540,15 +618,24 @@ class Session:
     return [round(float(n[0]), 4), round(float(n[1]), 4)]
 
   def _still(self) -> tuple[bool, str]:
-    if len(self._ring) < RING:
-      return False, f"settling ({len(self._ring)}/{RING} frames)"
-    Ts = [T for _, T in self._ring]
+    poses = [p for _, p in self._ring if p is not None]
+    if len(poses) < FUSION_MIN_FRAMES:
+      return False, (f"collecting stable detections ({len(poses)}/"
+                     f"{FUSION_MIN_FRAMES} frames)")
+    Ts = [calibrate._rt(p["rvec"], p["tvec"]) for p in poses]
     ref = Ts[-1]
     dt = max(float(np.linalg.norm(T[:3, 3] - ref[:3, 3])) for T in Ts) * 1000
     dr = max(_ang(T[:3, :3], ref[:3, :3]) for T in Ts)
     if dt > self.still_mm or dr > self.still_deg:
-      return False, f"moving ({dt:.1f} mm, {dr:.2f} deg over {RING} frames)"
-    return True, f"still ({dt:.1f} mm, {dr:.2f} deg)"
+      return False, (f"moving ({dt:.1f} mm, {dr:.2f} deg over "
+                     f"{len(Ts)} detections)")
+    return True, f"still ({dt:.1f} mm, {dr:.2f} deg; {len(Ts)} fused frames)"
+
+  def _fused_detection(self) -> dict | None:
+    detections = [p for _, p in list(self._ring) if p is not None]
+    return calibrate.fuse_detections(
+      detections, self.reader.K, self.reader.dist, self.board,
+      min_frames=FUSION_MIN_FRAMES)
 
   def _novel(self, T_cb: np.ndarray | None) -> tuple[bool, str]:
     if T_cb is None:
@@ -641,7 +728,8 @@ class Session:
     try:
       out = calibrate.solve(
         records, board=self.board,
-        min_rotation_span_deg=GUIDANCE_MIN_ROT_SPAN_DEG)
+        min_rotation_span_deg=GUIDANCE_MIN_ROT_SPAN_DEG,
+        K=self.reader.K, dist=self.reader.dist)
     except (RuntimeError, np.linalg.LinAlgError, ValueError) as e:
       self.guidance_failure = f"rough solve failed: {e}"
       return
@@ -808,6 +896,25 @@ class Session:
       records = list(self.records)
       target = dict(self.next_target) if self.next_target is not None else None
       motion = dict(self.motion)
+      recovery_q = (None if self.recovery_q is None
+                    else self.recovery_q.copy())
+      _, last_st = getattr(self, "_last", (None, None))
+    recovery = None
+    if recovery_q is not None:
+      delta = (float("inf") if last_st is None else
+               float(np.max(np.abs(recovery_q - last_st.q))))
+      available = bool(np.isfinite(delta)
+                       and delta <= RECOVERY_MAX_MOTION_RAD)
+      recovery = {
+        "available": available,
+        "q_deg": [round(float(x), 1) for x in np.degrees(recovery_q)],
+        "motion_deg": (None if not np.isfinite(delta)
+                       else round(math.degrees(delta), 1)),
+        "why": ("" if available else
+                ("no current arm feedback" if not np.isfinite(delta) else
+                 f"last visible pose is {math.degrees(delta):.1f} deg away; "
+                 "30 deg automatic-recovery limit exceeded")),
+      }
     return {
       "board": {"describe": self.board.describe(),
                 "n_corners": self.board.n_corners(),
@@ -819,6 +926,10 @@ class Session:
       "min_rotation_span_deg": calibrate.MIN_ROT_SPAN_DEG,
       "poses": [{"i": i, "n_corners": r.get("n_corners"),
                  "reproj_px": round(r.get("reproj_rms_px", 0.0), 2),
+                 "fusion_frames": r.get("fusion_frames"),
+                 "corner_spread_px": (round(r["corner_spread_px"], 2)
+                                      if r.get("corner_spread_px") is not None
+                                      else None),
                  "normal": self._normal(calibrate._rt(r["rvec"], r["tvec"]))}
                 for i, r in enumerate(records)],
       "solution": self.solution,
@@ -826,7 +937,10 @@ class Session:
       "guidance_failure": self.guidance_failure,
       "next_target": target,
       "motion": motion,
-      "image_source": "D405 gray",
+      "recovery": recovery,
+      "image_source": (f"D405 raw left grayscale "
+                       f"{self.reader.meta['resolution'][0]}x"
+                       f"{self.reader.meta['resolution'][1]}"),
       "guidance_min_poses": GUIDANCE_MIN_POSES,
       "guidance_min_rotation_span_deg": GUIDANCE_MIN_ROT_SPAN_DEG,
       "table": self.table,
@@ -843,14 +957,17 @@ class Session:
   def record(self) -> dict:
     with self.lock:
       live = dict(self._live)
-      T_cb, st = getattr(self, "_last", (None, None))
+      _, st = getattr(self, "_last", (None, None))
       moving = self.motion.get("status") == "moving"
     if moving:
       return {"ok": False, "why": "arm is moving"}
-    if T_cb is None:
-      return {"ok": False, "why": "no board in view"}
     if not live.get("still"):
       return {"ok": False, "why": live.get("still_detail", "moving")}
+    fused = self._fused_detection()
+    if fused is None:
+      return {"ok": False,
+              "why": "not enough consistent board corners to fuse"}
+    T_cb = calibrate._rt(fused["rvec"], fused["tvec"])
     if not live.get("novel"):
       return {"ok": False, "why": live.get("novel_detail", "not a new pose")}
     if not live.get("arm_novel"):
@@ -860,10 +977,18 @@ class Session:
       return {"ok": False, "why": "no arm; poses cannot be recorded"}
     rec = {
       "joint_pos": [*st.q.tolist(), st.gripper, -st.gripper],
-      "rvec": cv2.Rodrigues(T_cb[:3, :3])[0].ravel().tolist(),
-      "tvec": T_cb[:3, 3].tolist(),
-      "n_corners": live.get("n_corners"),
-      "reproj_rms_px": live.get("reproj_px"),
+      "rvec": np.asarray(fused["rvec"]).ravel().tolist(),
+      "tvec": np.asarray(fused["tvec"]).ravel().tolist(),
+      "n_corners": fused["n_corners"],
+      "reproj_rms_px": fused["reproj_rms_px"],
+      "fusion_frames": fused["fusion_frames"],
+      "corner_spread_px": fused["corner_spread_px"],
+      "object_points": np.asarray(fused["object_points"]).tolist(),
+      "image_points": np.asarray(fused["image_points"]).tolist(),
+      "camera_K": self.reader.K.tolist(),
+      "camera_dist": self.reader.dist.tolist(),
+      "image_size": list(self.reader.meta["resolution"]),
+      "image_source": self.reader.meta.get("gray_source"),
     }
     with self.lock:
       self.records.append(rec)
@@ -898,7 +1023,8 @@ class Session:
     if len(records) < calibrate.MIN_POSES:
       return {"ok": False, "why": f"{len(records)} poses; "
                                   f"{calibrate.MIN_POSES} is the minimum"}
-    out = calibrate.solve(records, board=self.board)
+    out = calibrate.solve(records, board=self.board,
+                          K=self.reader.K, dist=self.reader.dist)
     if out["T_base_cam"] is None:
       self.solution = {"ok": False,
                        "rot_span_deg": round(out["rot_span_deg"], 1),
@@ -920,6 +1046,12 @@ class Session:
                          * 1000, 1),
       "vs_sim_deg": round(_ang(T[:3, :3], nominal[:3, :3]), 2),
       "T_base_cam": T.tolist(),
+      "joint_refined": bool(out.get("joint_refined")),
+      "reprojection_rms_px": (round(out["reprojection_rms_px"], 3)
+                              if out.get("joint_refined") else None),
+      "reprojection_before_px": (round(out["reprojection_before_px"], 3)
+                                 if out.get("joint_refined") else None),
+      "n_corner_observations": out.get("n_corner_observations"),
     }
     guide_ok = (out["residual_mm"] <= 35.0
                 and _plausible_camera_transform(T))
@@ -963,15 +1095,51 @@ class Session:
     self._motion_thread.start()
     return {"ok": True}
 
+  def return_visible(self) -> dict:
+    """Offer a click-confirmed retreat to the last board-visible joint pose."""
+    with self.lock:
+      if self.arm is None:
+        return {"ok": False, "why": "no arm connected"}
+      if self.motion.get("status") == "moving":
+        return {"ok": False, "why": "arm is already moving"}
+      if self.recovery_q is None:
+        return {"ok": False, "why": "no recovery pose is available"}
+      _, st = getattr(self, "_last", (None, None))
+      if st is None:
+        return {"ok": False, "why": "no current arm feedback"}
+      goal = self.recovery_q.copy()
+      delta = float(np.max(np.abs(goal - st.q)))
+      if not np.isfinite(delta) or delta > RECOVERY_MAX_MOTION_RAD:
+        return {
+          "ok": False,
+          "why": (f"last board-visible pose is {math.degrees(delta):.1f} deg "
+                  "away; refusing automatic recovery above 30 deg. "
+                  "Reposition manually until the board is visible."),
+        }
+      self.next_target = {
+        "available": True,
+        "recovery": True,
+        "q": [*goal.tolist(), float(st.gripper)],
+        "from_q": [*st.q.tolist(), float(st.gripper)],
+        "q_deg": [round(float(x), 1) for x in np.degrees(goal)],
+        "motion_deg": round(math.degrees(delta), 1),
+        "status": "ready",
+      }
+      self.motion = {"status": "idle", "progress": 0.0}
+    return self.move_next()
+
   def _move_worker(self, target: dict) -> None:
     """Execute one confirmed target, with feedback and a tracking watchdog."""
     try:
       with self.arm_lock:
         start = self.arm.read()
+        # Preload the measured pose while drives are still disabled.  PiPER
+        # may retain an old position target across enable cycles; enabling
+        # before replacing it can produce an immediate jump towards that stale
+        # target.
+        self.arm.command(np.array([*start.q, start.gripper]))
         self.arm.enable()
-        # Hold the measured pose immediately after enabling, before the first
-        # interpolated command.  This prevents a stale drive setpoint from
-        # becoming the arm's first enabled target.
+        # Repeat after enable, before the first interpolated command.
         self.arm.command(np.array([*start.q, start.gripper]))
       path = _joint_trajectory(start.q, np.asarray(target["q"][:6]))
       period = 1.0 / AUTO_RATE_HZ
@@ -1049,7 +1217,9 @@ class Session:
     if not (self.solution and self.solution.get("ok")):
       return {"ok": False, "why": "solve first"}
     T = np.asarray(self.solution["T_base_cam"], dtype=np.float64)
-    rig = config.Rig(T_base_cam=T, K=self.reader.K,
+    deployment_K = self.reader.intrinsics(
+      config.D405_WIDTH, config.D405_HEIGHT)
+    rig = config.Rig(T_base_cam=T, K=deployment_K,
                      serial=self.reader.serial,
                      residual_mm=self.solution["residual_mm"])
     frame = self.reader.latest()
@@ -1145,6 +1315,8 @@ class Handler(BaseHTTPRequestHandler):
       self._json(sess.move_next())
     elif path == "/stop-motion":
       self._json(sess.stop_motion())
+    elif path == "/return-visible":
+      self._json(sess.return_visible())
     else:
       self.send_error(404)
 
@@ -1158,8 +1330,15 @@ def main() -> int:
                  help="camera only; poses cannot be recorded, but the board "
                       "and the framing can be checked without CAN")
   p.add_argument("--poses", default=str(calibrate.POSES_FILE))
+  p.add_argument("--calib-width", type=int, default=CALIB_WIDTH)
+  p.add_argument("--calib-height", type=int, default=CALIB_HEIGHT)
+  p.add_argument("--aligned-gray", action="store_true",
+                 help="fallback to the old depth-aligned colour grayscale; "
+                      "raw unwarped left grayscale is the default")
   p.add_argument("--still-mm", type=float, default=STILL_MM)
   p.add_argument("--still-deg", type=float, default=STILL_DEG)
+  p.add_argument("--recovery-q-deg", default=None,
+                 help=argparse.SUPPRESS)
   calibrate_group = p.add_argument_group("the board")
   calibrate_group.add_argument("--board", default=None)
   calibrate_group.add_argument("--board-kind",
@@ -1172,9 +1351,16 @@ def main() -> int:
   a = p.parse_args()
 
   board = calibrate.board_from_args(a)
+  recovery_q = None
+  if a.recovery_q_deg:
+    values = [float(x) for x in a.recovery_q_deg.split(",")]
+    if len(values) != 6:
+      p.error("--recovery-q-deg needs six comma-separated joint angles")
+    recovery_q = np.radians(values)
   print(f"board: {board.describe()}", flush=True)
   sess = Session(board, a.serial, a.can, a.no_arm, Path(a.poses),
-                 a.still_mm, a.still_deg)
+                 a.still_mm, a.still_deg, recovery_q,
+                 a.calib_width, a.calib_height, not a.aligned_gray)
   httpd = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
   httpd.session = sess
   print(f"\n  open http://127.0.0.1:{a.port}\n", flush=True)

@@ -112,6 +112,8 @@ class Board:
   marker_m: float = BOARD_MARKER_M
   dictionary: str = BOARD_DICT
   legacy: bool = False
+  inverted: bool = False
+  """Ink-saving white-marker inverse print; part of board identity."""
   min_corners: int = 6
 
   def __post_init__(self):
@@ -145,7 +147,10 @@ class Board:
       d = {"kind": "charuco",
            "squares": (d["squares_x"], d["squares_y"]),
            "square_m": d["square_m"], "marker_m": d["marker_m"],
-           "dictionary": d.get("dictionary", BOARD_DICT)}
+           "dictionary": d.get("dictionary", BOARD_DICT),
+           "min_corners": d.get("min_corners", 6),
+           "inverted": d.get("inverted", False),
+           "legacy": d.get("legacy", False)}
     return cls.from_dict(d)
 
   def to_dict(self) -> dict:
@@ -176,6 +181,7 @@ class Board:
     if self.kind == "charuco":
       return (f"ChArUco {n}, {self.square_m * 1000:.1f} mm squares, "
               f"{self.marker_m * 1000:.1f} mm markers, {self.dictionary}"
+              + (", inverted white-marker print" if self.inverted else "")
               + (", legacy origin" if self.legacy else ""))
     return (f"checkerboard {n} inner corners, "
             f"{self.square_m * 1000:.1f} mm squares")
@@ -202,6 +208,7 @@ class Board:
       board = self._charuco()
       params = cv2.aruco.DetectorParameters()
       params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+      params.detectInvertedMarker = bool(self.inverted)
       det = cv2.aruco.CharucoDetector(board, cv2.aruco.CharucoParameters(),
                                       params)
       corners, ids, _, _ = det.detectBoard(gray)
@@ -262,7 +269,64 @@ def detect_board(gray: np.ndarray, K: np.ndarray, dist: np.ndarray,
   rms = float(np.sqrt(((proj.reshape(-1, 2) - img.reshape(-1, 2)) ** 2)
                       .sum(1).mean()))
   return {"rvec": rvec, "tvec": tvec, "n_corners": int(len(img)),
-          "reproj_rms_px": rms}
+          "reproj_rms_px": rms,
+          "object_points": obj.reshape(-1, 3),
+          "image_points": img.reshape(-1, 2)}
+
+
+def fuse_detections(detections: list[dict], K: np.ndarray,
+                    dist: np.ndarray, board: Board = DEFAULT_BOARD,
+                    min_frames: int = 8,
+                    min_fraction: float = 0.5) -> dict | None:
+  """Fuse repeated, settled detections in image space before PnP.
+
+  Averaging already-solved 6-D poses is both awkward and biased.  ChArUco IDs
+  give a better option: group the same physical corner across frames, take its
+  coordinate-wise median, and solve PnP once from those robust image points.
+  A corner must appear in at least half the valid frames, so one accidental
+  decode cannot enter the calibration simply because it has a plausible ID.
+  """
+  valid = [d for d in detections
+           if d is not None and d.get("object_points") is not None
+           and d.get("image_points") is not None]
+  if len(valid) < int(min_frames):
+    return None
+  grouped: dict[tuple[float, float, float], list[np.ndarray]] = {}
+  for d in valid:
+    obj = np.asarray(d["object_points"], dtype=np.float64).reshape(-1, 3)
+    img = np.asarray(d["image_points"], dtype=np.float64).reshape(-1, 2)
+    for p, uv in zip(obj, img):
+      key = tuple(np.round(p, 7).tolist())
+      grouped.setdefault(key, []).append(uv)
+  required = max(3, int(np.ceil(len(valid) * float(min_fraction))))
+  fused = [(k, np.median(np.stack(v), axis=0), np.stack(v))
+           for k, v in grouped.items() if len(v) >= required]
+  if len(fused) < board.min_corners:
+    return None
+  fused.sort(key=lambda x: x[0])
+  obj = np.asarray([x[0] for x in fused], dtype=np.float64)
+  img = np.asarray([x[1] for x in fused], dtype=np.float64)
+  ok, rvec, tvec = cv2.solvePnP(obj, img, np.asarray(K, dtype=np.float64),
+                                np.asarray(dist, dtype=np.float64),
+                                flags=cv2.SOLVEPNP_ITERATIVE)
+  if not ok:
+    return None
+  proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
+  reproj = np.linalg.norm(proj.reshape(-1, 2) - img, axis=1)
+  spreads = np.concatenate([
+    np.linalg.norm(samples - median, axis=1)
+    for _, median, samples in fused
+  ])
+  return {
+    "rvec": rvec,
+    "tvec": tvec,
+    "n_corners": int(len(img)),
+    "reproj_rms_px": float(np.sqrt(np.mean(reproj ** 2))),
+    "object_points": obj,
+    "image_points": img,
+    "fusion_frames": len(valid),
+    "corner_spread_px": float(np.sqrt(np.mean(spreads ** 2))),
+  }
 
 
 def _rt(rvec, tvec) -> np.ndarray:
@@ -415,9 +479,128 @@ def _unflip(records: list[dict], board: Board, gripper_site: str):
   return out, sum(flipped)
 
 
+def _transform_mean(Ts: list[np.ndarray]) -> np.ndarray:
+  """A small SE(3) mean suitable for a rigid-mount initial guess."""
+  M = np.sum([T[:3, :3] for T in Ts], axis=0)
+  U, _, Vt = np.linalg.svd(M)
+  R = U @ Vt
+  if np.linalg.det(R) < 0:
+    U[:, -1] *= -1
+    R = U @ Vt
+  out = np.eye(4)
+  out[:3, :3] = R
+  out[:3, 3] = np.mean([T[:3, 3] for T in Ts], axis=0)
+  return out
+
+
+def _pack_transform(T: np.ndarray) -> np.ndarray:
+  return np.r_[cv2.Rodrigues(T[:3, :3])[0].ravel(), T[:3, 3]]
+
+
+def _unpack_transform(x: np.ndarray) -> np.ndarray:
+  T = np.eye(4)
+  T[:3, :3] = cv2.Rodrigues(np.asarray(x[:3], dtype=np.float64))[0]
+  T[:3, 3] = np.asarray(x[3:6], dtype=np.float64)
+  return T
+
+
+def refine_reprojection(records: list[dict], T_base_cam: np.ndarray,
+                        K: np.ndarray | None = None,
+                        dist: np.ndarray | None = None,
+                        gripper_site: str = "grasp_site") -> dict | None:
+  """Jointly refine camera and rigid board mount from every fused corner.
+
+  The closed-form hand-eye result remains the initial guess.  Unlike a
+  pose-level AX=XB solve, this stage does not compress every image to one PnP
+  transform: it minimises every observed corner's pixel error with a robust
+  loss while sharing one camera pose and one board-to-gripper transform.
+  """
+  observed = [r for r in records
+              if r.get("object_points") is not None
+              and r.get("image_points") is not None]
+  if len(observed) < 4:
+    return None
+  if K is None:
+    K = observed[0].get("camera_K")
+  if dist is None:
+    dist = observed[0].get("camera_dist", [0.0] * 5)
+  if K is None:
+    return None
+  K = np.asarray(K, dtype=np.float64).reshape(3, 3)
+  dist = np.asarray(dist, dtype=np.float64).reshape(-1)
+
+  from scipy.optimize import least_squares
+  from .proprio import Kinematics
+
+  kin = Kinematics(site_name=gripper_site)
+  samples = []
+  mounts = []
+  for r in observed:
+    kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
+    T_bg = np.eye(4)
+    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
+    obj = np.asarray(r["object_points"], dtype=np.float64).reshape(-1, 3)
+    img = np.asarray(r["image_points"], dtype=np.float64).reshape(-1, 2)
+    if len(obj) != len(img) or len(obj) < 4:
+      continue
+    samples.append((T_bg, obj, img))
+    mounts.append(np.linalg.inv(T_bg) @ T_base_cam
+                  @ _rt(r["rvec"], r["tvec"]))
+  if len(samples) < 4:
+    return None
+  T_gripper_board = _transform_mean(mounts)
+  x0 = np.r_[_pack_transform(T_base_cam),
+             _pack_transform(T_gripper_board)]
+
+  def residual(x):
+    T_bc = _unpack_transform(x[:6])
+    T_gb = _unpack_transform(x[6:])
+    T_cam_base = np.linalg.inv(T_bc)
+    out = []
+    for T_bg, obj, img in samples:
+      T_cb = T_cam_base @ T_bg @ T_gb
+      rvec = cv2.Rodrigues(T_cb[:3, :3])[0]
+      uv, _ = cv2.projectPoints(obj, rvec, T_cb[:3, 3], K, dist)
+      e = uv.reshape(-1, 2) - img
+      xyz = obj @ T_cb[:3, :3].T + T_cb[:3, 3]
+      if np.any(xyz[:, 2] <= 0.03):
+        e += np.maximum(0.03 - xyz[:, 2:3], 0.0) * 1000.0
+      out.append(e.ravel())
+    return np.concatenate(out)
+
+  before = residual(x0)
+  fit = least_squares(residual, x0, loss="soft_l1", f_scale=1.0,
+                      x_scale="jac", max_nfev=300)
+  after = residual(fit.x)
+  rms0 = float(np.sqrt(np.mean(before ** 2)))
+  rms = float(np.sqrt(np.mean(after ** 2)))
+  if (not fit.success or not np.isfinite(rms)
+      or rms > max(rms0 * 1.05, rms0 + 0.05)):
+    return None
+  per_pose = []
+  offset = 0
+  for _, obj, _ in samples:
+    n = len(obj) * 2
+    per_pose.append(float(np.sqrt(np.mean(after[offset:offset + n] ** 2))))
+    offset += n
+  return {
+    "T_base_cam": _unpack_transform(fit.x[:6]),
+    "T_gripper_board": _unpack_transform(fit.x[6:]),
+    "reprojection_rms_px": rms,
+    "reprojection_before_px": rms0,
+    "per_pose_reprojection_px": per_pose,
+    "n_observations": int(sum(len(x[1]) for x in samples)),
+    "optimizer_nfev": int(fit.nfev),
+  }
+
+
 def solve(records: list[dict], gripper_site: str = "grasp_site",
           board: Board | None = None,
-          min_rotation_span_deg: float = MIN_ROT_SPAN_DEG):
+          min_rotation_span_deg: float = MIN_ROT_SPAN_DEG,
+          K: np.ndarray | None = None,
+          dist: np.ndarray | None = None,
+          refine: bool = True):
   """Camera pose in the base frame, plus a residual per pose.
 
   The residual is the thing to read.  ``calibrateHandEye`` will return a
@@ -470,6 +653,11 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   T_base_cam[:3, :3] = R
   T_base_cam[:3, 3] = np.asarray(t).ravel()
 
+  refined = (refine_reprojection(records, T_base_cam, K, dist, gripper_site)
+             if refine and (board is None or board.kind == "charuco") else None)
+  if refined is not None:
+    T_base_cam = refined["T_base_cam"]
+
   # The board in the gripper frame, from every pose.  Constant if the solution
   # is right.
   in_gripper = []
@@ -485,7 +673,7 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   origins = np.stack([T[:3, 3] for T in in_gripper])
   centre = origins.mean(axis=0)
   per_pose_mm = np.linalg.norm(origins - centre, axis=1) * 1000
-  return {
+  result = {
     "T_base_cam": T_base_cam,
     "residual_mm": float(np.sqrt((per_pose_mm ** 2).mean())),
     "worst_mm": float(per_pose_mm.max()),
@@ -495,6 +683,19 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
     "n_poses": len(records),
     "n_flipped": n_flipped,
   }
+  if refined is not None:
+    result.update({
+      "joint_refined": True,
+      "reprojection_rms_px": refined["reprojection_rms_px"],
+      "reprojection_before_px": refined["reprojection_before_px"],
+      "per_pose_reprojection_px": refined["per_pose_reprojection_px"],
+      "n_corner_observations": refined["n_observations"],
+      "optimizer_nfev": refined["optimizer_nfev"],
+      "T_gripper_board": refined["T_gripper_board"],
+    })
+  else:
+    result["joint_refined"] = False
+  return result
 
 
 def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
@@ -598,7 +799,8 @@ def preview(args) -> int:
 
   board = board_from_args(args)
   print(f"board: {board.describe()}\n")
-  reader = sensor.Reader(serial=args.serial, infrared=True)
+  reader = sensor.Reader(serial=args.serial, width=1280, height=720,
+                         gray_source="left_ir")
   first = reader.wait_for_first()
   if getattr(first, "ir", None) is None:
     print("WARNING: no infrared stream; falling back to the depth-aligned "
@@ -609,7 +811,7 @@ def preview(args) -> int:
       if frame is None:
         print("no frame")
         continue
-      pose = detect_board(board_image(frame), reader.K, np.zeros(5), board)
+      pose = detect_board(board_image(frame), reader.K, reader.dist, board)
       if pose is None:
         print(f"[{i:3d}] not found")
       else:
@@ -633,7 +835,8 @@ def collect(args) -> int:
   """
   from . import robot, sensor
 
-  reader = sensor.Reader(serial=args.serial, infrared=True)
+  reader = sensor.Reader(serial=args.serial, width=1280, height=720,
+                         gray_source="left_ir")
   reader.wait_for_first()
   # Connected but deliberately not enabled: a disabled PiPER is back-drivable,
   # so the poses are set by moving the arm with a hand, and the drives still
@@ -681,7 +884,7 @@ def collect(args) -> int:
       if frame is None:
         print("  no frame")
         continue
-      pose = detect_board(board_image(frame), reader.K, np.zeros(5), board)
+      pose = detect_board(board_image(frame), reader.K, reader.dist, board)
       if pose is None:
         print("  board not found -- move it into view, add light, or check "
               "the board description with --preview")
@@ -697,6 +900,12 @@ def collect(args) -> int:
         "tvec": np.asarray(pose["tvec"]).ravel().tolist(),
         "n_corners": pose["n_corners"],
         "reproj_rms_px": pose["reproj_rms_px"],
+        "object_points": np.asarray(pose["object_points"]).tolist(),
+        "image_points": np.asarray(pose["image_points"]).tolist(),
+        "camera_K": reader.K.tolist(),
+        "camera_dist": reader.dist.tolist(),
+        "image_size": list(reader.meta["resolution"]),
+        "image_source": reader.meta.get("gray_source"),
       })
       save_poses(board, records)
       print(f"  recorded: {pose['n_corners']} corners, "
@@ -732,6 +941,12 @@ def run_solve(args) -> int:
     return 1
   print(f"residual         {out['residual_mm']:.2f} mm rms, "
         f"{out['worst_mm']:.2f} mm worst (pose {out['worst_pose']})")
+  if out.get("joint_refined"):
+    print(f"corner refine    {out['reprojection_before_px']:.3f} -> "
+          f"{out['reprojection_rms_px']:.3f} px over "
+          f"{out['n_corner_observations']} fused corners")
+  else:
+    print("corner refine    unavailable (legacy poses have no saved corners)")
   T = out["T_base_cam"]
   print(f"camera position  {np.round(T[:3, 3], 4).tolist()} m")
   nominal = config.sim_camera_extrinsic()

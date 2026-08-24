@@ -122,10 +122,16 @@ class Stream:
     cfg = rs.config()
     if serial:
       cfg.enable_device(serial)
+    self.gray_source = str(getattr(args, "gray_source", "aligned_color"))
+    if self.gray_source not in ("aligned_color", "left_ir"):
+      raise ValueError(
+        f"unknown D405 gray source {self.gray_source!r}; expected "
+        "'aligned_color' or 'left_ir'")
     cfg.enable_stream(rs.stream.depth, args.width, args.height, rs.format.z16,
                       args.fps)
-    cfg.enable_stream(rs.stream.color, args.width, args.height, rs.format.bgr8,
-                      args.fps)
+    if self.gray_source == "aligned_color":
+      cfg.enable_stream(rs.stream.color, args.width, args.height,
+                        rs.format.bgr8, args.fps)
     # The left infrared imager, optionally, and NOT aligned to anything.
     #
     # The colour stream below is warped into the depth grid, which is right for
@@ -141,7 +147,8 @@ class Stream:
     # as that imager's frame, so its intrinsics are the depth intrinsics --
     # checked on this camera, identical to five decimal places and zero
     # distortion, where the colour stream carries -0.052 of radial.
-    self.infrared = bool(getattr(args, "infrared", False))
+    self.infrared = (self.gray_source == "left_ir"
+                     or bool(getattr(args, "infrared", False)))
     if self.infrared:
       cfg.enable_stream(rs.stream.infrared, 1, args.width, args.height,
                         rs.format.y8, args.fps)
@@ -150,6 +157,7 @@ class Stream:
     profile = self._pipe.start(cfg)
     dev = profile.get_device()
     sensor = dev.first_depth_sensor()
+    self._depth_sensor = sensor
     if sensor.supports(rs.option.visual_preset):
       sensor.set_option(rs.option.visual_preset, float(PRESETS[args.preset]))
     if sensor.supports(rs.option.depth_units):
@@ -158,7 +166,8 @@ class Stream:
 
     # Colour is resampled into the depth grid, never the other way round: the
     # depth samples are the measurement and must not be interpolated.
-    self._align = rs.align(rs.stream.depth)
+    self._align = (rs.align(rs.stream.depth)
+                   if self.gray_source == "aligned_color" else None)
     self._filters = _post(args)
 
     intr = profile.get_stream(rs.stream.depth).as_video_stream_profile() \
@@ -178,6 +187,7 @@ class Stream:
       "librealsense": rs.__version__ if hasattr(rs, "__version__") else "unknown",
       "resolution": [args.width, args.height],
       "fps": args.fps,
+      "gray_source": self.gray_source,
       "preset": args.preset,
       "depth_units_m": self._scale,
       "filters": bool(getattr(args, "filters", False)),
@@ -199,6 +209,19 @@ class Stream:
       f = raw.get_infrared_frame(1)
       if f:
         ir = np.asanyarray(f.get_data()).copy()
+    if self.gray_source == "left_ir":
+      # The depth frame is defined in this left imager's optical frame.  No
+      # colour-to-depth warp, no black alignment holes at marker edges, and no
+      # factory extrinsic is needed before hand-eye calibration.
+      d = raw.get_depth_frame()
+      if not d or ir is None:
+        raise RuntimeError("no raw left grayscale/depth frame")
+      for f in self._filters:
+        d = f.process(d)
+      depth = (np.asanyarray(d.as_depth_frame().get_data()).astype(np.float32)
+               * self._scale)
+      return depth, ir, ir
+
     frames = self._align.process(raw)
     d = frames.get_depth_frame()
     for f in self._filters:
@@ -210,6 +233,30 @@ class Stream:
       raise RuntimeError("no colour frame; cannot locate the target")
     gray = cv2.cvtColor(np.asanyarray(c.get_data()), cv2.COLOR_BGR2GRAY)
     return depth, gray, ir
+
+  def intrinsics(self, width: int, height: int) -> np.ndarray:
+    """Factory depth intrinsics for another supported resolution.
+
+    Calibration runs the raw imager at 1280x720, while deployment deliberately
+    remains at the characterised 848x480 mode.  Extrinsics are resolution
+    independent; the rig file still needs the latter mode's exact per-device
+    intrinsics rather than a scaled approximation.
+    """
+    for p in self._depth_sensor.get_stream_profiles():
+      try:
+        if p.stream_type() != rs.stream.depth or p.format() != rs.format.z16:
+          continue
+        v = p.as_video_stream_profile()
+        if v.width() != int(width) or v.height() != int(height):
+          continue
+        intr = v.get_intrinsics()
+        return np.array([[intr.fx, 0.0, intr.ppx],
+                         [0.0, intr.fy, intr.ppy],
+                         [0.0, 0.0, 1.0]], dtype=np.float64)
+      except RuntimeError:
+        continue
+    raise RuntimeError(
+      f"D405 does not report a {width}x{height} depth profile")
 
   def close(self) -> None:
     try:
