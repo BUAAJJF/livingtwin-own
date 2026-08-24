@@ -197,15 +197,19 @@ def _end_the_table(camera: torch.Tensor, edge) -> torch.Tensor:
   robot rather than the table.
   """
   off, plane, floor = edge
-  n = camera.shape[0]
-  img = camera.view(n, 3, *plane.shape).clone()
-  depth = img[:, 0]
-  bare = depth >= (plane - 0.02).unsqueeze(0)
-  depth = torch.where(bare & off.unsqueeze(0), floor.expand_as(depth), depth)
-  img[:, 0] = depth
+  # The observation carries the image as ``(N, 3, H, W)``; keep that shape
+  # rather than assuming it, so this survives the group being flattened later.
+  img = camera.reshape(*camera.shape[:-3], 3, *plane.shape).clone()
+  depth = img[..., 0, :, :]
+  # Only pixels reading the bare plane are touched.  Anything nearer is the arm
+  # swinging out over the edge, and rewriting that would be ablating the robot
+  # rather than the table.
+  bare = depth >= (plane - 0.02)
+  depth = torch.where(bare & off, floor.expand_as(depth), depth)
+  img[..., 0, :, :] = depth
   # The third channel is the product of the first two by construction.
-  img[:, 2] = depth * img[:, 1]
-  return img.reshape(n, -1)
+  img[..., 2, :, :] = depth * img[..., 1, :, :]
+  return img.reshape(camera.shape)
 
 
 def main() -> int:
