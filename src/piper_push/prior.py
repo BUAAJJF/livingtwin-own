@@ -21,6 +21,28 @@ from typing import ClassVar
 import torch
 
 
+def risk_lambda(costs, odds: float = 9.0) -> float:
+  """The pre-registered tilt strength for :meth:`CategoricalPrior.tilt`.
+
+  ``ln(odds) / (max cost - min cost)``, with ``odds = 9``.  Fixed before any
+  adaptation was run, and stated as a rule rather than a number so that it
+  cannot be tuned towards the answer.
+
+  What it means: applied to a posterior that is *undecided between* the two
+  extremes of the cost range, it produces 9:1 odds in favour of the dangerous
+  one.  That is a deliberate, bounded amount of pessimism -- enough that a
+  method which is genuinely uncertain spends most of its PPO budget where the
+  safety cost is, and little enough that a candidate the data have argued
+  against does not come back.  Being a ratio of costs it is scale-free, so the
+  same rule carries to an axis whose costs are measured in other units.
+  """
+  lo = min(float(c) for c in costs)
+  hi = max(float(c) for c in costs)
+  if hi <= lo:
+    return 0.0
+  return math.log(odds) / (hi - lo)
+
+
 @dataclass(frozen=True)
 class CategoricalPrior:
   """A distribution over :attr:`VALUES`, which a subclass supplies."""
@@ -75,6 +97,57 @@ class CategoricalPrior:
     return cls(tuple(float(x) for x in torch.softmax(t / temperature, dim=0)))
 
   # -- combination ----------------------------------------------------------
+
+  def tilt(self, cost, lam: float):
+    """Reweight by ``exp(lam * cost)`` and renormalise -- a risk-averse tilt.
+
+    This is where WM1-B's risk-awareness lives, and it is worth being exact
+    about why it lives here rather than in a learned head.
+
+    The phase specification asks for ``C_obs(history) -> P(a safety event in
+    the next H steps)``, and that head was built, trained and measured. Inside
+    the target domain, with no cross-domain base-rate shortcut available, it
+    scored 1.02x its base rate against a shuffled-label control at 1.16x: the
+    label is not predictable from deployable observations at any lead time
+    tested. So there is no honest per-step risk signal to put in a score.
+
+    What is available without any target label at all is ``cost[i]``: how
+    often the safety shell fires under candidate ``i`` *in simulation*. Tilting
+    an ordinary posterior by it produces a distribution that is deliberately
+    not the best estimate of the domain -- it is the estimate a planner should
+    train against when being wrong towards danger is cheaper than being wrong
+    towards safety. At ``lam = 0`` it is the posterior unchanged; as ``lam``
+    grows it concentrates on the most dangerous candidate the data have not
+    ruled out.
+
+    The consequence, which the report has to state rather than bury: when the
+    posterior is already a point mass the tilt does nothing, because there is
+    no surviving candidate to move mass towards. It can only help a posterior
+    that is genuinely uncertain -- which is the comparison the phase is
+    actually about.
+
+    ``cost`` is in whatever units the caller measured; ``lam`` carries the
+    reciprocal unit. Both are recorded in :meth:`to_json` so a tilted prior can
+    never be mistaken for a fitted one.
+    """
+    values = type(self).VALUES
+    if len(cost) != len(values):
+      raise ValueError(f"cost has {len(cost)} entries, expected {len(values)}")
+    if lam < 0:
+      raise ValueError("lam must be non-negative: a negative tilt would move "
+                       "mass towards the safest candidate, which is the "
+                       "opposite of risk aversion")
+    m = max(float(c) for c in cost)
+    w = [p * math.exp(lam * (float(c) - m))
+         for p, c in zip(self.probs, cost)]
+    total = sum(w)
+    if total <= 0.0:
+      # every candidate the posterior allows has been tilted into underflow;
+      # returning the posterior unchanged is the only defensible answer, and
+      # it is loud rather than silent.
+      raise ValueError("the tilt underflowed to zero mass; lam is too large "
+                       f"for costs spanning {min(cost)} to {m}")
+    return type(self)(tuple(v / total for v in w))
 
   def mix(self, other, alpha: float):
     """``alpha * self + (1 - alpha) * other``."""

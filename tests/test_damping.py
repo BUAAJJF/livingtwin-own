@@ -28,7 +28,7 @@ import mjlab.tasks  # noqa: F401  -- import mjlab before us
 import pytest
 import torch
 
-from piper_push import damping
+from piper_push import damping, prior
 
 
 # ---------------------------------------------------------------------------
@@ -224,3 +224,109 @@ def test_a_partial_reset_leaves_the_other_environments_untouched():
   kd = -env.sim.model.actuator_biasprm[:, 0, 2]
   assert torch.allclose(kd[:8], torch.full((8,), 5.0 * 0.75))
   assert torch.allclose(kd[8:], torch.full((8,), 5.0 * 1.5))
+
+
+# ---------------------------------------------------------------------------
+# The risk-averse tilt
+# ---------------------------------------------------------------------------
+
+
+def test_the_tilt_is_the_identity_at_zero_lambda():
+  q = damping.DampingPrior((0.2, 0.5, 0.3))
+  out = q.tilt(damping.trip_costs(), 0.0)
+  assert out.probs == pytest.approx(q.probs, abs=1e-12)
+
+
+def test_the_tilt_moves_mass_towards_the_dangerous_candidate():
+  """0.75 trips 74 times as often as nominal, so any positive lambda has to
+  favour it -- that is the whole mechanism."""
+  q = damping.DampingPrior((1 / 3, 1 / 3, 1 / 3))
+  out = q.tilt(damping.trip_costs(), 0.01)
+  assert out.mass(damping.TARGET) > q.mass(damping.TARGET)
+  assert out.mass(damping.COUNTER) < q.mass(damping.COUNTER)
+  assert out.probs[0] > out.probs[1] > out.probs[2]
+
+
+def test_a_point_mass_cannot_be_tilted():
+  """The limitation the report has to state.  With no surviving candidate to
+  move mass towards, risk-awareness has nothing to do -- so it can only help a
+  posterior that is genuinely uncertain."""
+  q = damping.DampingPrior.point(damping.NOMINAL)
+  for lam in (0.0, 0.01, 1.0):
+    assert q.tilt(damping.trip_costs(), lam).probs == pytest.approx(q.probs)
+
+
+def test_a_large_lambda_concentrates_on_the_most_dangerous_survivor():
+  q = damping.DampingPrior((0.001, 0.5, 0.499))
+  out = q.tilt(damping.trip_costs(), 1.0)
+  assert out.mass(damping.TARGET) > 0.999
+
+
+def test_a_candidate_the_posterior_excluded_stays_excluded():
+  """The tilt reweights; it does not resurrect.  A candidate ruled out by the
+  data must not come back because it is dangerous."""
+  q = damping.DampingPrior((0.0, 0.5, 0.5))
+  out = q.tilt(damping.trip_costs(), 0.05)
+  assert out.mass(damping.TARGET) == 0.0
+
+
+def test_the_tilt_never_underflows_silently():
+  q = damping.DampingPrior((0.0, 0.5, 0.5))
+  with pytest.raises(ValueError, match="underflowed"):
+    q.tilt(damping.trip_costs(), 1e4)
+
+
+def test_a_negative_lambda_is_rejected():
+  q = damping.DampingPrior.uniform()
+  with pytest.raises(ValueError, match="non-negative"):
+    q.tilt(damping.trip_costs(), -1.0)
+
+
+def test_a_mismatched_cost_vector_is_rejected():
+  q = damping.DampingPrior.uniform()
+  with pytest.raises(ValueError, match="expected"):
+    q.tilt((1.0, 2.0), 0.1)
+
+
+def test_the_costs_match_what_the_dataset_measured():
+  c = damping.trip_costs()
+  assert len(c) == len(damping.VALUES)
+  assert c[damping.VALUES.index(damping.TARGET)] > 100.0
+  assert c[damping.VALUES.index(damping.COUNTER)] < c[
+    damping.VALUES.index(damping.NOMINAL)]
+
+
+def test_the_lambda_rule_gives_the_odds_it_promises():
+  """Nine to one between the extremes of the cost range, from an undecided
+  starting point -- that is the whole definition, so it is what gets pinned."""
+  c = damping.trip_costs()
+  lam = prior.risk_lambda(c)
+  hi, lo = max(c), min(c)
+  assert math.exp(lam * (hi - lo)) == pytest.approx(9.0)
+
+  two = damping.DampingPrior((0.5, 0.0, 0.5))     # target against counter
+  out = two.tilt(c, lam)
+  assert out.probs[0] / out.probs[2] == pytest.approx(9.0)
+
+
+def test_the_lambda_rule_is_scale_free():
+  """Costs in trips per hour and trips per minute must give the same tilt."""
+  c = damping.trip_costs()
+  per_min = tuple(x / 60.0 for x in c)
+  q = damping.DampingPrior.uniform()
+  a = q.tilt(c, prior.risk_lambda(c))
+  b = q.tilt(per_min, prior.risk_lambda(per_min))
+  assert a.probs == pytest.approx(b.probs, abs=1e-12)
+
+
+def test_the_lambda_rule_is_zero_when_every_candidate_costs_the_same():
+  assert prior.risk_lambda((3.0, 3.0, 3.0)) == 0.0
+
+
+def test_the_tilt_at_the_registered_lambda_does_what_the_report_will_claim():
+  """Concrete numbers, so a change to the rule cannot slip past the report."""
+  c = damping.trip_costs()
+  lam = prior.risk_lambda(c)
+  u = damping.DampingPrior.uniform().tilt(c, lam)
+  assert u.mass(damping.TARGET) == pytest.approx(0.816, abs=0.002)
+  assert u.mass(damping.NOMINAL) == pytest.approx(0.093, abs=0.002)

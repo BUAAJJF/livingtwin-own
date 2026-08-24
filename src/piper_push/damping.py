@@ -50,6 +50,25 @@ COUNTER = 1.5
 
 EVENT_NAME = "wm1b_servo_damping"
 
+TRIPS_PER_ARM_HOUR = {0.75: 206.0, 1.0: 2.8, 1.5: 0.7}
+"""Safety-shell firing rate under each candidate, measured in simulation.
+
+From the WM1-B dataset collection, which recorded the `over_speed` termination
+per environment across 2496 sessions and 35.2 arm-hours: 183-230/h at 0.75,
+1.9-3.8/h at 1.0, 0-1.4/h at 1.5.  The counter-direction candidate is *safer*
+than nominal, which is why 1.5 is a control and not a second target.
+
+These are simulator numbers and nothing else.  They are read to build a
+risk-averse tilt over candidates, which is a decision about where to spend a
+PPO budget; no target-domain reward, success, trip label or true damping is
+involved at any point.
+"""
+
+
+def trip_costs() -> tuple[float, ...]:
+  """The cost vector in :data:`VALUES` order, for `CategoricalPrior.tilt`."""
+  return tuple(TRIPS_PER_ARM_HOUR[v] for v in VALUES)
+
 
 class DampingPrior(prior.CategoricalPrior):
   """A categorical distribution over :data:`VALUES`, a multiplier on kd."""

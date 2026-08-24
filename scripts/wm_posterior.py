@@ -35,7 +35,8 @@ from pathlib import Path
 
 import torch
 
-from piper_push import damping, latency, risk, wm_data, wm_infer, wm_model
+from piper_push import (damping, latency, prior, risk, wm_data, wm_infer,
+                        wm_model)
 
 # Which simulator parameter this run is about.  Phase WM1-A's observation delay
 # and Phase WM1-B's servo damping differ in their candidate set, their target
@@ -85,16 +86,38 @@ METHODS: dict[str, dict] = {
   # number.  Free: the components are already cached.
   "abl_latent_only": {"latent": 1.0},
   "abl_action_only": {"action": 1.0},
-  # Phase WM1-B.  The risk-aware score asks what the *safety* consequence of
-  # the predicted future would have been, which is the question a tail-only
-  # mismatch makes different from every other score here.
-  "M5_risk_aware": {"latent": None, "action": None, "risk": None},  # fitted
+  # Phase WM1-B.  `S_risk` asked what the *safety* consequence of the predicted
+  # future would have been.  It is kept, and it is kept because it FAILED: the
+  # head it depends on scores 1.02x its base rate inside the target domain
+  # against a shuffled-label control at 1.16x, so the component is noise.  It
+  # stays in the report as a measured negative rather than being deleted.
   "abl_risk_only": {"risk": 1.0},
+  "M5_risk_score": {"latent": None, "action": None, "risk": None},  # fitted
   # Controls.
   "ctrl_wm_shuffled":  {"state_ctrl": 1.0, "latent_ctrl": 1.0,
                         "action_ctrl": 1.0},
   "ctrl_clf_shuffled": {"clf_shuf": 1.0},
   "ctrl_done_only":    {"clf_done": 1.0},
+}
+
+
+# Risk-awareness that does not depend on the failed head.  Each entry tilts
+# another method's posterior by the simulated trip rate of each candidate:
+#
+#     q_risk(theta) ∝ q(theta) * exp(lambda * cost(theta))
+#
+# The tilt reads only simulator safety labels, which the specification allows,
+# and never the target domain's reward, success, trip label or true damping.
+# It is not an estimator and does not try to be -- it is the distribution a
+# planner should train against when being wrong towards danger costs more than
+# being wrong towards safety.
+#
+# `M2_broad` is tilted because a broad posterior is the one with mass left to
+# move; `DA` is tilted as well so the report can show what the same operation
+# does to a posterior that is already nearly a point mass, which is nothing.
+TILTED = {
+  "M5_risk_aware": ("M2_broad", "LAMBDA"),
+  "M5_risk_aware_da": ("DA", "LAMBDA"),
 }
 
 
@@ -336,6 +359,10 @@ def main() -> int:
                  default="logs/rsl_rl/piperx_pick_place_vision/"
                          "2026-08-22_17-15-09_f3/model_1500.pt")
   p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
+  p.add_argument("--risk-lambda", type=float, default=None,
+                 help="tilt strength.  Default is the pre-registered rule in "
+                      "`default_lambda`; passing a value overrides it and the "
+                      "override is recorded in the posterior's provenance.")
   p.add_argument("--risk-head", default=None,
                  help="path to risk_head.pt; enables the risk component")
   p.add_argument("--device", default="cuda:0")
@@ -451,10 +478,10 @@ def main() -> int:
 
     for name, weights in METHODS.items():
       w = (w_da if name == "DA"
-           else w_m5 if name == "M5_risk_aware" else weights)
+           else w_m5 if name == "M5_risk_score" else weights)
       cal_r = [combine(c, k_of(c), w) for c, _ in cal_rows]
       cal_y = [y for _, y in cal_rows]
-      temp = (t_da if name == "DA" else t_m5 if name == "M5_risk_aware" else
+      temp = (t_da if name == "DA" else t_m5 if name == "M5_risk_score" else
               (wm_infer.fit_temperature(cal_r, cal_y, cls=PRIOR_CLS) if cal_r else 1.0))
       for split in ("test", "calh"):
         rows = [combine(r["comp"], k_of(r["comp"]), w) for r in scores.get(split, [])]
@@ -556,7 +583,8 @@ def main() -> int:
   # the honest one.
   chosen = {}
   for name in ("B1b_img_proprio", "B2_classifier", "B3_state", "B4_action",
-               "DA", "abl_latent_only", "abl_action_only"):
+               "DA", "abl_latent_only", "abl_action_only", "M2_broad",
+               "M5_risk_score"):
     e = report["budgets"]["60.0"]["methods"]["test"].get(name)
     t = (e or {}).get("target_only")
     if not t:
@@ -574,6 +602,38 @@ def main() -> int:
     d["mass_on_truth_across_sessions"] = {
       "mean": t["mass_on_truth"], "min": t["mass_min"], "max": t["mass_max"]}
     chosen[name] = d
+
+  # -- risk-aware tilts -----------------------------------------------------
+  # Applied after the fact to a base posterior, so nothing above changes and a
+  # tilted distribution can never be mistaken for a fitted one.
+  if a.axis == "servo_damping_scale":
+    costs = damping.trip_costs()
+    lam = (a.risk_lambda if a.risk_lambda is not None
+             else prior.risk_lambda(costs))
+    for name, (base, _) in TILTED.items():
+      if base not in chosen:
+        print(f"  !! no `{base}` posterior; `{name}` is not written")
+        continue
+      q = PRIOR_CLS(tuple(chosen[base]["probs"]))
+      try:
+        tilted = q.tilt(costs, lam)
+      except ValueError as exc:
+        print(f"  !! {name}: {exc}")
+        continue
+      d = tilted.to_json()
+      d["source"] = f"`{base}` tilted by exp({lam:.5f} * simulated trips/h)"
+      d["risk_tilt"] = {
+        "base_method": base, "lam": lam, "costs": list(costs),
+        "cost_units": "safety-shell firings per arm-hour, in simulation",
+        "base_probs": list(q.probs),
+        "total_variation_from_base": tilted.total_variation(q),
+        "reads_no_target_label": True,
+      }
+      chosen[name] = d
+      print(f"  {name}: {base} {['%.3f' % x for x in q.probs]} -> "
+            f"{['%.3f' % x for x in tilted.probs]} (TV "
+            f"{tilted.total_variation(q):.3f})")
+
   (out / "posteriors_60s.json").write_text(json.dumps(chosen, indent=1))
   print(f"\n  wrote {out / 'posterior_report.json'} and posteriors_60s.json")
   return 0
