@@ -207,6 +207,11 @@ def main() -> int:
                  default="results/wm1_damping/posterior/posterior_report.json")
   p.add_argument("--out", default="results/wm1_damping/gate.json")
   p.add_argument("--min-seeds", type=int, default=MIN_SEEDS)
+  p.add_argument("--markdown", default=None,
+                 help="also write sections 6.2 and 7 of the report as "
+                      "markdown, so the numbers in the document come from the "
+                      "same pass that decided the gate rather than from "
+                      "retyping them")
   a = p.parse_args()
 
   adapt = Path(a.adapt)
@@ -392,6 +397,50 @@ def main() -> int:
   report["verdict"] = worst
   print()
   print(f"  OVERALL: {worst}")
+
+  if a.markdown:
+    md = ["### 6.2 What the runs measured", "",
+          "| arm | seeds | evals | trips/arm-hour | NB 95% CI | obj/min |",
+          "|---|---|---|---|---|---|"]
+    for role in sorted(runs):
+      for domain in ("target", "retention"):
+        sl = seed_level.get((role, domain))
+        if not sl:
+          continue
+        nb = count.nb2_rate(sl["trips"], sl["hours"])
+        thr = t_interval(sl["throughput"])
+        md.append(f"| `{role}` — {domain} | {len(sl['seeds'])} | "
+                  f"{sl['n_eval']} | {nb['rate']:.2f} | "
+                  f"[{nb['ci'][0]:.2f}, {nb['ci'][1]:.2f}] | "
+                  f"{thr['mean']:.2f} |")
+    if anc:
+      md += ["", "Against the anchors of §2.4: "
+             + ", ".join(f"`{k}` {v['throughput']:.2f} obj/min and "
+                         f"{v['trips_per_hour']:.2f} trips/arm-hour"
+                         for k, v in sorted(anc.items())) + "."]
+    md += ["", "## 7. Gate", "",
+           "| criterion | verdict | detail |", "|---|---|---|"]
+    for name, c in report["criteria"].items():
+      v = ("NOT RUN" if not c.get("checked")
+           else c.get("verdict") or ("GREEN" if c.get("pass") else "RED"))
+      if "ratio" in c:
+        detail = (f"ratio {c['ratio']:.2f}, NB CI "
+                  f"[{c['ci_nb'][0]:.2f}, {c['ci_nb'][1]:.2f}], "
+                  f"Holm p {c['p_holm']:.3f}, "
+                  f"{min(c['n_seeds'])} seeds, alpha "
+                  f"{c.get('alpha_seed_heterogeneity', float('nan')):.2f}")
+      elif "loss" in c and c["loss"] == c["loss"]:
+        detail = (f"{100 * c['loss']:+.1f}% against `{c['reference']}`, "
+                  f"budget {100 * c['budget']:.0f}%")
+      elif "margin" in c:
+        detail = (f"{c['best_balanced']:.3f} (`{c['best']}`) against "
+                  f"{c['control_balanced']:.3f} (`{c['worst_control']}`)")
+      else:
+        detail = c.get("why", "")
+      md.append(f"| {name} | **{v}** | {detail} |")
+    md += ["", f"**OVERALL: {worst}**", ""]
+    Path(a.markdown).write_text("\n".join(md) + "\n")
+    print(f"  wrote {a.markdown}")
   Path(a.out).parent.mkdir(parents=True, exist_ok=True)
   Path(a.out).write_text(json.dumps(report, indent=1))
   print(f"  wrote {a.out}")

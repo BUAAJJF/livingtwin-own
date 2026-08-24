@@ -90,6 +90,9 @@ $M -c "from hardware.deploy import robot; a=robot.PiperArm(); a.connect(); \
 #    what to pass if it is not the sheet in hardware/depth_bench/targets.
 #    Either the guided page -- preflight, live coverage, solve, save:
 $M -m hardware.deploy.calibgui                # http://127.0.0.1:8771
+# If launching through `micromamba run` directly, attach its streams so the
+# ~30 s model import and each hardware startup stage are visible immediately:
+micromamba run -a "" -n mjlab python -u -m hardware.deploy.calibgui
 #    or the same steps from the prompt:
 $M -m hardware.deploy.calibrate --preview     # does the detector see the board?
 $M -m hardware.deploy.calibrate --collect     # vary the ORIENTATION

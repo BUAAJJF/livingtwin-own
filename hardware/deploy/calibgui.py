@@ -45,6 +45,14 @@ normal 30-degree gate.
 
 from __future__ import annotations
 
+# Importing the deployment model loads MuJoCo, mjlab and Torch and takes about
+# 30 seconds on this workstation.  Say so before those imports begin; without
+# this line the terminal is completely silent and a healthy first start looks
+# hung.
+if __name__ == "__main__":
+  print("calibgui: loading deployment model (about 30 s on first start) ...",
+        flush=True)
+
 import argparse
 import dataclasses
 import json
@@ -370,14 +378,31 @@ class Session:
     # The deployed perception path is the D405's grayscale stream.  Calibration
     # uses that exact image too; using the optional raw IR stream here would
     # make the GUI validate a different optical path from the one deployed.
-    self.reader = sensor.Reader(serial=serial, infrared=False)
+    print("calibgui: opening D405 grayscale stream ...", flush=True)
+    try:
+      self.reader = sensor.Reader(serial=serial, infrared=False)
+    except RuntimeError as e:
+      if "VIDIOC_S_FMT" in str(e) or "Input/output error" in str(e):
+        raise RuntimeError(
+          "D405 refused to start its video stream. Another process usually "
+          "has /dev/video* open; close RealSense Viewer and any older "
+          "calibgui, then check `fuser /dev/video*`. Unplug/replug the D405 "
+          "if no owner is reported. Original error: " + str(e)) from e
+      raise
     self.reader.wait_for_first()
 
     self.arm = None
     if not no_arm:
       from . import robot
-      self.arm = robot.PiperArm(can)
-      self.arm.connect()
+      print(f"calibgui: connecting arm on {can} ...", flush=True)
+      try:
+        self.arm = robot.PiperArm(can)
+        self.arm.connect()
+      except Exception:
+        # A failed CAN bring-up must not leave the camera thread alive and make
+        # the next launch fail with the unrelated-looking VIDIOC_S_FMT error.
+        self.reader.close()
+        raise
     self.kin = proprio.Kinematics()
     self.planner = NextPosePlanner(
       board, self.reader.K, (config.D405_WIDTH, config.D405_HEIGHT))
@@ -1046,12 +1071,12 @@ def main() -> int:
   a = p.parse_args()
 
   board = calibrate.board_from_args(a)
-  print(f"board: {board.describe()}")
+  print(f"board: {board.describe()}", flush=True)
   sess = Session(board, a.serial, a.can, a.no_arm, Path(a.poses),
                  a.still_mm, a.still_deg)
   httpd = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
   httpd.session = sess
-  print(f"\n  open http://127.0.0.1:{a.port}\n")
+  print(f"\n  open http://127.0.0.1:{a.port}\n", flush=True)
   try:
     httpd.serve_forever()
   except KeyboardInterrupt:

@@ -18,15 +18,19 @@
    "checked": false,
    "why": "need both risk_aware and broad_dr in the target domain, on 2+ seeds each"
   },
-  "C4  target throughput not paid away": {
+  "C4  tilted mixture trips < untilted, same alpha": {
+   "checked": false,
+   "why": "need both mixture_tilted and mixture in the target domain, on 2+ seeds each"
+  },
+  "C5  target throughput not paid away": {
    "checked": false,
    "why": "no risk-aware runs in target"
   },
-  "C5  source retention not paid away": {
+  "C6  source retention not paid away": {
    "checked": false,
    "why": "no risk-aware runs in retention"
   },
-  "C6  default-off with provenance": {
+  "C7  default-off with provenance": {
    "checked": true,
    "point_mass_at_nominal_installs_nothing": true,
    "writes_from_the_default_field": true,

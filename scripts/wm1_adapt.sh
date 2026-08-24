@@ -72,6 +72,23 @@ wait_for_gpu() {
   done
 }
 
+# Hide every card but this shard's own.
+#
+# `--device cuda:5` does NOT stop a process from touching cuda:0.  torch and
+# warp both initialise a context on device 0 during startup regardless of which
+# device the work runs on, and each of those contexts is ~464 MiB that stays
+# for the life of the process.  Nine concurrent jobs put 4.2 GiB on a card this
+# project was told to stay off entirely -- all of that card's used memory, in
+# fact, so it looked occupied while being idle.
+#
+# CUDA_VISIBLE_DEVICES makes it impossible rather than unlikely: the process
+# cannot enumerate the other cards at all.  Inside the process the one visible
+# card is renumbered to 0, so every --device below is cuda:0 and the physical
+# card is chosen here and only here.  `nvidia-smi -i` keeps using the global
+# index, which is what the memory wait wants.
+export CUDA_VISIBLE_DEVICES="$GPU"
+DEV=cuda:0
+
 BASE=logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt
 TASK=Mjlab-Pick-Place-PiperX-Vision
 # The output directory follows the PLAN, not the phase this script was first
@@ -133,7 +150,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
       --task "$TASK" --resume "$BASE" \
       --num-envs 512 --iterations "$ITERS" \
       "$FLAG" "$PROBS" "$SEEDFLAG" "$SEED" --seed "$SEED" \
-      --run-name "wm1_$TAG" --device "cuda:$GPU" --logger tensorboard \
+      --run-name "wm1_$TAG" --device "$DEV" --logger tensorboard \
       > "logs/wm1_adapt/$TAG.train.log" 2>&1 \
       || { echo "!!! $TAG training FAILED" >&2; exit 5; }
     # Highest ITERATION, not last path in a sort.  A run that was aborted --
@@ -173,7 +190,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
       wait_for_gpu "$MIN_FREE_MIB_EVAL"
       "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
-        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
+        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "$DEV" \
         "$EFLAG" "$EVAL" \
         --label "${TAG}_target__r$r" --json "$OUT/${TAG}_target__r$r.json" \
         > "$OUT/${TAG}_target__r$r.log" 2>&1
@@ -182,7 +199,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     if [ ! -e "$OUT/${TAG}_retention__r$r.json" ]; then
       wait_for_gpu "$MIN_FREE_MIB_EVAL"
       "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
-        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
+        --num-envs 512 --steps 2400 --seed "$SEED_E" --device "$DEV" \
         --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \
         > "$OUT/${TAG}_retention__r$r.log" 2>&1
     fi

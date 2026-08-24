@@ -198,3 +198,27 @@ def test_a_blocked_job_does_not_block_the_rest_of_the_queue():
     src = (ROOT / "scripts" / "wm1_queue.py").read_text()
     loop = src.split("for job in sorted(pending", 1)[1].split("proc = subprocess")[0]
     assert "continue" in loop and "break" not in loop
+
+
+def test_a_shard_cannot_see_any_card_but_its_own():
+    """`--device cuda:5` does not stop a process touching cuda:0.
+
+    torch and warp both initialise a context on device 0 during startup
+    whatever device the work runs on, and each of those is ~464 MiB held for
+    the life of the process.  Nine concurrent jobs put 4.2 GiB on a card this
+    project was told to stay off -- in fact all of that card's used memory, so
+    it read as occupied while being idle.
+
+    `CUDA_VISIBLE_DEVICES` makes it impossible rather than unlikely, and the
+    single visible card is then cuda:0 inside the process.
+    """
+    for name in ("wm1_adapt.sh", "wm1b_anchor.sh"):
+        src = (ROOT / "scripts" / name).read_text()
+        assert 'export CUDA_VISIBLE_DEVICES="$GPU"' in src, name
+        assert "DEV=cuda:0" in src, name
+        assert '--device "cuda:$GPU"' not in src, (
+            f"{name} still names a global device index; with "
+            "CUDA_VISIBLE_DEVICES set that index does not exist")
+        # the memory wait must keep the GLOBAL index -- nvidia-smi does not
+        # honour CUDA_VISIBLE_DEVICES and would otherwise poll the wrong card
+        assert '-i "$GPU"' in src or name == "wm1b_anchor.sh", name
