@@ -173,3 +173,28 @@ def test_evaluations_get_a_smaller_memory_floor_than_trainings():
     # the training still takes the full one
     body = src.split("finetune.py", 1)[0]
     assert body.rstrip().endswith("wait_for_gpu") or "\n    wait_for_gpu\n" in body
+
+
+def test_an_evaluation_only_job_is_admitted_at_the_smaller_floor():
+    """A job whose checkpoint is on disk has nothing left but evaluation.
+
+    Admitting it at the training floor is what left five finished WM1-A
+    checkpoints waiting hours for a training-sized hole while the cards were
+    busy with the other phase's trainings.  It also has to be admitted
+    *first* -- a finished checkpoint is closer to a result than an unstarted
+    training, and it is cheaper.
+    """
+    src = (ROOT / "scripts" / "wm1_queue.py").read_text()
+    assert "def needs_only_eval(tag: str) -> bool:" in src
+    assert 'sorted(pending, key=lambda j: not needs_only_eval(j["tag"]))' in src
+    assert "floor = (a.min_free_eval if needs_only_eval(job[\"tag\"])" in src
+    assert '"MIN_FREE_MIB_EVAL": str(a.min_free_eval)' in src
+
+
+def test_a_blocked_job_does_not_block_the_rest_of_the_queue():
+    """`break` on the first job that cannot be placed meant one expensive
+    training at the head of the list held up every cheap evaluation behind
+    it.  `continue` lets the queue keep looking."""
+    src = (ROOT / "scripts" / "wm1_queue.py").read_text()
+    loop = src.split("for job in sorted(pending", 1)[1].split("proc = subprocess")[0]
+    assert "continue" in loop and "break" not in loop

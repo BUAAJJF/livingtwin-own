@@ -388,8 +388,10 @@ def test_navigation_can_use_a_weaker_rotation_gate_without_weakening_the_solve()
 
 
 def test_calibration_motion_is_rest_to_rest_and_speed_limited():
+  import threading
+
   from hardware.deploy.calibgui import (AUTO_RATE_HZ, AUTO_SPEED_RAD_S,
-                                         _joint_trajectory)
+                                         Session, _joint_trajectory)
 
   q0 = np.zeros(6)
   q1 = np.array([0.31, -0.12, 0.07, 0.22, -0.18, 0.03])
@@ -400,6 +402,16 @@ def test_calibration_motion_is_rest_to_rest_and_speed_limited():
   assert speed.max() <= AUTO_SPEED_RAD_S * 1.01
   assert np.abs(path[1] - path[0]).max() < np.abs(path[len(path) // 2]
                                                    - path[len(path) // 2 - 1]).max()
+
+  # The browser's stop button must be a cancellation visible to the streaming
+  # worker, even though this unit test has no camera or arm to construct a full
+  # Session around.
+  sess = Session.__new__(Session)
+  sess.lock = threading.Lock()
+  sess.motion = {"status": "moving", "progress": 0.5}
+  sess._motion_cancel = threading.Event()
+  assert sess.stop_motion()["ok"]
+  assert sess._motion_cancel.is_set()
 
 
 def test_next_pose_planner_keeps_the_board_in_the_d405_gray_image():

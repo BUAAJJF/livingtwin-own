@@ -33,6 +33,7 @@
   button:disabled { opacity:.35; cursor:default; }
   button.go { background:var(--ok); border-color:var(--ok); color:#05130a; }
   button.auto { background:#1f6feb; border-color:#388bfd; color:white; }
+  button.stop { background:#8b1a1a; border-color:var(--bad); color:white; }
   button.big { width:100%; padding:16px; font-size:17px; margin-top:4px; }
   .check { display:flex; gap:10px; align-items:flex-start; padding:6px 0;
            border-bottom:1px solid #1d222a; }
@@ -86,6 +87,7 @@
       <h2>Next automatic target</h2>
       <div id="target"></div>
       <button id="move" class="big auto" disabled>move arm to the previewed target</button>
+      <button id="stop" class="big stop" disabled>stop and hold</button>
       <div class="why" id="movewhy"></div>
       <p class="hint">The cyan outline in the D405 grayscale image is the
       predicted board position. The planner checks camera visibility, joint
@@ -249,6 +251,7 @@ function render(s) {
   $("target").innerHTML = targetHtml;
   const canMove = !!(s.has_arm && t && t.available && t.status === "ready" && !moving);
   $("move").disabled = !canMove;
+  $("stop").disabled = !moving;
   $("movewhy").textContent = canMove ? ""
     : (moving ? "motion in progress" : (t && t.why) || (!g ? "rough extrinsic not ready" : "no ready target"));
 
@@ -318,6 +321,7 @@ $("move").onclick = async () => {
   if (!r.ok) $("movewhy").textContent = r.why;
   tick();
 };
+$("stop").onclick = async () => { await post("/stop-motion"); tick(); };
 addEventListener("keydown", e => {
   if (e.code === "Space" && !$("rec").disabled) { e.preventDefault(); $("rec").click(); }
 });

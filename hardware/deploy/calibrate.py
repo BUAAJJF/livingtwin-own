@@ -426,6 +426,10 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   same place from every viewpoint.  It is a fixed thing held in a moving hand,
   so its pose in the *gripper* frame is constant, and the spread of that is the
   error.
+
+  ``min_rotation_span_deg`` is explicit so the GUI may request a rough result
+  for view planning after its manual bootstrap.  Saving and the CLI leave it
+  at ``MIN_ROT_SPAN_DEG``; lowering it does not lower the calibration gate.
   """
   from .proprio import Kinematics
 

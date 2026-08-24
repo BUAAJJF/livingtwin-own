@@ -35,6 +35,12 @@ Nothing here re-implements the calibration.  Detection, the solve, the residual
 and the table fit are all ``calibrate.py``'s, called directly, so the GUI and
 the CLI cannot drift apart -- and ``calib_poses.json`` is written in the same
 format by both, so a session started in one can be finished in the other.
+
+After five manual seed poses, the same solver is allowed a weaker 15-degree
+gate to produce navigation-only guidance.  It predicts nearby board poses in
+the D405 grayscale image and lets the operator confirm one slow automatic
+move at a time.  That rough result is never saveable; the final solve keeps the
+normal 30-degree gate.
 """
 
 from __future__ import annotations
@@ -338,6 +344,7 @@ class Session:
     self.next_target: dict | None = None
     self.motion: dict = {"status": "idle", "progress": 0.0}
     self._motion_thread: threading.Thread | None = None
+    self._motion_cancel = threading.Event()
     self._last_plan_attempt = 0.0
     self._plan_epoch = 0
 
@@ -378,6 +385,11 @@ class Session:
     if config.RIG_FILE.exists():
       try:
         rig = config.Rig.load()
+        if (rig.serial and self.reader.serial
+            and str(rig.serial) != str(self.reader.serial)):
+          raise ValueError(
+            f"rig belongs to D405 {rig.serial}, connected camera is "
+            f"{self.reader.serial}")
         self.guidance_T = rig.T_base_cam.copy()
         self.guidance = {
           "source": f"existing {config.RIG_FILE.name}",
@@ -783,17 +795,24 @@ class Session:
       "vs_sim_deg": round(_ang(T[:3, :3], nominal[:3, :3]), 2),
       "T_base_cam": T.tolist(),
     }
+    guide_ok = (out["residual_mm"] <= 35.0
+                and np.linalg.norm(T[:3, 3] - nominal[:3, 3]) <= 0.40
+                and _ang(T[:3, :3], nominal[:3, :3]) <= 35.0)
     with self.lock:
-      self.guidance_T = T.copy()
-      self.guidance = {
-        "source": f"accepted solve from {len(records)} current poses",
-        "rough": False,
-        "session": True,
-        "position_m": self.solution["position_m"],
-        "residual_mm": self.solution["residual_mm"],
-        "rotation_span_deg": self.solution["rot_span_deg"],
-      }
       self._invalidate_target()
+      if guide_ok:
+        self.guidance_T = T.copy()
+        self.guidance = {
+          "source": f"accepted solve from {len(records)} current poses",
+          "rough": False,
+          "session": True,
+          "position_m": self.solution["position_m"],
+          "residual_mm": self.solution["residual_mm"],
+          "rotation_span_deg": self.solution["rot_span_deg"],
+        }
+      elif self.guidance and self.guidance.get("session"):
+        self.guidance_T = None
+        self.guidance = None
     return self.solution
 
   def move_next(self) -> dict:
@@ -811,6 +830,7 @@ class Session:
       self.next_target = target
       self.motion = {"status": "moving", "progress": 0.0,
                      "why": "enabling arm"}
+      self._motion_cancel.clear()
     self._motion_thread = threading.Thread(
       target=self._move_worker, args=(target,), daemon=True,
       name="calibgui-motion")
@@ -833,6 +853,8 @@ class Session:
       for i, q in enumerate(path):
         if self._stop.is_set():
           raise RuntimeError("session is closing")
+        if self._motion_cancel.is_set():
+          raise RuntimeError("motion cancelled by operator")
         with self.arm_lock:
           st = self.arm.read()
           command = np.array([*q, target["q"][6]], dtype=np.float64)
@@ -860,6 +882,8 @@ class Session:
       goal = np.asarray(target["q"][:6])
       final = float("inf")
       for _ in range(40):
+        if self._motion_cancel.is_set():
+          raise RuntimeError("motion cancelled by operator")
         with self.arm_lock:
           st = self.arm.read()
           self.arm.command(np.array([*goal, target["q"][6]]))
@@ -887,6 +911,14 @@ class Session:
         self.motion = {"status": "failed", "progress": 0.0,
                        "why": str(e)}
 
+  def stop_motion(self) -> dict:
+    with self.lock:
+      if self.motion.get("status") != "moving":
+        return {"ok": False, "why": "arm is not moving"}
+      self._motion_cancel.set()
+      self.motion["why"] = "stop requested; holding at feedback pose"
+    return {"ok": True}
+
   def save(self) -> dict:
     if not (self.solution and self.solution.get("ok")):
       return {"ok": False, "why": "solve first"}
@@ -911,6 +943,7 @@ class Session:
 
   def close(self) -> None:
     self._stop.set()
+    self._motion_cancel.set()
     if self._motion_thread is not None:
       self._motion_thread.join(timeout=3.0)
     self._thread.join(timeout=2.0)
@@ -984,6 +1017,8 @@ class Handler(BaseHTTPRequestHandler):
       self._json(sess.save())
     elif path == "/move-next":
       self._json(sess.move_next())
+    elif path == "/stop-motion":
+      self._json(sess.stop_motion())
     else:
       self.send_error(404)
 

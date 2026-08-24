@@ -327,8 +327,9 @@ as deployment.  The workflow is now assisted after the manual bootstrap:
    grayscale image, with joint angles and grasp-site position in the page.
    Clicking **move arm to the previewed target** is the confirmation: the arm
    enables, follows a 0.22 rad/s rest-to-rest joint trajectory, and stops on a
-   feedback tracking error.  Once the normal stillness ring turns green,
-   record the pose and the next target is generated.
+   feedback tracking error.  **stop and hold** cancels an in-progress stream
+   and commands the measured pose.  Once the normal stillness ring turns
+   green, record the pose and the next target is generated.
 
 An existing `rig.json` can seed guidance immediately; as soon as the current
 session has enough bootstrap poses, its rough solve supersedes that old result.

@@ -105,6 +105,11 @@ def is_done(tag: str) -> bool:
              for kind in ("target", "retention") for r in range(3))
 
 
+def needs_only_eval(tag: str) -> bool:
+  """The training is done and the checkpoint pointer is written."""
+  return (ADAPT / f"{tag}.ckpt").exists()
+
+
 def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--plan", required=True)
@@ -113,6 +118,11 @@ def main() -> int:
   p.add_argument("--max-concurrent", type=int, default=8)
   p.add_argument("--gpus", default=None,
                  help="comma-separated allow-list; default every visible card")
+  p.add_argument("--min-free-eval", type=int, default=15000,
+                 help="floor for a job that only has evaluations left.  A "
+                      "512-environment evaluation needs about 11 GiB against "
+                      "a training's 35; holding both to one number starves "
+                      "finished checkpoints behind other people's trainings.")
   p.add_argument("--backoff", type=float, default=900.0,
                  help="seconds to leave a tag alone after it fails")
   a = p.parse_args()
@@ -171,17 +181,24 @@ def main() -> int:
       # the candidate list to come from `stable` dropped the allow-list, so
       # --gpus was accepted, printed, and then ignored -- a queue told to use
       # four cards took all eight.
-      ready = {g for g in free if g in allowed and free[g] >= a.min_free_mib}
+      ready = {g for g in free if g in allowed and free[g] >= a.min_free_eval}
       stable = ready & was_free
       was_free = ready
       now = time.time()
       pending = [j for j in pending
                  if now - failed_at.get(j["tag"], 0.0) >= a.backoff]
-      for job in pending:
+      # A job whose checkpoint is already on disk has nothing left to do but
+      # evaluate, and an evaluation needs about a third of what a training
+      # needs.  Admitting it at the training floor is what left five finished
+      # WM1-A checkpoints waiting hours for a training-sized hole while the
+      # cards were busy with somebody else's trainings.
+      for job in sorted(pending, key=lambda j: not needs_only_eval(j["tag"])):
+        floor = (a.min_free_eval if needs_only_eval(job["tag"])
+                 else a.min_free_mib)
         cand = [g for g in stable
-                if g not in running and free.get(g, 0) >= a.min_free_mib]
+                if g not in running and free.get(g, 0) >= floor]
         if not cand:
-          break
+          continue
         gpu = max(cand, key=lambda g: free[g])
         one = ADAPT / f"queue_{job['tag']}.json"
         one.write_text(json.dumps({**plan, "jobs": [job], "n_runs": 1}, indent=1))
@@ -192,7 +209,8 @@ def main() -> int:
         # and the card sat half idle.  One number, passed down.
         proc = subprocess.Popen(
           ["bash", "scripts/wm1_adapt.sh", str(gpu), "0", "1", str(one)],
-          env={**os.environ, "MIN_FREE_MIB": str(a.min_free_mib)},
+          env={**os.environ, "MIN_FREE_MIB": str(a.min_free_mib),
+               "MIN_FREE_MIB_EVAL": str(a.min_free_eval)},
           stdout=open(f"logs/wm1_adapt/queue_{job['tag']}.log", "w"),
           stderr=subprocess.STDOUT)
         running[gpu] = (proc, job["tag"], time.time())
