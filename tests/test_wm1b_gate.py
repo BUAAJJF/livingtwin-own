@@ -182,3 +182,38 @@ def test_a_role_is_an_alpha_as_well_as_a_name(tmp_path):
 def test_the_seed_floor_is_the_one_the_specification_asked_for():
   assert gate.MIN_SEEDS == 8
   assert gate.THROUGHPUT_BUDGET == 0.05
+
+
+def test_every_job_in_the_real_plan_is_claimed_by_exactly_one_role():
+  """Run against the plan on disk, when there is one.
+
+  A job no role claims is not an error anywhere -- it is simply absent from the
+  gate, and the comparison it belonged to quietly runs with one arm short or
+  with two arms pooled. The plan is 43 jobs over six distributions and the
+  cheapest place to catch that is here.
+  """
+  plan_path = ROOT / "results" / "wm1_damping" / "adapt" / "all.json"
+  if not plan_path.exists():
+    pytest.skip("no merged plan on disk")
+  plan = json.loads(plan_path.read_text())
+
+  from collections import Counter
+  seen, unclaimed = Counter(), []
+  for j in plan["jobs"]:
+    alpha = float(j["tag"].split("_a")[1].split("_s")[0])
+    names = set(j["methods"])
+    for role, want in gate.ROLES.items():
+      if abs(alpha - want["alpha"]) > 1e-9:
+        continue
+      if names & set(want["methods"]):
+        seen[role] += 1
+        break
+    else:
+      unclaimed.append((j["tag"], sorted(names)))
+
+  assert not unclaimed, f"jobs no gate role claims: {unclaimed}"
+  for a, b in (("risk_aware", "trajectory_matching"),
+               ("risk_aware", "broad_dr"),
+               ("mixture_tilted", "mixture")):
+    assert seen[a] >= gate.MIN_SEEDS, f"{a} has {seen[a]} seeds"
+    assert seen[b] >= gate.MIN_SEEDS, f"{b} has {seen[b]} seeds"
