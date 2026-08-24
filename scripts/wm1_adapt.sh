@@ -19,7 +19,19 @@ SHARD=${2:?}; NSHARD=${3:?}; PLAN=${4:?}
 
 cd "$(dirname "$0")/.."
 export MUJOCO_GL=${MUJOCO_GL:-disable}
-PREFIX="$(micromamba env list | awk '$1=="mjlab" {print $NF}')"
+# Resolve micromamba by path, not by PATH.  When the queue supervisor is
+# itself started with `micromamba run`, the wrapper replaces PATH with the
+# environment's bin -- which does not contain micromamba -- so every shard this
+# script launched died with rc=127 one minute in, and the queue faithfully
+# moved on to the next job and killed that one too.
+MAMBA=${MAMBA:-$(command -v micromamba || true)}
+for c in "$HOME/.local/bin/micromamba" /usr/local/bin/micromamba; do
+  [ -n "$MAMBA" ] && break
+  [ -x "$c" ] && MAMBA="$c"
+done
+[ -n "$MAMBA" ] || { echo "!!! micromamba not found; set MAMBA" >&2; exit 3; }
+
+PREFIX="$("$MAMBA" env list | awk '$1=="mjlab" {print $NF}')"
 [ -n "$PREFIX" ] && export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
 # Fragmentation: rsl_rl's recurrent update pads whole trajectories, so one
@@ -106,7 +118,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
   if [ ! -e "$OUT/$TAG.ckpt" ]; then
     echo $$ > "$LOCK"
     wait_for_gpu
-    micromamba run -n mjlab python scripts/finetune.py \
+    "$MAMBA" run -n mjlab python scripts/finetune.py \
       --task "$TASK" --resume "$BASE" \
       --num-envs 512 --iterations "$ITERS" \
       "$FLAG" "$PROBS" "$SEEDFLAG" "$SEED" --seed "$SEED" \
@@ -149,7 +161,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     # report the result as a recovery.
     if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
       wait_for_gpu
-      micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
+      "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         "$EFLAG" "$EVAL" \
         --label "${TAG}_target__r$r" --json "$OUT/${TAG}_target__r$r.json" \
@@ -158,7 +170,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     # retention: back in the domain the policy was deployed from
     if [ ! -e "$OUT/${TAG}_retention__r$r.json" ]; then
       wait_for_gpu
-      micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
+      "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \
         > "$OUT/${TAG}_retention__r$r.log" 2>&1
