@@ -1,0 +1,99 @@
+{
+ "config": {
+  "data": "results/wm1_damping/data",
+  "out": "results/wm1_damping/model",
+  "epochs": 4,
+  "batch": 256,
+  "stride": 25,
+  "lr": 0.001,
+  "hidden": 96,
+  "axis": "servo_damping_scale",
+  "device": "cuda:6",
+  "seed": 0
+ },
+ "dims": {
+  "enc": 100,
+  "proprio": 13,
+  "action": 7,
+  "servo": 1
+ },
+ "length": 25,
+ "n_windows": {
+  "train": 91247,
+  "val": 11386,
+  "valh": 11414
+ },
+ "classifier": {
+  "history": [
+   {
+    "loss": 0.4064505244357412,
+    "train_acc": 0.8091444102271855
+   },
+   {
+    "loss": 0.03413908054115621,
+    "train_acc": 0.9884160575142197
+   },
+   {
+    "loss": 0.012361689135484417,
+    "train_acc": 0.9961971352482821
+   },
+   {
+    "loss": 0.007069500316461387,
+    "train_acc": 0.9979396582901355
+   }
+  ],
+  "window_accuracy": {
+   "val": 0.99825,
+   "valh": 0.9975
+  }
+ },
+ "shuffled": {
+  "history": [
+   {
+    "loss": 1.10058600094472,
+    "train_acc": 0.33104650015890935
+   },
+   {
+    "loss": 1.0992866323775603,
+    "train_acc": 0.33339178274354225
+   },
+   {
+    "loss": 1.0990262809587794,
+    "train_acc": 0.3341479719881202
+   },
+   {
+    "loss": 1.0988721376707573,
+    "train_acc": 0.3374467105767861
+   }
+  ],
+  "window_accuracy": {
+   "val": 0.327875,
+   "valh": 0.330125
+  }
+ },
+ "done_only": {
+  "history": [
+   {
+    "loss": 1.0987049731887688,
+    "train_acc": 0.33387399037776583
+   },
+   {
+    "loss": 1.0984967619765038,
+    "train_acc": 0.335660350477276
+   },
+   {
+    "loss": 1.098442500712825,
+    "train_acc": 0.3352548576939516
+   },
+   {
+    "loss": 1.0984234803197097,
+    "train_acc": 0.33513430578539566
+   }
+  ],
+  "window_accuracy": {
+   "val": 0.339375,
+   "valh": 0.340875
+  }
+ },
+ "wall_clock_s": 1552.4960656166077
+}

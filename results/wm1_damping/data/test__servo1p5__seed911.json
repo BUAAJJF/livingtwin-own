@@ -1,0 +1,27 @@
+{
+ "steps": 15000,
+ "n_envs": 32,
+ "arm_seconds": 9600.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 1.5,
+ "axis": "servo_damping_scale",
+ "episode_boundaries": 236,
+ "safety_trips": 6,
+ "shape_class_counts": [
+  0,
+  0,
+  0,
+  267969,
+  212031
+ ],
+ "bytes": 383040000,
+ "file": "test__servo1p5__seed911.pt",
+ "split": "test",
+ "shapes": "holdout",
+ "seed": 911
+}

@@ -1,0 +1,63 @@
+{
+ "stage": "formal",
+ "seeds": [
+  7,
+  13,
+  101,
+  2718,
+  31415
+ ],
+ "alphas": [
+  0.75
+ ],
+ "n_distinct": 3,
+ "n_runs": 1,
+ "jobs": [
+  {
+   "probs": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "alpha": 1.0,
+   "methods": [
+    "ORACLE"
+   ],
+   "prior": {
+    "values": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "unit": "control steps",
+    "probs": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0
+    ],
+    "argmax": 3,
+    "mean": 3.0,
+    "entropy_bits": -0.0,
+    "lags": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "mean_lag_steps": 3.0,
+    "mean_lag_ms": 60.0
+   },
+   "tag": "q7878_a1.00_s101",
+   "seed": 101,
+   "probs_arg": "0.000000,0.000000,0.000000,1.000000,0.000000",
+   "iterations": 2100
+  }
+ ]
+}

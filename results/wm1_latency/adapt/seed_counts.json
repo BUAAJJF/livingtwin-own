@@ -1,0 +1,2248 @@
+{
+ "configurations": {
+  "q13c3_a1.00|a1.0|retention": {
+   "name": "B0_prior_refit",
+   "methods": [
+    "B0_prior_refit"
+   ],
+   "alpha": 1.0,
+   "domain": "retention",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    75.0,
+    99.0,
+    41.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 3.499348958333195,
+    "ci": [
+     2.3550527755810977,
+     5.199647013925671
+    ],
+    "alpha": 0.1085210235831394,
+    "events": 215.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     3.6621093749998552,
+     4.833984374999809,
+     2.001953124999921
+    ],
+    "loglik": -13.812761396617047,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    3.6621093749998552,
+    4.833984374999809,
+    2.001953124999921
+   ],
+   "throughput_over_seeds": {
+    "mean": 55.67762756347656,
+    "ci": [
+     52.971969564660704,
+     58.38328556229242
+    ],
+    "n": 3,
+    "sd": 1.0890860148394603
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 3.4993489583331945,
+    "upper_quasi": 4.529970194223273,
+    "dispersion_within_repeats": 4.243023255813955,
+    "n_evaluations": 9
+   },
+   "recovery": NaN,
+   "retention_loss": 0.004710923691273703
+  },
+  "q13c3_a1.00|a1.0|target": {
+   "name": "B0_prior_refit",
+   "methods": [
+    "B0_prior_refit"
+   ],
+   "alpha": 1.0,
+   "domain": "target",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    106.0,
+    241.0,
+    92.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 7.1451822916663845,
+    "ci": [
+     4.379268476080784,
+     11.658026965004256
+    ],
+    "alpha": 0.1803340039588846,
+    "events": 439.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     5.175781249999795,
+     11.767578124999535,
+     4.492187499999822
+    ],
+    "loglik": -16.505255962942915,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    5.175781249999795,
+    11.767578124999535,
+    4.492187499999822
+   ],
+   "throughput_over_seeds": {
+    "mean": 42.08523220486111,
+    "ci": [
+     33.760952230150075,
+     50.40951217957214
+    ],
+    "n": 3,
+    "sd": 3.3507031960557008
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 7.145182291666384,
+    "upper_quasi": 9.55190643897871,
+    "dispersion_within_repeats": 11.797266514806376,
+    "n_evaluations": 9
+   },
+   "recovery": -0.0023646924918563237,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 11.658026965004256,
+    "enough_seeds": false
+   }
+  },
+  "q1ae5_a0.75|a0.75|retention": {
+   "name": "B2_classifier",
+   "methods": [
+    "B2_classifier"
+   ],
+   "alpha": 0.75,
+   "domain": "retention",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    163.0,
+    109.0,
+    73.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 5.615234374999781,
+    "ci": [
+     3.8960254561944074,
+     8.093082922763589
+    ],
+    "alpha": 0.09564717294715226,
+    "events": 345.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     7.958984374999685,
+     5.3222656249997895,
+     3.564453124999859
+    ],
+    "loglik": -14.999195177421008,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    7.958984374999685,
+    5.3222656249997895,
+    3.564453124999859
+   ],
+   "throughput_over_seeds": {
+    "mean": 53.58697043524848,
+    "ci": [
+     53.196772238210905,
+     53.97716863228606
+    ],
+    "n": 3,
+    "sd": 0.15706323548474452
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 5.615234374999777,
+    "upper_quasi": 7.069172636620636,
+    "dispersion_within_repeats": 5.413043478260871,
+    "n_evaluations": 9
+   },
+   "recovery": NaN,
+   "retention_loss": 0.042083353033025156
+  },
+  "q1ae5_a0.75|a0.75|target": {
+   "name": "B2_classifier",
+   "methods": [
+    "B2_classifier"
+   ],
+   "alpha": 0.75,
+   "domain": "target",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    171.0,
+    79.0,
+    85.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 5.452473958333115,
+    "ci": [
+     3.641838846157223,
+     8.163313513356195
+    ],
+    "alpha": 0.11824441422635013,
+    "events": 335.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     8.34960937499967,
+     3.8574218749998472,
+     4.150390624999836
+    ],
+    "loglik": -15.177556595811179,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    8.34960937499967,
+    3.8574218749998472,
+    4.150390624999836
+   ],
+   "throughput_over_seeds": {
+    "mean": 49.53830422295465,
+    "ci": [
+     49.40748947407971,
+     49.66911897182959
+    ],
+    "n": 3,
+    "sd": 0.05265577304921344
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 5.452473958333117,
+    "upper_quasi": 7.07559575843303,
+    "dispersion_within_repeats": 6.936567164179105,
+    "n_evaluations": 9
+   },
+   "recovery": 0.5368049116429221,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 8.163313513356195,
+    "enough_seeds": false
+   }
+  },
+  "q2f23_a0.50|a0.5|retention": {
+   "name": "decision-aware",
+   "methods": [
+    "DA"
+   ],
+   "alpha": 0.5,
+   "domain": "retention",
+   "n_seeds": 1,
+   "seeds": [
+    42
+   ],
+   "n_evaluations": 3,
+   "trips_per_seed": [
+    140.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 6.835937499999731,
+    "ci": [
+     5.792398371761101,
+     8.067477149313355
+    ],
+    "alpha": 0.0,
+    "events": 140.0,
+    "exposure_h": 20.48000000000081,
+    "n_clusters": 1,
+    "per_cluster_rate": [
+     6.835937499999729
+    ],
+    "loglik": -3.390354981592168,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    6.835937499999729
+   ],
+   "throughput_over_seeds": {
+    "mean": 54.6435546875,
+    "ci": [
+     NaN,
+     NaN
+    ],
+    "n": 1,
+    "sd": NaN
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 6.835937499999729,
+    "upper_quasi": 8.066674335974827,
+    "dispersion_within_repeats": 0.65,
+    "n_evaluations": 3
+   },
+   "recovery": NaN,
+   "retention_loss": 0.023195932528858532
+  },
+  "q2f23_a0.50|a0.5|target": {
+   "name": "decision-aware",
+   "methods": [
+    "DA"
+   ],
+   "alpha": 0.5,
+   "domain": "target",
+   "n_seeds": 1,
+   "seeds": [
+    42
+   ],
+   "n_evaluations": 3,
+   "trips_per_seed": [
+    116.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 5.6640624999997735,
+    "ci": [
+     4.72167355491592,
+     6.794540882755917
+    ],
+    "alpha": 0.0,
+    "events": 116.0,
+    "exposure_h": 20.48000000000081,
+    "n_clusters": 1,
+    "per_cluster_rate": [
+     5.664062499999776
+    ],
+    "loglik": -3.296452017782883,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    5.664062499999776
+   ],
+   "throughput_over_seeds": {
+    "mean": 47.89957809448242,
+    "ci": [
+     NaN,
+     NaN
+    ],
+    "n": 1,
+    "sd": NaN
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 5.664062499999776,
+    "upper_quasi": 6.793503441322824,
+    "dispersion_within_repeats": 0.06034482758620689,
+    "n_evaluations": 3
+   },
+   "recovery": 0.41825630298481103,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 6.794540882755917,
+    "enough_seeds": false
+   }
+  },
+  "q48aa_a0.75|a0.75|retention": {
+   "name": "B3_state",
+   "methods": [
+    "B3_state"
+   ],
+   "alpha": 0.75,
+   "domain": "retention",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    88.0,
+    40.0,
+    202.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 5.3710937499997895,
+    "ci": [
+     2.642799719127204,
+     10.915941856091232
+    ],
+    "alpha": 0.38369291946720097,
+    "events": 330.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     4.29687499999983,
+     1.9531249999999227,
+     9.86328124999961
+    ],
+    "loglik": -16.5304543656464,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    4.29687499999983,
+    1.9531249999999227,
+    9.86328124999961
+   ],
+   "throughput_over_seeds": {
+    "mean": 54.06250127156576,
+    "ci": [
+     52.51605873670563,
+     55.608943806425884
+    ],
+    "n": 3,
+    "sd": 0.6224766538143967
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 5.371093749999787,
+    "upper_quasi": 7.826208493432962,
+    "dispersion_within_repeats": 16.097727272727273,
+    "n_evaluations": 9
+   },
+   "recovery": NaN,
+   "retention_loss": 0.03358279962322062
+  },
+  "q48aa_a0.75|a0.75|target": {
+   "name": "B3_state",
+   "methods": [
+    "B3_state"
+   ],
+   "alpha": 0.75,
+   "domain": "target",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    84.0,
+    55.0,
+    133.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 4.427083333333155,
+    "ci": [
+     2.9617139095665816,
+     6.617474691586379
+    ],
+    "alpha": 0.11515872319288042,
+    "events": 272.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     4.1015624999998375,
+     2.685546874999894,
+     6.494140624999743
+    ],
+    "loglik": -14.548759911209993,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    4.1015624999998375,
+    2.685546874999894,
+    6.494140624999743
+   ],
+   "throughput_over_seeds": {
+    "mean": 49.0185555352105,
+    "ci": [
+     48.58071648754048,
+     49.45639458288053
+    ],
+    "n": 3,
+    "sd": 0.1762397109230886
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 4.427083333333158,
+    "upper_quasi": 5.63340244398532,
+    "dispersion_within_repeats": 4.663602941176471,
+    "n_evaluations": 9
+   },
+   "recovery": 0.4992052891597001,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 6.617474691586379,
+    "enough_seeds": false
+   }
+  },
+  "q7878_a1.00|a1.0|retention": {
+   "name": "known-parameter target-only adaptation",
+   "methods": [
+    "ORACLE"
+   ],
+   "alpha": 1.0,
+   "domain": "retention",
+   "n_seeds": 7,
+   "seeds": [
+    7,
+    13,
+    42,
+    101,
+    2718,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 13,
+   "trips_per_seed": [
+    29.0,
+    106.0,
+    126.0,
+    62.0,
+    73.0,
+    161.0,
+    87.0
+   ],
+   "hours_per_seed": [
+    6.826666666666937,
+    6.826666666666937,
+    20.48000000000081,
+    6.826666666666937,
+    6.826666666666937,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 8.199677939985106,
+    "ci": [
+     5.944005229334265,
+     11.311349119894492
+    ],
+    "alpha": 0.17602254562613917,
+    "events": 644.0,
+    "exposure_h": 88.74666666667018,
+    "n_clusters": 7,
+    "per_cluster_rate": [
+     4.248046874999832,
+     15.527343749999385,
+     6.152343749999757,
+     9.08203124999964,
+     10.693359374999577,
+     7.861328124999689,
+     4.248046874999832
+    ],
+    "loglik": -35.173430029774416,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    4.248046874999832,
+    15.527343749999385,
+    6.152343749999757,
+    9.08203124999964,
+    10.693359374999577,
+    7.861328124999689,
+    4.248046874999832
+   ],
+   "throughput_over_seeds": {
+    "mean": 49.55520030430385,
+    "ci": [
+     48.389795591727584,
+     50.72060501688012
+    ],
+    "n": 7,
+    "sd": 1.2600617271023762
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 7.25661057692279,
+    "upper_quasi": 10.862258325185065,
+    "dispersion_within_repeats": 10.011128364389235,
+    "n_evaluations": 13
+   },
+   "recovery": NaN,
+   "retention_loss": 0.11415497219356022
+  },
+  "q7878_a1.00|a1.0|target": {
+   "name": "known-parameter target-only adaptation",
+   "methods": [
+    "ORACLE"
+   ],
+   "alpha": 1.0,
+   "domain": "target",
+   "n_seeds": 8,
+   "seeds": [
+    7,
+    13,
+    42,
+    101,
+    2718,
+    31415,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 16,
+   "trips_per_seed": [
+    39.0,
+    148.0,
+    82.0,
+    157.0,
+    108.0,
+    56.0,
+    119.0,
+    79.0
+   ],
+   "hours_per_seed": [
+    6.826666666666937,
+    6.826666666666937,
+    20.48000000000081,
+    13.653333333333874,
+    13.653333333333874,
+    6.826666666666937,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 8.535701339091357,
+    "ci": [
+     5.828025024008534,
+     12.501352868257571
+    ],
+    "alpha": 0.292583533955178,
+    "events": 788.0,
+    "exposure_h": 109.226666666671,
+    "n_clusters": 8,
+    "per_cluster_rate": [
+     5.7128906249997735,
+     21.67968749999914,
+     4.003906249999842,
+     11.499023437499545,
+     7.9101562499996865,
+     8.203124999999675,
+     5.81054687499977,
+     3.8574218749998472
+    ],
+    "loglik": -42.95668101880008,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    5.7128906249997735,
+    21.67968749999914,
+    4.003906249999842,
+    11.499023437499545,
+    7.9101562499996865,
+    8.203124999999675,
+    5.81054687499977,
+    3.8574218749998472
+   ],
+   "throughput_over_seeds": {
+    "mean": 46.4880895614624,
+    "ci": [
+     44.46722686485821,
+     48.50895225806659
+    ],
+    "n": 8,
+    "sd": 2.4168553346566712
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 7.214355468749714,
+    "upper_quasi": 5.438215204514301,
+    "dispersion_within_repeats": 20.4818950930626,
+    "n_evaluations": 16
+   },
+   "recovery": 0.3161465002428471,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 12.501352868257571,
+    "enough_seeds": true
+   }
+  },
+  "qcc23_a0.75|a0.75|retention": {
+   "name": "B4_action / decision-aware",
+   "methods": [
+    "B4_action",
+    "DA"
+   ],
+   "alpha": 0.75,
+   "domain": "retention",
+   "n_seeds": 4,
+   "seeds": [
+    42,
+    101,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 10,
+   "trips_per_seed": [
+    154.0,
+    73.0,
+    163.0,
+    70.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    6.826666666666937,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 7.327981043789228,
+    "ci": [
+     5.006217896450783,
+     10.726521955068119
+    ],
+    "alpha": 0.14138311619825586,
+    "events": 460.0,
+    "exposure_h": 68.26666666666937,
+    "n_clusters": 4,
+    "per_cluster_rate": [
+     7.5195312499997025,
+     10.693359374999577,
+     7.958984374999685,
+     3.4179687499998646
+    ],
+    "loglik": -20.68007381657727,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    7.5195312499997025,
+    10.693359374999577,
+    7.958984374999685,
+    3.4179687499998646
+   ],
+   "throughput_over_seeds": {
+    "mean": 53.582764625549316,
+    "ci": [
+     51.208256242788664,
+     55.95727300830997
+    ],
+    "n": 4,
+    "sd": 1.4924628427156845
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 6.7382812499997335,
+    "upper_quasi": 8.418269625410757,
+    "dispersion_within_repeats": 6.78743961352657,
+    "n_evaluations": 10
+   },
+   "recovery": NaN,
+   "retention_loss": 0.04215853577039736
+  },
+  "qcc23_a0.75|a0.75|target": {
+   "name": "B4_action / decision-aware",
+   "methods": [
+    "B4_action",
+    "DA"
+   ],
+   "alpha": 0.75,
+   "domain": "target",
+   "n_seeds": 5,
+   "seeds": [
+    7,
+    42,
+    101,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 11,
+   "trips_per_seed": [
+    48.0,
+    66.0,
+    59.0,
+    164.0,
+    92.0
+   ],
+   "hours_per_seed": [
+    6.826666666666937,
+    20.48000000000081,
+    6.826666666666937,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 6.20698084475048,
+    "ci": [
+     4.5143351853214915,
+     8.534282375037174
+    ],
+    "alpha": 0.1182453314545519,
+    "events": 429.0,
+    "exposure_h": 75.0933333333363,
+    "n_clusters": 5,
+    "per_cluster_rate": [
+     7.031249999999721,
+     3.2226562499998725,
+     8.642578124999657,
+     8.007812499999684,
+     4.492187499999822
+    ],
+    "loglik": -23.8565329776737,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    7.031249999999721,
+    3.2226562499998725,
+    8.642578124999657,
+    8.007812499999684,
+    4.492187499999822
+   ],
+   "throughput_over_seeds": {
+    "mean": 47.95361506144205,
+    "ci": [
+     44.65375824561191,
+     51.25347187727219
+    ],
+    "n": 5,
+    "sd": 2.658034638404971
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 5.712890624999774,
+    "upper_quasi": 7.162851136567464,
+    "dispersion_within_repeats": 6.538461538461537,
+    "n_evaluations": 11
+   },
+   "recovery": 0.42216544139291134,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": false,
+    "upper": 8.534282375037174,
+    "enough_seeds": false
+   }
+  },
+  "qcd16_a0.75|a0.75|retention": {
+   "name": "B1b_img_proprio",
+   "methods": [
+    "B1b_img_proprio"
+   ],
+   "alpha": 0.75,
+   "domain": "retention",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    102.0,
+    77.0,
+    115.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 4.78515624999981,
+    "ci": [
+     3.976072441835242,
+     5.758879062661974
+    ],
+    "alpha": 0.016588859373485098,
+    "events": 294.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     4.980468749999803,
+     3.7597656249998512,
+     5.615234374999778
+    ],
+    "loglik": -12.575028551877011,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    4.980468749999803,
+    3.7597656249998512,
+    5.615234374999778
+   ],
+   "throughput_over_seeds": {
+    "mean": 54.02045525444879,
+    "ci": [
+     53.03915272733892,
+     55.00175778155866
+    ],
+    "n": 3,
+    "sd": 0.39499554602603404
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 4.78515624999981,
+    "upper_quasi": 5.5073759435848215,
+    "dispersion_within_repeats": 1.5535714285714286,
+    "n_evaluations": 9
+   },
+   "recovery": NaN,
+   "retention_loss": 0.03433441105801275
+  },
+  "qcd16_a0.75|a0.75|target": {
+   "name": "B1b_img_proprio",
+   "methods": [
+    "B1b_img_proprio"
+   ],
+   "alpha": 0.75,
+   "domain": "target",
+   "n_seeds": 3,
+   "seeds": [
+    42,
+    20260824,
+    31415927
+   ],
+   "n_evaluations": 9,
+   "trips_per_seed": [
+    96.0,
+    91.0,
+    85.0
+   ],
+   "hours_per_seed": [
+    20.48000000000081,
+    20.48000000000081,
+    20.48000000000081
+   ],
+   "negative_binomial": {
+    "rate": 4.427083333333161,
+    "ci": [
+     3.9310269608836195,
+     4.98573706954957
+    ],
+    "alpha": 0.0,
+    "events": 272.0,
+    "exposure_h": 61.44000000000243,
+    "n_clusters": 3,
+    "per_cluster_rate": [
+     4.687499999999814,
+     4.443359374999824,
+     4.150390624999836
+    ],
+    "loglik": -9.853888024968342,
+    "zero_events": false,
+    "method": "negative binomial (NB2), clusters as observations"
+   },
+   "per_seed_rate": [
+    4.687499999999814,
+    4.443359374999824,
+    4.150390624999836
+   ],
+   "throughput_over_seeds": {
+    "mean": 49.7555898030599,
+    "ci": [
+     48.887567403926184,
+     50.62361220219361
+    ],
+    "n": 3,
+    "sd": 0.34939783811467023
+   },
+   "quasi_poisson_would_have_said": {
+    "rate": 4.427083333333158,
+    "upper_quasi": 4.985683967307719,
+    "dispersion_within_repeats": 0.22150735294117652,
+    "n_evaluations": 9
+   },
+   "recovery": 0.5525237695749442,
+   "retention_loss": NaN,
+   "g3": {
+    "pass": true,
+    "upper": 4.98573706954957,
+    "enough_seeds": false
+   }
+  }
+ },
+ "comparisons": [
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 0.6231884057971017,
+    "ci": [
+     0.3638585038500153,
+     1.0673483923300555
+    ],
+    "p_wald": 0.08496885730790389,
+    "p_lrt": 0.12075475043743147,
+    "lr_statistic": 2.4075042012949908,
+    "alpha": 0.10173177687690316,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 3.4993489583331963,
+    "rate_b": 5.615234374999778
+   },
+   "cluster_robust": {
+    "ratio": 0.623188405797102,
+    "ci": [
+     0.3283899277578494,
+     1.1826300269669294
+    ],
+    "p": 0.14795681911985328,
+    "n_clusters": 6,
+    "rate_a": 3.4993489583331963,
+    "rate_b": 5.615234374999775
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 0.6515151515151516,
+    "ci": [
+     0.2868834981507107,
+     1.479597102621845
+    ],
+    "p_wald": 0.3059240796216499,
+    "p_lrt": 0.3257007646294825,
+    "lr_statistic": 0.965916273206517,
+    "alpha": 0.25117805849654334,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 3.499348958333195,
+    "rate_b": 5.371093749999787
+   },
+   "cluster_robust": {
+    "ratio": 0.6515151515151518,
+    "ci": [
+     0.24652315812853148,
+     1.721834150901561
+    ],
+    "p": 0.38754165322922995,
+    "n_clusters": 6,
+    "rate_a": 3.4993489583331954,
+    "rate_b": 5.371093749999785
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 7
+   },
+   "negative_binomial": {
+    "ratio": 0.4271362574128747,
+    "ci": [
+     0.24468375432037112,
+     0.7456374980980421
+    ],
+    "p_wald": 0.002766753998873871,
+    "p_lrt": 0.01465966346350765,
+    "lr_statistic": 5.956915832807283,
+    "alpha": 0.15614965089680113,
+    "n_clusters": [
+     3,
+     7
+    ],
+    "rate_a": 3.4993489583331954,
+    "rate_b": 8.192582337843275
+   },
+   "cluster_robust": {
+    "ratio": 0.48222912353347164,
+    "ci": [
+     0.2846021422034697,
+     0.8170877625285324
+    ],
+    "p": 0.006712351794167037,
+    "n_clusters": 10,
+    "rate_a": 3.4993489583331954,
+    "rate_b": 7.256610576922787
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 4
+   },
+   "negative_binomial": {
+    "ratio": 0.47796031441172065,
+    "ci": [
+     0.272971950389002,
+     0.8368847488798795
+    ],
+    "p_wald": 0.009794043888066867,
+    "p_lrt": 0.03170184030813012,
+    "lr_statistic": 4.614548474136669,
+    "alpha": 0.12786428499660046,
+    "n_clusters": [
+     3,
+     4
+    ],
+    "rate_a": 3.4993489583331963,
+    "rate_b": 7.321421575848274
+   },
+   "cluster_robust": {
+    "ratio": 0.5193236714975844,
+    "ci": [
+     0.28594718235561234,
+     0.9431709505090623
+    ],
+    "p": 0.031386629304307516,
+    "n_clusters": 7,
+    "rate_a": 3.499348958333195,
+    "rate_b": 6.738281249999734
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 0.7312925170068032,
+    "ci": [
+     0.47615774378280823,
+     1.123133567421474
+    ],
+    "p_wald": 0.15285585199449034,
+    "p_lrt": 0.18614695713558224,
+    "lr_statistic": 1.7478522919408945,
+    "alpha": 0.059806488879506035,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 3.499348958333197,
+    "rate_b": 4.78515624999981
+   },
+   "cluster_robust": {
+    "ratio": 0.7312925170068028,
+    "ci": [
+     0.43854532609519403,
+     1.21946059758954
+    ],
+    "p": 0.23034135708483106,
+    "n_clusters": 6,
+    "rate_a": 3.499348958333195,
+    "rate_b": 4.78515624999981
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.3104477611940293,
+    "ci": [
+     0.6940857765741615,
+     2.4741514561708597
+    ],
+    "p_wald": 0.4043852574244578,
+    "p_lrt": 0.41723853909152026,
+    "lr_statistic": 0.6580801576102644,
+    "alpha": 0.14981773140107174,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 7.145182291666379,
+    "rate_b": 5.452473958333117
+   },
+   "cluster_robust": {
+    "ratio": 1.3104477611940297,
+    "ci": [
+     0.5755789590401286,
+     2.9835582205476676
+    ],
+    "p": 0.5195252099095123,
+    "n_clusters": 6,
+    "rate_a": 7.145182291666383,
+    "rate_b": 5.452473958333117
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.6139705882352942,
+    "ci": [
+     0.8546801109182842,
+     3.047808210828525
+    ],
+    "p_wald": 0.13998658163438163,
+    "p_lrt": 0.17265173438055617,
+    "lr_statistic": 1.8597666520077496,
+    "alpha": 0.1488783062114404,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 7.145182291666383,
+    "rate_b": 4.427083333333157
+   },
+   "cluster_robust": {
+    "ratio": 1.6139705882352944,
+    "ci": [
+     0.7220598721523428,
+     3.60759704305932
+    ],
+    "p": 0.24343162783067102,
+    "n_clusters": 6,
+    "rate_a": 7.145182291666387,
+    "rate_b": 4.42708333333316
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 8
+   },
+   "negative_binomial": {
+    "ratio": 0.8376390194842186,
+    "ci": [
+     0.420584231974011,
+     1.6682487683129292
+    ],
+    "p_wald": 0.6142450937419092,
+    "p_lrt": 0.6206959483918331,
+    "lr_statistic": 0.24489062471970158,
+    "alpha": 0.26170922760999227,
+    "n_clusters": [
+     3,
+     8
+    ],
+    "rate_a": 7.1451822916663845,
+    "rate_b": 8.530144997383328
+   },
+   "cluster_robust": {
+    "ratio": 0.990411731528483,
+    "ci": [
+     0.4862833570166748,
+     2.0171683521457884
+    ],
+    "p": 0.9788214075085077,
+    "n_clusters": 11,
+    "rate_a": 7.145182291666387,
+    "rate_b": 7.214355468749715
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 5
+   },
+   "negative_binomial": {
+    "ratio": 1.1490972159506896,
+    "ci": [
+     0.6576488245449401,
+     2.007795593064875
+    ],
+    "p_wald": 0.6254794362909579,
+    "p_lrt": 0.6275178165881365,
+    "lr_statistic": 0.23544184142066626,
+    "alpha": 0.14257588100581486,
+    "n_clusters": [
+     3,
+     5
+    ],
+    "rate_a": 7.145182291666383,
+    "rate_b": 6.218083372306245
+   },
+   "cluster_robust": {
+    "ratio": 1.2507122507122514,
+    "ci": [
+     0.6062147169367385,
+     2.5804077175594964
+    ],
+    "p": 0.5448963802136008,
+    "n_clusters": 8,
+    "rate_a": 7.1451822916663845,
+    "rate_b": 5.712890624999771
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B0_prior_refit",
+    "alpha": 1.0,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.6139705882352953,
+    "ci": [
+     0.9726681191769099,
+     2.6780985295301973
+    ],
+    "p_wald": 0.0639241458621694,
+    "p_lrt": 0.09832696579967419,
+    "lr_statistic": 2.7324723174355086,
+    "alpha": 0.09120647950317862,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 7.145182291666385,
+    "rate_b": 4.427083333333156
+   },
+   "cluster_robust": {
+    "ratio": 1.6139705882352944,
+    "ci": [
+     0.8510484329995865,
+     3.0608141190124813
+    ],
+    "p": 0.1426424880817547,
+    "n_clusters": 6,
+    "rate_a": 7.145182291666387,
+    "rate_b": 4.42708333333316
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.0454545454545463,
+    "ci": [
+     0.4692585667488265,
+     2.3291534434502794
+    ],
+    "p_wald": 0.9133915464349991,
+    "p_lrt": 0.913434502973362,
+    "lr_statistic": 0.011817317815257411,
+    "alpha": 0.24167015697754657,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 5.615234374999781,
+    "rate_b": 5.371093749999787
+   },
+   "cluster_robust": {
+    "ratio": 1.0454545454545463,
+    "ci": [
+     0.3982612910252837,
+     2.744367156039235
+    ],
+    "p": 0.9280690444682795,
+    "n_clusters": 6,
+    "rate_a": 5.61523437499978,
+    "rate_b": 5.371093749999785
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 7
+   },
+   "negative_binomial": {
+    "ratio": 0.6855793193806309,
+    "ci": [
+     0.39848470206558584,
+     1.1795158025540704
+    ],
+    "p_wald": 0.17270147556848003,
+    "p_lrt": 0.20041289788287303,
+    "lr_statistic": 1.6393629386964648,
+    "alpha": 0.15108903810665072,
+    "n_clusters": [
+     3,
+     7
+    ],
+    "rate_a": 5.615234374999777,
+    "rate_b": 8.190495565229005
+   },
+   "cluster_robust": {
+    "ratio": 0.7738095238095238,
+    "ci": [
+     0.4614742385109154,
+     1.2975397739870995
+    ],
+    "p": 0.33089051005917947,
+    "n_clusters": 10,
+    "rate_a": 5.615234374999777,
+    "rate_b": 7.256610576922787
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 4
+   },
+   "negative_binomial": {
+    "ratio": 0.7673261387673507,
+    "ci": [
+     0.44660952790040215,
+     1.3183538783949025
+    ],
+    "p_wald": 0.33751546257944137,
+    "p_lrt": 0.3541000434363958,
+    "lr_statistic": 0.8587096338702906,
+    "alpha": 0.12156646029275515,
+    "n_clusters": [
+     3,
+     4
+    ],
+    "rate_a": 5.615234374999774,
+    "rate_b": 7.3179240107996435
+   },
+   "cluster_robust": {
+    "ratio": 0.8333333333333336,
+    "ci": [
+     0.46359961508627545,
+     1.497940079857938
+    ],
+    "p": 0.5422774827374754,
+    "n_clusters": 7,
+    "rate_a": 5.615234374999775,
+    "rate_b": 6.73828124999973
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.1734693877551017,
+    "ci": [
+     0.7762409471063828,
+     1.7739728999501148
+    ],
+    "p_wald": 0.4480510064890879,
+    "p_lrt": 0.45837728964739843,
+    "lr_statistic": 0.5498541618297921,
+    "alpha": 0.057236249428932386,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 5.615234374999775,
+    "rate_b": 4.78515624999981
+   },
+   "cluster_robust": {
+    "ratio": 1.173469387755103,
+    "ci": [
+     0.7128776659723765,
+     1.9316503654523176
+    ],
+    "p": 0.5293162188899955,
+    "n_clusters": 6,
+    "rate_a": 5.615234374999781,
+    "rate_b": 4.785156249999809
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.2316176470588243,
+    "ci": [
+     0.6967269012529851,
+     2.1771543854827087
+    ],
+    "p_wald": 0.4735383168016547,
+    "p_lrt": 0.48259697671961044,
+    "lr_statistic": 0.49298905491426126,
+    "alpha": 0.11673569395012146,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 5.452473958333119,
+    "rate_b": 4.427083333333157
+   },
+   "cluster_robust": {
+    "ratio": 1.2316176470588225,
+    "ci": [
+     0.6012573693834773,
+     2.5228497907678116
+    ],
+    "p": 0.5690639518375807,
+    "n_clusters": 6,
+    "rate_a": 5.4524739583331145,
+    "rate_b": 4.42708333333316
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 8
+   },
+   "negative_binomial": {
+    "ratio": 0.6394610601519304,
+    "ci": [
+     0.3272746596587766,
+     1.2494412120906926
+    ],
+    "p_wald": 0.19075917569509854,
+    "p_lrt": 0.22019392775548766,
+    "lr_statistic": 1.503106932801586,
+    "alpha": 0.2454139207273322,
+    "n_clusters": [
+     3,
+     8
+    ],
+    "rate_a": 5.452473958333115,
+    "rate_b": 8.526670814072174
+   },
+   "cluster_robust": {
+    "ratio": 0.7557811618725324,
+    "ci": [
+     0.402239858586438,
+     1.4200610716420283
+    ],
+    "p": 0.38422698231336394,
+    "n_clusters": 11,
+    "rate_a": 5.452473958333118,
+    "rate_b": 7.214355468749715
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 5
+   },
+   "negative_binomial": {
+    "ratio": 0.8784422343897405,
+    "ci": [
+     0.5253585897909623,
+     1.4688267673831694
+    ],
+    "p_wald": 0.6212082963759425,
+    "p_lrt": 0.6252420598387469,
+    "lr_statistic": 0.23856832986224674,
+    "alpha": 0.11824498560648457,
+    "n_clusters": [
+     3,
+     5
+    ],
+    "rate_a": 5.452473958333118,
+    "rate_b": 6.206980658347998
+   },
+   "cluster_robust": {
+    "ratio": 0.9544159544159543,
+    "ci": [
+     0.5044884407934223,
+     1.8056108730878055
+    ],
+    "p": 0.8859518171205936,
+    "n_clusters": 8,
+    "rate_a": 5.452473958333114,
+    "rate_b": 5.712890624999771
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B2_classifier",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.2316176470588238,
+    "ci": [
+     0.8124904535671892,
+     1.8669536631315933
+    ],
+    "p_wald": 0.326307926004307,
+    "p_lrt": 0.34386490795089647,
+    "lr_statistic": 0.8959688770763563,
+    "alpha": 0.05757537673590775,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 5.452473958333119,
+    "rate_b": 4.427083333333159
+   },
+   "cluster_robust": {
+    "ratio": 1.2316176470588225,
+    "ci": [
+     0.7277665493924704,
+     2.084297539936375
+    ],
+    "p": 0.4376816126164064,
+    "n_clusters": 6,
+    "rate_a": 5.4524739583331145,
+    "rate_b": 4.42708333333316
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 7
+   },
+   "negative_binomial": {
+    "ratio": 0.6538167268530125,
+    "ci": [
+     0.3320851478878969,
+     1.2872491137637128
+    ],
+    "p_wald": 0.21891935095482423,
+    "p_lrt": 0.24677805685317689,
+    "lr_statistic": 1.3414520595877093,
+    "alpha": 0.24073266317984496,
+    "n_clusters": [
+     3,
+     7
+    ],
+    "rate_a": 5.371093749999788,
+    "rate_b": 8.214983694057873
+   },
+   "cluster_robust": {
+    "ratio": 0.7401656314699793,
+    "ci": [
+     0.31828176574575984,
+     1.7212583973376792
+    ],
+    "p": 0.4846967583795568,
+    "n_clusters": 10,
+    "rate_a": 5.371093749999785,
+    "rate_b": 7.256610576922787
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 4
+   },
+   "negative_binomial": {
+    "ratio": 0.7301644908825025,
+    "ci": [
+     0.34201690606455387,
+     1.5588123694829186
+    ],
+    "p_wald": 0.4163745061620935,
+    "p_lrt": 0.42994114446241993,
+    "lr_statistic": 0.62298244705066,
+    "alpha": 0.2472732782448681,
+    "n_clusters": [
+     3,
+     4
+    ],
+    "rate_a": 5.371093749999787,
+    "rate_b": 7.3560051427700825
+   },
+   "cluster_robust": {
+    "ratio": 0.7971014492753625,
+    "ci": [
+     0.3183644975606534,
+     1.995733586204396
+    ],
+    "p": 0.6281851485225525,
+    "n_clusters": 7,
+    "rate_a": 5.3710937499997895,
+    "rate_b": 6.738281249999734
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.122448979591837,
+    "ci": [
+     0.534923200423668,
+     2.355275880329927
+    ],
+    "p_wald": 0.7600045765142631,
+    "p_lrt": 0.7609082219726931,
+    "lr_statistic": 0.09259139834550467,
+    "alpha": 0.20483972441580398,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 5.371093749999787,
+    "rate_b": 4.785156249999808
+   },
+   "cluster_robust": {
+    "ratio": 1.1224489795918366,
+    "ci": [
+     0.4634493507417161,
+     2.718510037332867
+    ],
+    "p": 0.7979936925459523,
+    "n_clusters": 6,
+    "rate_a": 5.371093749999787,
+    "rate_b": 4.78515624999981
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 8
+   },
+   "negative_binomial": {
+    "ratio": 0.5192051978706003,
+    "ci": [
+     0.26522746826549326,
+     1.016388080988674
+    ],
+    "p_wald": 0.055807819360733195,
+    "p_lrt": 0.08720171928262206,
+    "lr_statistic": 2.9252869744576913,
+    "alpha": 0.2453419805310942,
+    "n_clusters": [
+     3,
+     8
+    ],
+    "rate_a": 4.427083333333161,
+    "rate_b": 8.526654493232765
+   },
+   "cluster_robust": {
+    "ratio": 0.6136491821771012,
+    "ci": [
+     0.3330752674287255,
+     1.13057124203077
+    ],
+    "p": 0.11727166408090794,
+    "n_clusters": 11,
+    "rate_a": 4.427083333333161,
+    "rate_b": 7.214355468749715
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 5
+   },
+   "negative_binomial": {
+    "ratio": 0.7133149059736107,
+    "ci": [
+     0.42648495473325826,
+     1.193050656153574
+    ],
+    "p_wald": 0.19797507533017217,
+    "p_lrt": 0.222933531329769,
+    "lr_statistic": 1.48538727723691,
+    "alpha": 0.11708847143580947,
+    "n_clusters": [
+     3,
+     5
+    ],
+    "rate_a": 4.427083333333157,
+    "rate_b": 6.2063519159053415
+   },
+   "cluster_robust": {
+    "ratio": 0.7749287749287751,
+    "ci": [
+     0.41840246829685596,
+     1.4352558880856028
+    ],
+    "p": 0.4174417846522348,
+    "n_clusters": 8,
+    "rate_a": 4.427083333333156,
+    "rate_b": 5.712890624999771
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B3_state",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 0.9999999999999996,
+    "ci": [
+     0.666193259668154,
+     1.5010659226695298
+    ],
+    "p_wald": 0.9999999999999984,
+    "p_lrt": 1.0,
+    "lr_statistic": 0.0,
+    "alpha": 0.05339084658919271,
+    "n_clusters": [
+     3,
+     3
+    ],
+    "rate_a": 4.427083333333157,
+    "rate_b": 4.42708333333316
+   },
+   "cluster_robust": {
+    "ratio": 1.0,
+    "ci": [
+     0.6084557417416953,
+     1.6435049115281835
+    ],
+    "p": 0.9999999999999999,
+    "n_clusters": 6,
+    "rate_a": 4.427083333333159,
+    "rate_b": 4.427083333333159
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 7
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 4
+   },
+   "negative_binomial": {
+    "ratio": 1.1170607963896007,
+    "ci": [
+     0.6691768401151293,
+     1.8647160930074707
+    ],
+    "p_wald": 0.6719801279518247,
+    "p_lrt": 0.6757130448098358,
+    "lr_statistic": 0.174991764284826,
+    "alpha": 0.16317503811329237,
+    "n_clusters": [
+     7,
+     4
+    ],
+    "rate_a": 8.19527697885092,
+    "rate_b": 7.336464591129226
+   },
+   "cluster_robust": {
+    "ratio": 1.0769230769230773,
+    "ci": [
+     0.6613845747626854,
+     1.753538497666972
+    ],
+    "p": 0.7657568925797398,
+    "n_clusters": 11,
+    "rate_a": 7.256610576922789,
+    "rate_b": 6.73828124999973
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 7
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.7091730176490898,
+    "ci": [
+     1.0336433483911887,
+     2.826189912416601
+    ],
+    "p_wald": 0.036714878271499427,
+    "p_lrt": 0.06347294517383799,
+    "lr_statistic": 3.4442311930297365,
+    "alpha": 0.1273624978217812,
+    "n_clusters": [
+     7,
+     3
+    ],
+    "rate_a": 8.178659947734573,
+    "rate_b": 4.785156249999809
+   },
+   "cluster_robust": {
+    "ratio": 1.5164835164835175,
+    "ci": [
+     1.0388983513479582,
+     2.2136162337560292
+    ],
+    "p": 0.030950425034774947,
+    "n_clusters": 10,
+    "rate_a": 7.256610576922791,
+    "rate_b": 4.785156249999808
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 8
+   },
+   "b": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 5
+   },
+   "negative_binomial": {
+    "ratio": 1.3658703535672319,
+    "ci": [
+     0.7905549869219898,
+     2.359863454935069
+    ],
+    "p_wald": 0.26375052944321953,
+    "p_lrt": 0.280780986288089,
+    "lr_statistic": 1.1633058673253345,
+    "alpha": 0.22688467286712113,
+    "n_clusters": [
+     8,
+     5
+    ],
+    "rate_a": 8.522139633909354,
+    "rate_b": 6.2393473960776396
+   },
+   "cluster_robust": {
+    "ratio": 1.2628205128205128,
+    "ci": [
+     0.719651421312396,
+     2.2159556701660525
+    ],
+    "p": 0.41604074968274934,
+    "n_clusters": 13,
+    "rate_a": 7.214355468749715,
+    "rate_b": 5.712890624999774
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "known-parameter target-only adaptation",
+    "alpha": 1.0,
+    "n_seeds": 8
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.9241420455094382,
+    "ci": [
+     1.0265244252955523,
+     3.6066580785267615
+    ],
+    "p_wald": 0.041188478290679495,
+    "p_lrt": 0.06994713221326054,
+    "lr_statistic": 3.28426048838233,
+    "alpha": 0.2132908145303142,
+    "n_clusters": [
+     8,
+     3
+    ],
+    "rate_a": 8.518337180640408,
+    "rate_b": 4.42708333333316
+   },
+   "cluster_robust": {
+    "ratio": 1.6295955882352944,
+    "ci": [
+     1.0662171651690917,
+     2.4906575020059685
+    ],
+    "p": 0.024058205794828376,
+    "n_clusters": 11,
+    "rate_a": 7.214355468749715,
+    "rate_b": 4.427083333333157
+   }
+  },
+  {
+   "domain": "retention",
+   "a": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 4
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.5239721583503885,
+    "ci": [
+     0.9530502079735168,
+     2.4369032397206913
+    ],
+    "p_wald": 0.07854714304992677,
+    "p_lrt": 0.10990405011229779,
+    "lr_statistic": 2.555600470790324,
+    "alpha": 0.08833225139774242,
+    "n_clusters": [
+     4,
+     3
+    ],
+    "rate_a": 7.292444898356062,
+    "rate_b": 4.785156249999811
+   },
+   "cluster_robust": {
+    "ratio": 1.4081632653061218,
+    "ci": [
+     0.8955400635311234,
+     2.2142211861956365
+    ],
+    "p": 0.13828509645017428,
+    "n_clusters": 7,
+    "rate_a": 6.73828124999973,
+    "rate_b": 4.78515624999981
+   }
+  },
+  {
+   "domain": "target",
+   "a": {
+    "name": "B4_action / decision-aware",
+    "alpha": 0.75,
+    "n_seeds": 5
+   },
+   "b": {
+    "name": "B1b_img_proprio",
+    "alpha": 0.75,
+    "n_seeds": 3
+   },
+   "negative_binomial": {
+    "ratio": 1.3931562841384229,
+    "ci": [
+     0.9226087049541997,
+     2.1036918702503766
+    ],
+    "p_wald": 0.11482197845798811,
+    "p_lrt": 0.1413215944936417,
+    "lr_statistic": 2.163509485027035,
+    "alpha": 0.07091856561189357,
+    "n_clusters": [
+     5,
+     3
+    ],
+    "rate_a": 6.1676189662375664,
+    "rate_b": 4.427083333333159
+   },
+   "cluster_robust": {
+    "ratio": 1.2904411764705883,
+    "ci": [
+     0.8556247891893455,
+     1.946225087176953
+    ],
+    "p": 0.2238956944678401,
+    "n_clusters": 8,
+    "rate_a": 5.712890624999774,
+    "rate_b": 4.427083333333159
+   }
+  }
+ ],
+ "gate_trips_per_arm_hour": 5.99,
+ "anchors": {
+  "nominal": {
+   "throughput": 55.941162109375,
+   "trips": 3.1249999999998765
+  },
+  "zeroshot": {
+   "throughput": 42.117919921875,
+   "trips": 9.643554687499618
+  }
+ }
+}

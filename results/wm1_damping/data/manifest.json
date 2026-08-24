@@ -1,0 +1,812 @@
+{
+ "schema": {
+  "enc": "actor encoder output, (T, N, D): the tensor the policy's GRU consumes.  Normalised proprioception concatenated with the spatial-softmax encoding of the (delayed) depth image.",
+  "hidden": "actor GRU hidden state BEFORE the step, (T, N, H).  Recorded rather than recomputed so that the frozen actor can be replayed on a predicted latent from any point in the log.",
+  "proprio": "(T, N, 13): joint1_pos, joint2_pos, joint3_pos, joint4_pos, joint5_pos, joint6_pos, joint1_vel, joint2_vel, joint3_vel, joint4_vel, joint5_vel, joint6_vel, gripper_pos.",
+  "action": "commanded joint targets as the policy emitted them, (T, N, A), before the action manager's rate limits.",
+  "servo": "gripper position minus gripper position target, (T, N, 1).  The quantity a real drive reports as current.",
+  "done": "(T, N) bool: this step ended an episode.  Deployable -- the robot knows when the task restarts -- but excluded from every feature set, with a done-only control reported instead, because reset cadence is a physical consequence of the domain and would be an accuracy the estimator did not earn from the plant.",
+  "lag": "SIMULATOR LABEL, scalar: the domain parameter's value.  Named for Phase WM1-A's axis, where it was an observation delay in control steps; meta['axis'] says which parameter it is.",
+  "shape": "SIMULATOR METADATA, (T, N) uint8: object shape class index.",
+  "trip": "SIMULATOR LABEL, (T, N) bool: the safety shell fired on this step. Trains the risk head; never an input to it."
+ },
+ "deployable_channels": [
+  "enc",
+  "hidden",
+  "proprio",
+  "action",
+  "servo",
+  "done"
+ ],
+ "simulator_only_channels": [
+  "lag",
+  "shape",
+  "trip"
+ ],
+ "proprio_names": [
+  "joint1_pos",
+  "joint2_pos",
+  "joint3_pos",
+  "joint4_pos",
+  "joint5_pos",
+  "joint6_pos",
+  "joint1_vel",
+  "joint2_vel",
+  "joint3_vel",
+  "joint4_vel",
+  "joint5_vel",
+  "joint6_vel",
+  "gripper_pos"
+ ],
+ "control_hz": 50.0,
+ "files": [
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 352,
+   "safety_trips": 307,
+   "shape_class_counts": [
+    108067,
+    77801,
+    54132,
+    0,
+    0
+   ],
+   "bytes": 191520000,
+   "file": "cal__servo0p75__seed5050.pt",
+   "split": "cal",
+   "shapes": "train",
+   "seed": 5050
+  },
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 119,
+   "safety_trips": 3,
+   "shape_class_counts": [
+    105023,
+    77418,
+    57559,
+    0,
+    0
+   ],
+   "bytes": 191520000,
+   "file": "cal__servo1__seed5051.pt",
+   "split": "cal",
+   "shapes": "train",
+   "seed": 5051
+  },
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 112,
+   "safety_trips": 2,
+   "shape_class_counts": [
+    102941,
+    80843,
+    56216,
+    0,
+    0
+   ],
+   "bytes": 191520000,
+   "file": "cal__servo1p5__seed5052.pt",
+   "split": "cal",
+   "shapes": "train",
+   "seed": 5052
+  },
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 292,
+   "safety_trips": 251,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    133279,
+    106721
+   ],
+   "bytes": 191520000,
+   "file": "calh__servo0p75__seed6060.pt",
+   "split": "calh",
+   "shapes": "holdout",
+   "seed": 6060
+  },
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 119,
+   "safety_trips": 1,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    131679,
+    108321
+   ],
+   "bytes": 191520000,
+   "file": "calh__servo1__seed6061.pt",
+   "split": "calh",
+   "shapes": "holdout",
+   "seed": 6061
+  },
+  {
+   "steps": 15000,
+   "n_envs": 16,
+   "arm_seconds": 4800.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 117,
+   "safety_trips": 1,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    135325,
+    104675
+   ],
+   "bytes": 191520000,
+   "file": "calh__servo1p5__seed6062.pt",
+   "split": "calh",
+   "shapes": "holdout",
+   "seed": 6062
+  },
+  {
+   "steps": 15000,
+   "n_envs": 32,
+   "arm_seconds": 9600.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 620,
+   "safety_trips": 521,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    267328,
+    212672
+   ],
+   "bytes": 383040000,
+   "file": "test__servo0p75__seed909.pt",
+   "split": "test",
+   "shapes": "holdout",
+   "seed": 909
+  },
+  {
+   "steps": 15000,
+   "n_envs": 32,
+   "arm_seconds": 9600.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 237,
+   "safety_trips": 10,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    268836,
+    211164
+   ],
+   "bytes": 383040000,
+   "file": "test__servo1__seed910.pt",
+   "split": "test",
+   "shapes": "holdout",
+   "seed": 910
+  },
+  {
+   "steps": 15000,
+   "n_envs": 32,
+   "arm_seconds": 9600.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 236,
+   "safety_trips": 6,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    267969,
+    212031
+   ],
+   "bytes": 383040000,
+   "file": "test__servo1p5__seed911.pt",
+   "split": "test",
+   "shapes": "holdout",
+   "seed": 911
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 448,
+   "safety_trips": 412,
+   "shape_class_counts": [
+    172449,
+    125247,
+    86304,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo0p75__seed101.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 101
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 503,
+   "safety_trips": 474,
+   "shape_class_counts": [
+    172383,
+    124670,
+    86947,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo0p75__seed202.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 202
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 22,
+   "safety_trips": 8,
+   "shape_class_counts": [
+    170840,
+    124177,
+    88983,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo1__seed102.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 102
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 21,
+   "safety_trips": 5,
+   "shape_class_counts": [
+    169257,
+    126575,
+    88168,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo1__seed203.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 203
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 6,
+   "safety_trips": 1,
+   "shape_class_counts": [
+    169326,
+    125883,
+    88791,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo1p5__seed103.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 103
+  },
+  {
+   "steps": 1500,
+   "n_envs": 256,
+   "arm_seconds": 7680.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 8,
+   "safety_trips": 3,
+   "shape_class_counts": [
+    166140,
+    131292,
+    86568,
+    0,
+    0
+   ],
+   "bytes": 306432000,
+   "file": "train__servo1p5__seed204.pt",
+   "split": "train",
+   "shapes": "train",
+   "seed": 204
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 240,
+   "safety_trips": 228,
+   "shape_class_counts": [
+    87575,
+    61584,
+    42841,
+    0,
+    0
+   ],
+   "bytes": 153216000,
+   "file": "val__servo0p75__seed303.pt",
+   "split": "val",
+   "shapes": "train",
+   "seed": 303
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 7,
+   "safety_trips": 2,
+   "shape_class_counts": [
+    84479,
+    61404,
+    46117,
+    0,
+    0
+   ],
+   "bytes": 153216000,
+   "file": "val__servo1__seed304.pt",
+   "split": "val",
+   "shapes": "train",
+   "seed": 304
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 4,
+   "safety_trips": 0,
+   "shape_class_counts": [
+    82229,
+    65775,
+    43996,
+    0,
+    0
+   ],
+   "bytes": 153216000,
+   "file": "val__servo1p5__seed305.pt",
+   "split": "val",
+   "shapes": "train",
+   "seed": 305
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 0.75,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 214,
+   "safety_trips": 195,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    104990,
+    87010
+   ],
+   "bytes": 153216000,
+   "file": "valh__servo0p75__seed404.pt",
+   "split": "valh",
+   "shapes": "holdout",
+   "seed": 404
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.0,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 6,
+   "safety_trips": 2,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    109710,
+    82290
+   ],
+   "bytes": 153216000,
+   "file": "valh__servo1__seed405.pt",
+   "split": "valh",
+   "shapes": "holdout",
+   "seed": 405
+  },
+  {
+   "steps": 1500,
+   "n_envs": 128,
+   "arm_seconds": 3840.0,
+   "dims": {
+    "enc": 100,
+    "hidden": 256,
+    "proprio": 13,
+    "action": 7
+   },
+   "lag": 1.5,
+   "axis": "servo_damping_scale",
+   "episode_boundaries": 2,
+   "safety_trips": 1,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    105803,
+    86197
+   ],
+   "bytes": 153216000,
+   "file": "valh__servo1p5__seed406.pt",
+   "split": "valh",
+   "shapes": "holdout",
+   "seed": 406
+  }
+ ],
+ "splits": {
+  "cal": {
+   "files": 3,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    5050,
+    5051,
+    5052
+   ],
+   "shapes": [
+    "train"
+   ],
+   "n_envs": 16,
+   "steps": 15000,
+   "sessions": 48,
+   "arm_hours": 4.0,
+   "gigabytes": 0.57456,
+   "episode_boundaries": 583,
+   "safety_trips": 312,
+   "shape_class_counts": [
+    316031,
+    236062,
+    167907,
+    0,
+    0
+   ]
+  },
+  "calh": {
+   "files": 3,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    6060,
+    6061,
+    6062
+   ],
+   "shapes": [
+    "holdout"
+   ],
+   "n_envs": 16,
+   "steps": 15000,
+   "sessions": 48,
+   "arm_hours": 4.0,
+   "gigabytes": 0.57456,
+   "episode_boundaries": 528,
+   "safety_trips": 253,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    400283,
+    319717
+   ]
+  },
+  "test": {
+   "files": 3,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    909,
+    910,
+    911
+   ],
+   "shapes": [
+    "holdout"
+   ],
+   "n_envs": 32,
+   "steps": 15000,
+   "sessions": 96,
+   "arm_hours": 8.0,
+   "gigabytes": 1.14912,
+   "episode_boundaries": 1093,
+   "safety_trips": 537,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    804133,
+    635867
+   ]
+  },
+  "train": {
+   "files": 6,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    101,
+    102,
+    103,
+    202,
+    203,
+    204
+   ],
+   "shapes": [
+    "train"
+   ],
+   "n_envs": 256,
+   "steps": 1500,
+   "sessions": 1536,
+   "arm_hours": 12.8,
+   "gigabytes": 1.838592,
+   "episode_boundaries": 1008,
+   "safety_trips": 903,
+   "shape_class_counts": [
+    1020395,
+    757844,
+    525761,
+    0,
+    0
+   ]
+  },
+  "val": {
+   "files": 3,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    303,
+    304,
+    305
+   ],
+   "shapes": [
+    "train"
+   ],
+   "n_envs": 128,
+   "steps": 1500,
+   "sessions": 384,
+   "arm_hours": 3.2,
+   "gigabytes": 0.459648,
+   "episode_boundaries": 251,
+   "safety_trips": 230,
+   "shape_class_counts": [
+    254283,
+    188763,
+    132954,
+    0,
+    0
+   ]
+  },
+  "valh": {
+   "files": 3,
+   "values": [
+    0.75,
+    1.0,
+    1.5
+   ],
+   "seeds": [
+    404,
+    405,
+    406
+   ],
+   "shapes": [
+    "holdout"
+   ],
+   "n_envs": 128,
+   "steps": 1500,
+   "sessions": 384,
+   "arm_hours": 3.2,
+   "gigabytes": 0.459648,
+   "episode_boundaries": 222,
+   "safety_trips": 198,
+   "shape_class_counts": [
+    0,
+    0,
+    0,
+    320503,
+    255497
+   ]
+  }
+ },
+ "axis": "servo_damping_scale",
+ "candidates": [
+  0.75,
+  1.0,
+  1.5
+ ],
+ "step_ms": 20.0,
+ "leakage_checks": {
+  "label_is_not_a_channel": true,
+  "no_shared_generation_seed": true,
+  "test_shapes_disjoint_from_training": true,
+  "one_sequence_length_per_split": true,
+  "budgets_nested_within_a_session": true,
+  "balanced_candidates_per_split": true
+ },
+ "failures": []
+}

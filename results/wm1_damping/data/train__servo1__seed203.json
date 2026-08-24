@@ -1,0 +1,27 @@
+{
+ "steps": 1500,
+ "n_envs": 256,
+ "arm_seconds": 7680.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 1.0,
+ "axis": "servo_damping_scale",
+ "episode_boundaries": 21,
+ "safety_trips": 5,
+ "shape_class_counts": [
+  169257,
+  126575,
+  88168,
+  0,
+  0
+ ],
+ "bytes": 306432000,
+ "file": "train__servo1__seed203.pt",
+ "split": "train",
+ "shapes": "train",
+ "seed": 203
+}

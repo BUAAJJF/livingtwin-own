@@ -1,0 +1,27 @@
+{
+ "steps": 15000,
+ "n_envs": 16,
+ "arm_seconds": 4800.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 1.5,
+ "axis": "servo_damping_scale",
+ "episode_boundaries": 112,
+ "safety_trips": 2,
+ "shape_class_counts": [
+  102941,
+  80843,
+  56216,
+  0,
+  0
+ ],
+ "bytes": 191520000,
+ "file": "cal__servo1p5__seed5052.pt",
+ "split": "cal",
+ "shapes": "train",
+ "seed": 5052
+}

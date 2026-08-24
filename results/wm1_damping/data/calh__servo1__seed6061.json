@@ -1,0 +1,27 @@
+{
+ "steps": 15000,
+ "n_envs": 16,
+ "arm_seconds": 4800.0,
+ "dims": {
+  "enc": 100,
+  "hidden": 256,
+  "proprio": 13,
+  "action": 7
+ },
+ "lag": 1.0,
+ "axis": "servo_damping_scale",
+ "episode_boundaries": 119,
+ "safety_trips": 1,
+ "shape_class_counts": [
+  0,
+  0,
+  0,
+  131679,
+  108321
+ ],
+ "bytes": 191520000,
+ "file": "calh__servo1__seed6061.pt",
+ "split": "calh",
+ "shapes": "holdout",
+ "seed": 6061
+}
