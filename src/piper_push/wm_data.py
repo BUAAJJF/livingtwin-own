@@ -304,12 +304,14 @@ def make_index(sessions, stride: int, length: int, burn_in: int):
   for si, (s, _) in enumerate(sessions):
     w = windows(s, length=length - burn_in, burn_in=burn_in, stride=stride)
     idx.extend((si, t0, b) for t0, b in w)
-    lags.extend([s.lag] * len(w))
-  return idx, torch.tensor(lags)
+    lags.extend([float(s.lag)] * len(w))
+  # float, not long: Phase WM1-B's values are damping multipliers.
+  return idx, torch.tensor(lags, dtype=torch.float32)
 
 
 def batch_from(sessions, idx, sel, length: int, device,
-               keys=("enc", "proprio", "action", "servo")) -> dict:
+               keys=("enc", "proprio", "action", "servo"),
+               values=None) -> dict:
   """One batch, assembled per source session and concatenated on the batch
   axis.  ``_lag`` rides along as the conditioning value, which is an input to
   the model and never a feature."""
@@ -323,8 +325,21 @@ def batch_from(sessions, idx, sel, length: int, device,
     for k, v in g.items():
       parts.setdefault(k, []).append(v)
   out = {k: torch.cat(v, dim=1) for k, v in parts.items()}
-  out["_lag"] = torch.tensor([sessions[si][0].lag for si, _, _ in order],
-                             device=device)
+  vals = [float(sessions[si][0].lag) for si, _, _ in order]
+  out["_lag"] = torch.tensor(vals, device=device)
+  if values is not None:
+    # The model conditions on an INDEX into the candidate set, not on the
+    # parameter's value.  For Phase WM1-A's lags 0..4 those coincide; for
+    # damping multipliers 0.75/1.0/1.5 they do not, and an embedding indexed
+    # by 0.75 is a crash at best and a silent truncation to zero at worst.
+    lut = {round(float(v), 9): i for i, v in enumerate(values)}
+    missing = sorted({v for v in vals if round(v, 9) not in lut})
+    if missing:
+      raise ValueError(f"{missing} not in the candidate set {tuple(values)}")
+    out["_theta"] = torch.tensor([lut[round(v, 9)] for v in vals],
+                                 dtype=torch.long, device=device)
+  else:
+    out["_theta"] = out["_lag"].long()
   out["_rows"] = order
   return out
 

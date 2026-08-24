@@ -28,7 +28,11 @@ from pathlib import Path
 
 import torch
 
-from piper_push import latency, wm_data, wm_model
+from piper_push import damping, latency, wm_data, wm_model
+
+AXES = {"obs_latency_steps": latency.LAGS,
+        "servo_damping_scale": damping.VALUES}
+VALUES = latency.LAGS
 
 BURN_IN = 8
 HORIZON = 16
@@ -36,7 +40,11 @@ ROLLOUT = 8
 
 
 load_split = wm_data.load_split
-batch_from = wm_data.batch_from
+
+
+def batch_from(sessions, idx, sel, length, device, **kw):
+  return wm_data.batch_from(sessions, idx, sel, length, device,
+                            values=VALUES, **kw)
 
 
 def make_index(sessions, stride: int, length: int):
@@ -80,8 +88,8 @@ def evaluate(members, norms, sessions, idx, length, device, batch=512,
   for i in range(0, len(order), batch):
     sel = order[i:i + batch]
     b = batch_from(sessions, idx, sel, length, device)
-    theta = (torch.full_like(b["_lag"], theta_override)
-             if theta_override is not None else b["_lag"])
+    theta = (torch.full_like(b["_theta"], theta_override)
+             if theta_override is not None else b["_theta"])
     for m in members:
       _, parts = losses(m, norms, b, theta, weights)
       for k, v in parts.items():
@@ -102,6 +110,7 @@ def main() -> int:
   p.add_argument("--hidden", type=int, default=192)
   p.add_argument("--subsample", type=float, default=0.8,
                  help="fraction of windows each ensemble member sees")
+  p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=0)
   p.add_argument("--shuffle-theta", action="store_true",
@@ -110,6 +119,8 @@ def main() -> int:
                       "Any posterior built on the result is the floor.")
   a = p.parse_args()
 
+  global VALUES
+  VALUES = AXES[a.axis]
   root = Path(a.data)
   length = BURN_IN + HORIZON + 1
   dev = a.device
@@ -122,8 +133,9 @@ def main() -> int:
   vh_idx, _ = make_index(valh, a.stride * 2, length)
   print(f"  windows: train {len(tr_idx):,}  val {len(va_idx):,}  "
         f"valh {len(vh_idx):,}")
-  print(f"  train lag counts: "
-        f"{torch.bincount(tr_lags, minlength=len(latency.LAGS)).tolist()}")
+  counts = [int(sum(1 for v in tr_lags.tolist() if abs(v - x) < 1e-9))
+            for x in VALUES]
+  print(f"  {a.axis} candidates {VALUES}, window counts {counts}")
 
   # Normalisation from the training split alone.  Fitted on a sample of the
   # windows rather than the raw tensors so that it matches what the model
@@ -147,7 +159,7 @@ def main() -> int:
   for k in range(a.members):
     torch.manual_seed(a.seed * 100 + k)
     m = wm_model.LatentDynamics(dims["z"], dims["p"], dims["a"],
-                                len(latency.LAGS), hidden=a.hidden).to(dev)
+                                len(VALUES), hidden=a.hidden).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=a.lr)
     gk = torch.Generator().manual_seed(a.seed * 1000 + k)
     keep = torch.randperm(len(tr_idx), generator=gk)[
@@ -159,7 +171,7 @@ def main() -> int:
       for i in range(0, len(perm), a.batch):
         sel = [keep[j] for j in perm[i:i + a.batch]]
         b = batch_from(train, tr_idx, sel, length, dev)
-        theta = b["_lag"]
+        theta = b["_theta"]
         if a.shuffle_theta:
           theta = theta[torch.randperm(len(theta), generator=gk).to(theta.device)]
         loss, parts = losses(m, norms, b, theta, weights)
@@ -211,14 +223,14 @@ def main() -> int:
   grids: dict[str, dict[int, list[float]]] = {}
   for split_name, split in (("val", val), ("valh", valh)):
     raw = {}
-    for true_lag in latency.LAGS:
+    for true_lag in VALUES:
       sub = [(s, n) for s, n in split if s.lag == true_lag]
       if not sub:
         continue
       si, _ = make_index(sub, a.stride * 4, length)
       raw[true_lag] = [evaluate(members, norms, sub, si, length, dev,
                                 theta_override=cand, limit=2000)
-                       for cand in latency.LAGS]
+                       for cand in range(len(VALUES))]
     for comp in ("z", "p", "e", "multi", "sum"):
       grid = {}
       for lag, rows in raw.items():
@@ -227,19 +239,19 @@ def main() -> int:
       grids[f"{split_name}/{comp}"] = grid
 
   for key, grid in grids.items():
-    n_right = sum(latency.LAGS[min(range(len(v)), key=lambda i: v[i])] == k
+    n_right = sum(VALUES[min(range(len(v)), key=lambda i: v[i])] == k
                   for k, v in grid.items())
     print()
     print(f"  {key}: NLL by true lag (row) under each candidate (column) "
           f"-- {n_right}/{len(grid)} argmins correct")
     for lag, v in grid.items():
       best = min(range(len(v)), key=lambda i: v[i])
-      mark = "  <-- correct" if latency.LAGS[best] == lag else "  <-- WRONG"
+      mark = "  <-- correct" if VALUES[best] == lag else "  <-- WRONG"
       print(f"    lag {lag}: " + " ".join(f"{x:9.3f}" for x in v) + mark)
   report["candidate_grids"] = {
     key: {str(k): v for k, v in grid.items()} for key, grid in grids.items()}
   report["candidate_grid_correct"] = {
-    key: sum(latency.LAGS[min(range(len(v)), key=lambda i: v[i])] == k
+    key: sum(VALUES[min(range(len(v)), key=lambda i: v[i])] == k
              for k, v in grid.items())
     for key, grid in grids.items()}
 

@@ -36,7 +36,11 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from piper_push import latency, wm_data, wm_infer
+from piper_push import damping, latency, wm_data, wm_infer
+
+AXES = {"obs_latency_steps": latency.LAGS,
+        "servo_damping_scale": damping.VALUES}
+VALUES = latency.LAGS
 
 BURN_IN = 0
 LENGTH = 25   # the window the posterior stage uses, so the two agree
@@ -44,7 +48,8 @@ LENGTH = 25   # the window the posterior stage uses, so the two agree
 
 def _batch(sessions, idx, sel, length, device):
   return wm_data.batch_from(sessions, idx, sel, length, device,
-                            keys=("enc", "proprio", "action", "servo", "done"))
+                            keys=("enc", "proprio", "action", "servo", "done"),
+                            values=VALUES)
 
 
 def _accuracy(model, sessions, idx, length, device, batch=512, limit=8000):
@@ -57,7 +62,7 @@ def _accuracy(model, sessions, idx, length, device, batch=512, limit=8000):
     for i in range(0, len(order), batch):
       sel = order[i:i + batch]
       b = _batch(sessions, idx, sel, length, device)
-      right += int((model(b).argmax(-1) == b["_lag"]).sum())
+      right += int((model(b).argmax(-1) == b["_theta"]).sum())
       n += len(sel)
   return right / max(n, 1)
 
@@ -73,7 +78,7 @@ def train_one(model, sessions, idx, length, device, epochs, batch, lr, seed,
     for i in range(0, len(perm), batch):
       sel = perm[i:i + batch]
       b = _batch(sessions, idx, sel, length, device)
-      y = b["_lag"]
+      y = b["_theta"]
       if shuffle_labels:
         y = y[torch.randperm(len(y), generator=g).to(y.device)]
       logits = model(b)
@@ -101,10 +106,13 @@ def main() -> int:
   p.add_argument("--stride", type=int, default=25)
   p.add_argument("--lr", type=float, default=1e-3)
   p.add_argument("--hidden", type=int, default=96)
+  p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=0)
   a = p.parse_args()
 
+  global VALUES
+  VALUES = AXES[a.axis]
   root, dev = Path(a.data), a.device
   train = wm_data.load_split(root, "train")
   val = wm_data.load_split(root, "val")
@@ -113,8 +121,9 @@ def main() -> int:
   va, _ = wm_data.make_index(val, a.stride * 2, LENGTH, BURN_IN)
   vh, _ = wm_data.make_index(valh, a.stride * 2, LENGTH, BURN_IN)
   print(f"  windows: train {len(tr):,}  val {len(va):,}  valh {len(vh):,}")
-  print(f"  lag counts: "
-        f"{torch.bincount(tr_lags, minlength=len(latency.LAGS)).tolist()}")
+  counts = [int(sum(1 for v in tr_lags.tolist() if abs(v - x) < 1e-9))
+            for x in VALUES]
+  print(f"  {a.axis} candidates {VALUES}, window counts {counts}")
 
   probe = _batch(train, tr, list(range(4)), LENGTH, dev)
   dims = {k: int(probe[k].shape[-1]) for k in
@@ -128,11 +137,11 @@ def main() -> int:
 
   for name, shuffle, ctor in (
     ("classifier", False,
-     lambda: wm_infer.HistoryClassifier(dims, len(latency.LAGS), a.hidden)),
+     lambda: wm_infer.HistoryClassifier(dims, len(VALUES), a.hidden)),
     ("shuffled", True,
-     lambda: wm_infer.HistoryClassifier(dims, len(latency.LAGS), a.hidden)),
+     lambda: wm_infer.HistoryClassifier(dims, len(VALUES), a.hidden)),
     ("done_only", False,
-     lambda: wm_infer.DoneOnlyClassifier(len(latency.LAGS))),
+     lambda: wm_infer.DoneOnlyClassifier(len(VALUES))),
   ):
     print(f"  -- {name}")
     torch.manual_seed(a.seed)
@@ -145,7 +154,7 @@ def main() -> int:
     report[name] = {"history": hist, "window_accuracy": accs}
     saved[name] = (m.state() if hasattr(m, "state")
                    else {"state_dict": m.state_dict(),
-                         "n_theta": len(latency.LAGS)})
+                         "n_theta": len(VALUES)})
 
   outdir = Path(a.out)
   outdir.mkdir(parents=True, exist_ok=True)
