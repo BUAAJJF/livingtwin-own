@@ -76,9 +76,12 @@ $M -m hardware.deploy.run --policy /tmp/vision_policy --replay recordings/sim \
     --allow-nominal --seconds 20
 
 # 4. mount the camera near the nominal pose, then measure where it really is.
-#    Board: hardware/depth_bench/targets/target_a4.pdf, taped to the gripper.
+#    The board goes ON THE GRIPPER -- see "Calibration" below for why, and for
+#    what to pass if it is not the sheet in hardware/depth_bench/targets.
+$M -m hardware.deploy.calibrate --preview     # does the detector see the board?
 $M -m hardware.deploy.calibrate --collect     # 8+ poses, vary the ORIENTATION
 $M -m hardware.deploy.calibrate --solve
+$M scripts/rig_to_sim.py                      # what the simulator now gets wrong
 
 # 5. the camera, still no motion.  Watch the mask find things on the real table.
 $M -m hardware.deploy.run --policy /tmp/vision_policy --no-arm --seconds 30 \
@@ -182,6 +185,63 @@ something like a rendered one.
 
 ---
 
+## Calibration
+
+**The board goes on the gripper, not on the table.** This is eye-to-hand: the
+camera is bolted to the world and cannot see itself, so the only way to relate
+it to the base frame is to show it something whose base-frame pose is already
+known, and the only such thing is the arm. A board lying on the table has an
+unknown pose in both frames and constrains nothing. If the board that cannot
+be gripped is the precision one, print
+`hardware/depth_bench/targets/target_a4.pdf` and grip that instead — the
+precision board still earns its keep on the table, for the depth checks in
+`hardware/depth_bench`, which are about range and not about pose.
+
+**Say which board it is.** The defaults describe the printed A4 sheet. Anything
+else needs its numbers, and the failure mode for getting them wrong is not a
+bad answer, it is `board not found` at every pose with nothing saying which of
+the five numbers is wrong. `--preview` is there to be run first, with the board
+in view, until it prints corners.
+
+```bash
+# a bought 12x9 ChArUco with 25 mm squares
+$M -m hardware.deploy.calibrate --preview --squares 12x9 --square-mm 25
+
+# a plain checkerboard -- SQUARES is INNER CORNERS, one fewer each way
+$M -m hardware.deploy.calibrate --preview --board-kind checker \
+    --squares 11x8 --square-mm 25
+```
+
+Three ways a board goes wrong quietly, all of them handled and none of them
+detectable by looking at the image:
+
+* **The square size scales the answer.** Solving a 25 mm board as a 33 mm one
+  multiplies the camera's distance by 1.32 and leaves the residual small,
+  because the residual measures self-consistency and a uniformly wrong ruler is
+  perfectly self-consistent. The board description is therefore stored in
+  `calib_poses.json` with the poses, and `--solve` uses that one.
+* **A checkerboard has a 180° symmetry.** Rotated half a turn it is the same
+  image, so the detector's corner order can flip between poses; hand-eye fed a
+  mixture solves for a camera that is not there. `solve` detects and undoes it
+  using the fact that `A` and `B` in `AX = XB` are conjugate and so must rotate
+  by the same angle — which needs no solution and therefore is not circular.
+  It prints how many poses it flipped. ChArUco does not have the problem.
+* **ChArUco origin conventions changed in OpenCV 4.6.** A board numbered the
+  old way still detects perfectly and puts its origin at a different corner,
+  which moves the answer by the width of the board and looks exactly like a
+  mounting error. `--legacy` if the residual is fine and the camera lands a
+  board-width from where it obviously is.
+
+**Then take it back to the simulator.** `scripts/rig_to_sim.py` reads
+`rig.json` and states the calibration as the axes `piper_push.perturb` already
+defines, against the ranges training randomised. It prints the
+`accept_s1.py` flags that replay the measured rig in simulation — run that
+against the nominal too, and the difference is what this mount costs — and, if
+anything is outside the trained envelope, the two edits that would close it and
+which one is the right kind of decision. Three quantities it can only name:
+the camera's roll, its lateral offset, and the table's tilt. `SessionMismatchCfg`
+has no term for any of them.
+
 ## The mask, and why there are two of them
 
 In simulation this channel is exact. On the robot nothing knows which pixels
@@ -256,7 +316,7 @@ proprio.py      the 36 numbers, with FK from the simulator's own robot model
 policy.py       the exported ONNX actor, hidden state carried by hand
 robot.py        action mapping, a PiPER CAN backend, and a dry-run stand-in
 sensor.py       the D405 on its own thread, at the settings the bench measured
-calibrate.py    eye-to-hand, with residuals reported and a refusal to guess
+calibrate.py    eye-to-hand, any board, residuals reported, refuses to guess
 run.py          the 50 Hz loop, and what it does when something is wrong
 jointcheck.py   one joint, five degrees: the CAN units, before anything else
 selftest.py     all of the above, against the simulator, nothing plugged in

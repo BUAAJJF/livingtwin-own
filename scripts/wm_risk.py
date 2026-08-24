@@ -173,10 +173,19 @@ def main() -> int:
   t0 = time.time()
 
   # -- the head the score uses ----------------------------------------------
+  # `risk_target_only` and its control are the decisive pair.  Trained across
+  # all three domains a head can score by recognising which domain a window
+  # came from -- the base rates differ a hundredfold -- and predict nothing
+  # about which window trips.  Inside the target domain that shortcut is gone
+  # and the base rate is three times higher, so if the label is learnable at
+  # all this is where it shows, and if this pair is indistinguishable then the
+  # answer is that it is not learnable at this lead time.
   for name, keep, shuffle in (
     ("risk", None, False),
     ("risk_heldout", [damping.NOMINAL, damping.COUNTER], False),
     ("risk_shuffled", None, True),
+    ("risk_target_only", [damping.TARGET], False),
+    ("risk_target_only_shuffled", [damping.TARGET], True),
   ):
     print(f"  -- {name}")
     if keep is None:

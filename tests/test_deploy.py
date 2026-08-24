@@ -340,3 +340,202 @@ def test_hand_eye_refuses_poses_that_do_not_rotate():
     "with no rotation the equation is satisfied by any X, so returning one "
     "would be worse than returning nothing"
   )
+
+
+def test_a_bought_board_is_described_and_detected():
+  """Any board, not the one this repository happens to print.
+
+  The rig hard-coded a 5x5 33 mm ChArUco because that is the sheet in
+  ``hardware/depth_bench/targets``.  A bought board is a better instrument and
+  a different one, and a detector configured for the wrong grid does not
+  degrade -- it returns nothing, at every pose, with the same message as a
+  board that is out of frame.
+
+  So the board is rendered from its own description and detected back, at a
+  size and dictionary that are not the defaults.
+  """
+  import cv2
+
+  from hardware.deploy import calibrate
+
+  board = calibrate.Board(kind="charuco", squares=(7, 5), square_m=0.025,
+                          marker_m=0.01875, dictionary="DICT_4X4_50")
+  img = board._charuco().generateImage((7 * 120, 5 * 120))
+  K = np.array([[900.0, 0, img.shape[1] / 2],
+                [0, 900.0, img.shape[0] / 2], [0, 0, 1]])
+  pose = calibrate.detect_board(img, K, np.zeros(5), board)
+  assert pose is not None, "the board it was told about was not detected"
+  assert pose["n_corners"] >= 20, pose["n_corners"]
+
+  # And the default description does not find it, which is the failure this
+  # exists to make impossible to hit silently.
+  assert calibrate.detect_board(img, K, np.zeros(5)) is None or \
+    calibrate.detect_board(img, K, np.zeros(5))["n_corners"] < 6
+
+
+def test_the_square_size_is_stored_with_the_poses():
+  """Solving a board's poses with the wrong square size scales the answer and
+  leaves the residual small, because self-consistency is not sensitive to a
+  uniformly wrong ruler.  The board therefore travels with the poses."""
+  import tempfile
+
+  from hardware.deploy import calibrate
+
+  board = calibrate.Board(kind="checker", squares=(11, 8), square_m=0.025)
+  recs = [{"joint_pos": [0.0] * 8, "rvec": [0.0, 0.0, 0.0],
+           "tvec": [0.0, 0.0, 0.5]}]
+  with tempfile.TemporaryDirectory() as d:
+    f = pathlib.Path(d) / "poses.json"
+    calibrate.save_poses(board, recs, f)
+    got_board, got_recs = calibrate.load_poses(f)
+  assert got_board == board
+  assert got_recs == recs
+
+
+def test_a_checkerboard_that_comes_back_rotated_is_put_back():
+  """The 180-degree corner-ordering flip, which a ChArUco board does not have.
+
+  A checkerboard rotated half a turn about its own normal is the same image,
+  so the detector's corner order can flip between poses and nothing in that
+  frame says it did.  Hand-eye fed a mixture solves for a camera that is not
+  there.  Half the poses here are flipped on purpose and the solver has to
+  recover the same answer it gets from clean ones.
+  """
+  import cv2
+
+  from hardware.deploy import calibrate, config, proprio
+
+  rng = np.random.default_rng(3)
+  kin = proprio.Kinematics()
+  default = np.asarray(
+    __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+    ["default_joint_pos"], dtype=np.float64)
+
+  board = calibrate.Board(kind="checker", squares=(11, 8), square_m=0.025)
+  F = calibrate._flip_matrix(board)
+  T_base_cam = config.sim_camera_extrinsic()
+  T_cam_base = np.linalg.inv(T_base_cam)
+  T_grip_board = np.eye(4)
+  T_grip_board[:3, :3] = cv2.Rodrigues(np.array([0.3, -0.2, 0.15]))[0]
+  T_grip_board[:3, 3] = [0.02, -0.01, 0.06]
+
+  records = []
+  for i in range(12):
+    q = default.copy()
+    q[:6] += rng.uniform(-0.6, 0.6, 6)
+    kin.update(q)
+    T_base_grip = np.eye(4)
+    T_base_grip[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_base_grip[:3, 3] = kin.data.site_xpos[kin.site_id]
+    T = T_cam_base @ T_base_grip @ T_grip_board
+    if i % 2:                                   # the detector flipped this one
+      T = T @ F
+    records.append({
+      "joint_pos": q.tolist(),
+      "rvec": cv2.Rodrigues(T[:3, :3])[0].ravel().tolist(),
+      "tvec": T[:3, 3].tolist(),
+    })
+
+  blind = calibrate.solve(records)
+  fixed = calibrate.solve(records, board=board)
+  assert fixed["n_flipped"] == 6, fixed["n_flipped"]
+  assert np.linalg.norm(fixed["T_base_cam"][:3, 3] - T_base_cam[:3, 3]) < 1e-3
+  assert fixed["residual_mm"] < 0.5
+  # And it was worth doing: told nothing about the board, the same poses give
+  # an answer that is wrong by more than the arm is long.
+  assert np.linalg.norm(blind["T_base_cam"][:3, 3] - T_base_cam[:3, 3]) > 0.05
+
+
+def _sim_extrinsic(dx=0.0, dy=0.0, dz=0.0, pitch=0.0, yaw=0.0, roll=0.0):
+  """The camera the simulator would build for a given session mismatch.
+
+  A reimplementation of ``perturb.randomize_camera_pose_offset`` with the
+  jitter set to zero, returned in OpenCV convention -- which is what a
+  calibration measures.  It is written out here rather than called because
+  calling it needs a built environment on a GPU, and the arithmetic it is
+  standing in for is nine lines.
+  """
+  import math
+
+  from piper_push import camera as sim_camera
+
+  pos = np.asarray(sim_camera.CAMERA_POS, dtype=np.float64) + [dx, dy, dz]
+  aim = np.asarray(sim_camera.CAMERA_AIM, dtype=np.float64)
+  fwd = aim - pos
+  fwd /= np.linalg.norm(fwd)
+  right = np.cross(fwd, [0.0, 0.0, 1.0])
+  right /= np.linalg.norm(right)
+  up = np.cross(right, fwd)
+  for ang, axis in ((math.radians(pitch), right), (math.radians(yaw), up)):
+    c, s = math.cos(ang), math.sin(ang)
+    fwd = fwd * c + np.cross(axis, fwd) * s
+    fwd /= np.linalg.norm(fwd)
+  right = np.cross(fwd, [0.0, 0.0, 1.0])
+  right /= np.linalg.norm(right)
+  up = np.cross(right, fwd)
+  if roll:
+    c, s = math.cos(math.radians(roll)), math.sin(math.radians(roll))
+    right, up = right * c + up * s, -right * s + up * c
+  T = np.eye(4)
+  T[:3, :3] = np.stack([right, -up, fwd], axis=1)
+  T[:3, 3] = pos
+  return T
+
+
+def _rig_to_sim():
+  import importlib.util
+
+  spec = importlib.util.spec_from_file_location(
+    "rig_to_sim",
+    pathlib.Path(__file__).resolve().parents[1] / "scripts" / "rig_to_sim.py")
+  mod = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(mod)
+  return mod
+
+
+def test_the_calibration_comes_back_as_the_simulator_s_own_axes():
+  """A measured extrinsic, turned into the flags that reproduce it.
+
+  This is the whole claim of ``scripts/rig_to_sim.py``: that the numbers it
+  prints, handed to ``accept_s1.py``, put the simulator's camera where the
+  real one is.  Checked by going round the loop -- build the camera the
+  simulator would build for a known mismatch, decompose it as if it had come
+  from a calibration, and rebuild from what came out.
+
+  The tolerance is a thousandth of a degree because there is no measurement
+  here and nothing to be noisy: any error is the decomposition disagreeing
+  with the thing it is inverting.
+  """
+  mod = _rig_to_sim()
+  for dx, dz, pitch, yaw in [(0.0, 0.0, 0.0, 0.0),
+                             (0.015, -0.008, 1.3, -0.7),
+                             (0.0, 0.0, 5.0, -4.0),
+                             (-0.05, 0.04, 8.0, -9.0)]:
+    T = _sim_extrinsic(dx=dx, dz=dz, pitch=pitch, yaw=yaw)
+    got = mod.decompose(T)
+    assert abs(got["cam_pos_x_m"] - dx) < 1e-9
+    assert abs(got["cam_pos_z_m"] - dz) < 1e-9
+    back = _sim_extrinsic(dx=got["cam_pos_x_m"], dz=got["cam_pos_z_m"],
+                          pitch=got["cam_pitch_deg"], yaw=got["cam_yaw_deg"])
+    ang = np.degrees(np.arccos(np.clip(T[:3, 2] @ back[:3, 2], -1, 1)))
+    assert ang < 1e-3, f"optical axis off by {ang:.4f} deg at {(dx, dz, pitch, yaw)}"
+
+
+def test_the_two_things_the_simulator_cannot_express_are_reported():
+  """Roll and lateral offset.
+
+  ``SessionMismatchCfg`` offsets x and z and nothing else, and the camera
+  frame is rebuilt from the world's up on every path, so a rolled mount is not
+  representable at all.  Both have to come out of the decomposition as
+  themselves rather than being absorbed into an axis that is representable --
+  a roll reported as a yaw would be a mismatch the simulator cheerfully
+  reproduces and the robot does not have.
+  """
+  mod = _rig_to_sim()
+  got = mod.decompose(_sim_extrinsic(roll=4.0))
+  assert abs(got["cam_roll_deg"] - 4.0) < 1e-6, got["cam_roll_deg"]
+  assert abs(got["cam_pitch_deg"]) < 1e-6 and abs(got["cam_yaw_deg"]) < 1e-6
+
+  got = mod.decompose(_sim_extrinsic(dy=0.03))
+  assert abs(got["cam_pos_y_m"] - 0.03) < 1e-9
+  assert abs(got["cam_pos_x_m"]) < 1e-9 and abs(got["cam_pos_z_m"]) < 1e-9

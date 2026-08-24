@@ -114,6 +114,13 @@ class Rig:
   residual_mm: float | None = None
   """Hand-eye reprojection residual.  Recorded because a calibration that has
   not been checked is a calibration that will be blamed for something else."""
+  table_tilt_deg: float | None = None
+  table_flatness_mm: float | None = None
+  """How far off level the table is in the base frame, and how far its surface
+  departs from the plane that was fitted to it.  Stored rather than printed
+  and forgotten because the simulator's table is exactly flat and exactly
+  level, and neither of those is randomised -- so these two numbers are a
+  measured sim2real gap, and ``scripts/rig_to_sim.py`` is what reads them."""
 
   @classmethod
   def nominal(cls) -> "Rig":
@@ -135,6 +142,8 @@ class Rig:
       K=np.asarray(d["K"], dtype=np.float64) if d.get("K") else None,
       serial=d.get("serial"),
       residual_mm=d.get("residual_mm"),
+      table_tilt_deg=d.get("table_tilt_deg"),
+      table_flatness_mm=d.get("table_flatness_mm"),
     )
 
   def save(self, path: pathlib.Path | str = RIG_FILE) -> None:
@@ -144,6 +153,8 @@ class Rig:
       "K": self.K.tolist() if self.K is not None else None,
       "serial": self.serial,
       "residual_mm": self.residual_mm,
+      "table_tilt_deg": self.table_tilt_deg,
+      "table_flatness_mm": self.table_flatness_mm,
     }, indent=2))
 
 

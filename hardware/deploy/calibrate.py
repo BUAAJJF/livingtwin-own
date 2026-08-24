@@ -42,6 +42,7 @@ import dataclasses
 import json
 import pathlib
 import sys
+import time
 
 import cv2
 import numpy as np
@@ -491,6 +492,91 @@ def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def load_poses(path=POSES_FILE) -> tuple[Board, list[dict]]:
+  """The recorded poses and the board they were recorded against.
+
+  The board is stored with them because it is not deducible from them and
+  getting it wrong is silent: solving a 25 mm board's poses as a 33 mm one
+  scales the whole answer by 1.32 and reports a residual that is still small,
+  because the residual measures self-consistency and a uniformly wrong ruler
+  is perfectly self-consistent.
+
+  A bare list is the old format, from before there was more than one board.
+  """
+  d = json.loads(pathlib.Path(path).read_text())
+  if isinstance(d, list):
+    return DEFAULT_BOARD, d
+  return Board.from_dict(d.get("board", {})), d["poses"]
+
+
+def save_poses(board: Board, records: list[dict], path=POSES_FILE) -> None:
+  pathlib.Path(path).write_text(json.dumps(
+    {"board": board.to_dict(), "poses": records}, indent=2))
+
+
+def board_from_args(args) -> Board:
+  b = Board.load(args.board) if args.board else Board()
+  kw = {}
+  if args.board_kind:
+    kw["kind"] = args.board_kind
+  if args.squares:
+    kw["squares"] = tuple(int(x) for x in args.squares.lower().split("x"))
+  if args.square_mm:
+    kw["square_mm"] = args.square_mm
+  if args.marker_mm:
+    kw["marker_mm"] = args.marker_mm
+  if args.dict:
+    kw["dictionary"] = args.dict
+  if args.legacy:
+    kw["legacy"] = True
+  if "square_mm" in kw:
+    kw["square_m"] = kw.pop("square_mm") / 1000.0
+  if "marker_mm" in kw:
+    kw["marker_m"] = kw.pop("marker_mm") / 1000.0
+  # A ChArUco board given a square size and no marker size: the ratio on every
+  # board this repository has seen is 0.75, and guessing it wrong is caught by
+  # the detector immediately rather than quietly.
+  if kw.get("square_m") and "marker_m" not in kw and \
+     kw.get("kind", b.kind) == "charuco":
+    kw["marker_m"] = round(kw["square_m"] * 0.75, 5)
+  return dataclasses.replace(b, **kw)
+
+
+def preview(args) -> int:
+  """The board, the camera, and nothing else -- run this before the arm.
+
+  Collecting eight poses only to find out at ``--solve`` that the dictionary
+  was wrong is eight poses of wasted time, and the failure at collection time
+  is a bare "board not found" that does not say which of the five numbers is
+  the wrong one.  This prints what the detector sees, continuously, so the
+  board description can be fixed while looking at it.
+  """
+  from . import sensor
+
+  board = board_from_args(args)
+  print(f"board: {board.describe()}\n")
+  reader = sensor.Reader(serial=args.serial)
+  reader.wait_for_first()
+  try:
+    for i in range(args.frames):
+      frame = reader.latest()
+      if frame is None:
+        print("no frame")
+        continue
+      pose = detect_board(frame.gray, reader.K, np.zeros(5), board)
+      if pose is None:
+        print(f"[{i:3d}] not found")
+      else:
+        t = np.asarray(pose["tvec"]).ravel()
+        print(f"[{i:3d}] {pose['n_corners']:3d} corners  "
+              f"{pose['reproj_rms_px']:.2f} px  "
+              f"range {np.linalg.norm(t) * 1000:.0f} mm")
+      time.sleep(0.2)
+  finally:
+    reader.close()
+  return 0
+
+
 def collect(args) -> int:
   """Walk through poses by hand, saving one record each time.
 
@@ -507,7 +593,20 @@ def collect(args) -> int:
   if arm is not None:
     arm.connect()
 
-  records = json.loads(POSES_FILE.read_text()) if POSES_FILE.exists() else []
+  board = board_from_args(args)
+  records = []
+  if POSES_FILE.exists():
+    stored, records = load_poses()
+    if stored != board and records:
+      print(f"REFUSING to append: {len(records)} pose(s) were recorded "
+            f"against\n  {stored.describe()}\nand this run is using\n  "
+            f"{board.describe()}\nPoses from two boards cannot be solved "
+            f"together.  Delete {POSES_FILE.name} to start over.")
+      reader.close()
+      if arm is not None:
+        arm.close()
+      return 1
+  print(f"board: {board.describe()}")
   print(f"{len(records)} pose(s) already recorded.  Move the arm so the board "
         "is fully visible, then press enter.  'q' to stop.")
   print("Vary the ORIENTATION, not just the position: hand-eye is determined "
@@ -521,12 +620,14 @@ def collect(args) -> int:
       if frame is None:
         print("  no frame")
         continue
-      pose = detect_board(frame.gray, reader.K, np.zeros(5))
+      pose = detect_board(frame.gray, reader.K, np.zeros(5), board)
       if pose is None:
-        print("  board not found -- move it into view or add light")
+        print("  board not found -- move it into view, add light, or check "
+              "the board description with --preview")
         continue
       if arm is None:
-        print("  --dry-run: no arm to read, pose not recorded")
+        print(f"  --dry-run: {pose['n_corners']} corners, "
+              f"{pose['reproj_rms_px']:.2f} px, no arm to read, not recorded")
         continue
       st = arm.read()
       records.append({
@@ -536,7 +637,7 @@ def collect(args) -> int:
         "n_corners": pose["n_corners"],
         "reproj_rms_px": pose["reproj_rms_px"],
       })
-      POSES_FILE.write_text(json.dumps(records, indent=2))
+      save_poses(board, records)
       print(f"  recorded: {pose['n_corners']} corners, "
             f"reprojection {pose['reproj_rms_px']:.2f} px")
   finally:
@@ -550,13 +651,17 @@ def run_solve(args) -> int:
   if not POSES_FILE.exists():
     print(f"no poses at {POSES_FILE}; run --collect first")
     return 1
-  records = json.loads(POSES_FILE.read_text())
+  board, records = load_poses()
   if len(records) < MIN_POSES:
     print(f"{len(records)} poses is not enough; {MIN_POSES} is the minimum")
     return 1
 
-  out = solve(records)
+  out = solve(records, board=board)
+  print(f"board            {board.describe()}")
   print(f"poses            {out['n_poses']}")
+  if out.get("n_flipped"):
+    print(f"corner order     {out['n_flipped']} pose(s) came back rotated by "
+          "180 deg and were corrected (checkerboard symmetry)")
   print(f"rotation spread  {out['rot_span_deg']:.1f} deg")
   if out["T_base_cam"] is None:
     print(f"\nREFUSING to solve: the poses span {out['rot_span_deg']:.1f} "
@@ -601,6 +706,8 @@ def run_solve(args) -> int:
     reader.close()
     rig.K = reader.K
     table = fit_table(frame.depth, T, reader.K)
+    rig.table_tilt_deg = table["tilt_deg"]
+    rig.table_flatness_mm = table["flatness_mm"]
     print(f"table            z = {table['table_z'] * 1000:+.1f} mm, tilt "
           f"{table['tilt_deg']:.2f} deg, flatness "
           f"{table['flatness_mm']:.1f} mm over {table['n_points']} points")
@@ -617,6 +724,29 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--collect", action="store_true")
   p.add_argument("--solve", action="store_true")
+  p.add_argument("--preview", action="store_true",
+                 help="detect the board and print what was found, no arm.  "
+                      "Run this first, with the board in the gripper, to "
+                      "confirm the description below matches the board.")
+  g = p.add_argument_group(
+    "the board", "Defaults describe the sheet in hardware/depth_bench/"
+    "targets.  A bought board needs its own numbers, and they are recorded "
+    "with the poses so --solve cannot use different ones.")
+  g.add_argument("--board", default=None, help="JSON file describing it")
+  g.add_argument("--board-kind", choices=("charuco", "checker"), default=None)
+  g.add_argument("--squares", default=None,
+                 help="'5x5'.  ChArUco: squares.  Checkerboard: INNER "
+                      "corners, one fewer than the squares each way.")
+  g.add_argument("--square-mm", type=float, default=None)
+  g.add_argument("--marker-mm", type=float, default=None,
+                 help="ChArUco only; defaults to 0.75 x the square")
+  g.add_argument("--dict", default=None,
+                 help="ChArUco only, e.g. DICT_5X5_100 or DICT_4X4_50")
+  g.add_argument("--legacy", action="store_true",
+                 help="ChArUco board numbered by the pre-OpenCV-4.6 "
+                      "convention; see Board")
+  p.add_argument("--frames", type=int, default=100,
+                 help="--preview only: how many to report before stopping")
   p.add_argument("--table", action="store_true", default=True,
                  help="also measure the table plane (default on)")
   p.add_argument("--no-table", dest="table", action="store_false")
@@ -625,6 +755,8 @@ def main() -> int:
   p.add_argument("--dry-run", action="store_true")
   p.add_argument("--max-residual-mm", type=float, default=4.0)
   a = p.parse_args()
+  if a.preview:
+    return preview(a)
   if a.collect:
     return collect(a)
   if a.solve:
