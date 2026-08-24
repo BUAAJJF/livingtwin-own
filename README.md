@@ -145,10 +145,9 @@ None of these has been achieved. They are what the direction is aiming at.
 
 **WM1-A in one line.** Sixty seconds of reward-free arm time identifies the
 domain (1.000 balanced accuracy over five candidates, against three controls at
-chance); posterior-guided fine-tuning recovers 102% of the known-parameter
-oracle's throughput gain while keeping 97% of the source domain; the safety half
-does not reproduce across training seeds and the criterion fails on its
-interval; and a three-millisecond ridge baseline with a far worse posterior
+chance); posterior-guided fine-tuning recovers 102% of what fine-tuning on the
+correct parameter achieves while keeping 97% of the source domain; the safety
+criterion FAILS -- the trip rate does not reproduce across training seeds; and a three-millisecond ridge baseline with a far worse posterior
 recovers just as much. Simulation only — no hardware result, and none claimed.
 
 Phase WM0 exists to decide whether WM1 is worth building. Simulator mismatch

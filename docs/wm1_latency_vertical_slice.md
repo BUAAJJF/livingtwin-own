@@ -1,11 +1,25 @@
 # Phase WM1-A — a reward-free calibration loop for 60 ms of observation delay
 
-**Verdict: YELLOW — five of six criteria.** The loop closes on throughput and
-on retention, and does not close on safety. Two results the phase did not
-expect: mixing a quarter of the source prior back in beats the known-parameter
-oracle in *both* domains, and a three-millisecond ridge regression whose
-posterior puts 0.235 of its mass on the truth recovers as much of the gap as a
-world model whose posterior puts 1.000 there — and is safer.
+**A note on names.** What earlier drafts and Phase WM0 called the *oracle* is
+called **known-parameter target-only adaptation** here — fine-tuning at
+`p_adapt = δ(3)`, the correct answer and nothing else. It is a *reference*, not
+a bound: section 6.3 shows a mixture beating it in both domains, and it is the
+only configuration in this phase that fails the retention criterion. Calling it
+an oracle implies a ceiling that it is not, and the recovery fractions below
+would then read as impossible.
+
+**Verdict: YELLOW — five of six criteria. The safety criterion (G3) does not
+pass.** The loop closes on throughput and on retention. On safety it does not:
+the trip rate's point estimate clears the threshold and its interval does not,
+and nothing in this report should be read as the safety half having been
+recovered.
+
+Two results the phase did not expect. Mixing a quarter of the source prior back
+in beats known-parameter target-only adaptation in *both* domains. And a
+three-millisecond ridge regression whose posterior puts 0.235 of its mass on
+the truth recovers as much of the gap as a world model whose posterior puts
+1.000 there — and is safer — so **the world model's identification advantage
+did not become an adaptation advantage over a broad posterior**.
 
 ## 0. What this phase asked
 
@@ -561,11 +575,11 @@ inventing agreement, so they are merged and the merge is stated:
 | [0.25, 0, 0.001, 0.687, 0.062] | B2 classifier |
 | [0.25, 0.039, 0.225, **0.405**, 0.081] | B3 state matching |
 | [0.278, 0.075, 0.155, **0.235**, 0.256] | B1b image→proprio |
-| [0, 0, 0, 1, 0] | the oracle (α = 1 by definition) |
+| [0, 0, 0, 1, 0] | known-parameter, target-only (α = 1 by definition) |
 | [1, 0, 0, 0, 0] | the source-prior refit control |
 
 At α = 1 the decision-aware posterior *is* δ(3) and its adaptation would have
-been the oracle's, with nothing to compare. That is why the α screening below
+been the known-parameter one's, with nothing to compare. That is why the α screening below
 matters as much as it does: mixing is what makes the comparison exist.
 
 ### 6.2 Choosing α
@@ -594,17 +608,18 @@ does not have this property.
 |---|---|---|---|---|---|---|
 | *no adaptation* (zero-shot) | — | — | — | 42.12 [41.79, 42.45] | — | 9.64 (395) |
 | *no mismatch* (nominal) | — | — | — | — | 55.94 [55.73, 56.15] | 3.12 (128) |
-| `q13c3_a1.00` | 1.00 | [1.00, 0.00, 0.00, 0.00, 0.00] | B0_prior_refit | 42.09 [40.05, 43.86] | 55.68 [54.97, 56.29] | 7.15 (439) |
-| `q1ae5_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.69, 0.06] | B2_classifier | 49.54 [49.36, 49.71] | 53.59 [53.34, 53.83] | 5.45 (335) |
-| `q2f23_a0.50` | 0.50 | [0.50, 0.00, 0.00, 0.50, 0.00] | DA | 47.90 [47.54, 48.25] | 54.64 [54.24, 55.03] | 5.66 (116) |
-| `q48aa_a0.75` | 0.75 | [0.25, 0.04, 0.23, 0.41, 0.08] | B3_state | 49.02 [48.77, 49.26] | 54.06 [53.58, 54.51] | 4.43 (272) |
-| `q7878_a1.00` | 1.00 | [0.00, 0.00, 0.00, 1.00, 0.00] | DA, ORACLE | 49.33 [49.08, 49.59] | 49.79 [48.84, 50.71] | 4.56 (280) |
-| `qcc23_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.75, 0.00] | B4_action, DA | 49.89 [49.68, 50.09] | 54.32 [54.01, 54.61] | 5.24 (322) |
-| `qcd16_a0.75` | 0.75 | [0.28, 0.08, 0.16, 0.23, 0.26] | B1b_img_proprio | 49.76 [49.46, 50.05] | 54.02 [53.68, 54.32] | 4.43 (272) |
+| `q13c3_a1.00` | 1.00 | [1.00, 0.00, 0.00, 0.00, 0.00] | source-prior refit (control) | 42.09 [40.05, 43.86] | 55.68 [54.97, 56.29] | 7.15 (439) |
+| `q1ae5_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.69, 0.06] | B2 classifier | 49.54 [49.36, 49.71] | 53.59 [53.34, 53.83] | 5.45 (335) |
+| `q2f23_a0.50` | 0.50 | [0.50, 0.00, 0.00, 0.50, 0.00] | decision-aware | 47.90 [47.54, 48.25] | 54.64 [54.24, 55.03] | 5.66 (116) |
+| `q48aa_a0.75` | 0.75 | [0.25, 0.04, 0.23, 0.41, 0.08] | B3 state matching | 49.02 [48.77, 49.26] | 54.06 [53.58, 54.51] | 4.43 (272) |
+| `q7878_a1.00` | 1.00 | [0.00, 0.00, 0.00, 1.00, 0.00] | decision-aware, known-parameter, target-only | 49.33 [49.08, 49.59] | 49.79 [48.84, 50.71] | 4.56 (280) |
+| `qcc23_a0.75` | 0.75 | [0.25, 0.00, 0.00, 0.75, 0.00] | B4 latent+action, decision-aware | 49.89 [49.68, 50.09] | 54.32 [54.01, 54.61] | 5.24 (322) |
+| `qcd16_a0.75` | 0.75 | [0.28, 0.08, 0.16, 0.23, 0.26] | B1b image→proprio | 49.76 [49.46, 50.05] | 54.02 [53.68, 54.32] | 4.43 (272) |
 
-Recovery as a fraction of what the oracle achieved,
-`(J_adapted − J_zero) / (J_oracle − J_zero)`, with `J_oracle = 49.33` measured
-in this phase:
+Recovery as a fraction of what **known-parameter target-only adaptation**
+achieved, `(J_adapted − J_zero) / (J_known − J_zero)`, with `J_known = 49.33`
+measured in this phase. Fractions above 1.0 are not an error: this denominator
+is a reference point, not a ceiling.
 
 | method | target recovery | retention | passes G2 / G3 / G4 |
 |---|---|---|---|
@@ -612,16 +627,17 @@ in this phase:
 | B1b image→proprio | 1.00 | 54.02 | ✓ / ✓ / ✓ |
 | B2 classifier | 0.98 | 53.59 | ✓ / point only / ✓ |
 | B3 state matching | 0.91 | 54.06 | ✓ / ✓ / ✓ |
-| the oracle | 0.95 | 49.79 | ✓ / ✓ / **✗** |
+| known-parameter, target-only | 0.95 | 49.79 | ✓ / ✓ / **✗** |
 | B0 source-prior refit | **−0.01** | 55.68 | ✗ / ✗ / ✓ |
 
 Four things in that table, and the third is the one that matters most.
 
-**Mixing beats the oracle at its own job.** The decision-aware posterior at
-α = 0.75 reaches 49.89 objects/min in the target domain against the oracle's
-49.33, and retains 54.32 against the oracle's 49.79. It is better in *both*
-domains than fine-tuning on the correct answer alone. The oracle is the only
-configuration in the table that fails G4. Twenty-five percent of the source
+**Mixing beats the correct answer at its own job.** The decision-aware
+posterior at α = 0.75 reaches 49.89 objects/min in the target domain against
+the known-parameter run's 49.33, and retains 54.32 against its 49.79. It is
+better in *both* domains than fine-tuning on the correct answer alone, which is
+the direct evidence that this reference is not an upper bound. Known-parameter
+target-only adaptation is the only configuration in the table that fails G4. Twenty-five percent of the source
 prior is not a concession — on this axis it is a regulariser on a
 high-variance 600-iteration fine-tune, and the source-prior refit control shows
 why that variance is there: conditioned on the wrong answer, the same budget
@@ -632,7 +648,8 @@ saw no target data recovers −1% — indistinguishable from not adapting at all
 while every method that saw sixty seconds of it recovers 91% to 102%. That is
 the loop working.
 
-**Identification quality does not translate into adaptation advantage.** B1b
+**Identification quality does not translate into adaptation advantage — the
+world model earns nothing here that a broad prior does not.** B1b
 puts 0.235 of its mass on the true domain and spreads the rest across all five
 candidates; the decision-aware posterior puts 1.000 on the truth. Their
 recoveries are 1.00 and 1.02. The reason is visible in the distributions
@@ -656,7 +673,7 @@ It is real and it is small.
 | zero-shot | 9.64 | 395 | 1.44 | [8.53, 10.84] |
 | **DA** | 5.24 | 322 | **6.90** | [3.78, **6.83**] |
 | B2 classifier | 5.45 | 335 | 6.94 | [3.96, 7.08] |
-| the oracle | 4.56 | 280 | 1.64 | [3.89, 5.28] |
+| known-parameter, target-only | 4.56 | 280 | 1.64 | [3.89, 5.28] |
 | B3 state matching | 4.43 | 272 | 4.66 | [3.32, 5.63] |
 | B1b image→proprio | 4.43 | 272 | **0.22** | [3.92, 4.99] |
 | nominal | 3.12 | 128 | 1.36 | [2.52, 3.81] |
@@ -747,7 +764,7 @@ and written to `results/wm1_latency/gate.json`.
 
 The same three thresholds re-derived from anchors measured in *this* phase
 rather than inherited from WM0 — `J_nominal` 55.94, `J_zero` 42.12,
-`J_oracle` 49.33 — give G2 ≥ 47.17, G3 ≤ 6.08, G4 ≥ 53.14. **The re-derived
+`J_known` 49.33 — give G2 ≥ 47.17, G3 ≤ 6.08, G4 ≥ 53.14. **The re-derived
 verdict agrees with the inherited one on every criterion**, including G3: 6.83
 exceeds 6.08 as well. The trip-rate discrepancy of section 8.2 does not change
 the answer.
@@ -846,10 +863,10 @@ landed on each:
 |---|---|---|
 | reward-free history cannot separate the domains | the data is not exciting enough, or the model is wrong; do not run PPO | **not hit.** 1.000 balanced accuracy on 160 held-out-shape sessions from 5 s of arm time, against three controls at or below chance |
 | posterior wrong where cross-correlation is right | the learned inference is broken | **not hit**, and the reverse: B1a is at chance and B1b reaches 0.438 where the learned posterior reaches 1.000 |
-| posterior right, target does not recover | simulator adaptation is the failure, not inference | **not hit.** every method that saw 60 s of target data recovers 91–102% of the oracle's gain; the control that saw none recovers −1% |
+| posterior right, target does not recover | simulator adaptation is the failure, not inference | **not hit.** every method that saw 60 s of target data recovers 91-102% of the known-parameter run's gain; the control that saw none recovers -1% |
 | target recovers, retention collapses | the posterior is too narrow; mix more source prior | **hit, and fixed by the mechanism that exists for it.** at α = 1 retention is 49.79 and G4 fails; at α = 0.75 it is 54.32 and G4 passes, with *higher* target throughput as well |
 | trajectory matching indistinguishable from decision-aware | the decision-aware novelty is not established | **not hit at the identification level** — 0.600 against 1.000 balanced accuracy, and a 25-point benign false-positive gap — but see section 5.1 on *which* part of the decision-aware score is doing it |
-| the oracle is unstable across training seeds | fix the oracle before evaluating anything against it | **not hit** for throughput — 49.16, 49.21, 49.71 across three seeds, against WM0's 49.72 — but **hit for safety**: the trip rate is overdispersed by a factor of 6.9 across seeds for the decision-aware run and 1.6 for the oracle, and that is why G3 fails on its interval (section 6.4) |
+| the known-parameter reference is unstable across training seeds | fix it before evaluating anything against it | **not hit** for throughput — 49.16, 49.21, 49.71 across three seeds, against WM0's 49.72 — but **hit for safety**: the trip rate is overdispersed by a factor of 6.9 across seeds for the decision-aware run and 1.6 for the known-parameter run, and that is why G3 fails on its interval (section 6.4) |
 
 ## 10. Limitations
 
@@ -884,10 +901,11 @@ but WM0's reported ±0.22 on 2.29 trips/hour was an understatement of that
 metric's spread, and this phase reports the safety criterion against two
 threshold sets because of it.
 
-**One "oracle" was the unadapted policy, and its exit status was clean.** The
+**One known-parameter run was measured on the unadapted policy, and its exit status was clean.** The
 adaptation runner picked its evaluation checkpoint with `ls -1v | tail -1` over
 every timestamped directory matching the run's tag. A duplicate of the seed-42
-oracle — started by an overlapping plan before the run lock existed, killed
+known-parameter run — started by an overlapping plan before the run lock
+existed, killed
 after it had written its first checkpoint — left a directory whose name sorts
 *after* the real one and whose newest file is `model_1500.pt`, which is where
 fine-tuning starts. The run reported 42.80 objects/min in the target domain and

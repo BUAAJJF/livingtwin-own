@@ -19,6 +19,20 @@ from pathlib import Path
 
 R = Path("results/wm1_latency")
 
+# What the adaptation plans call a configuration's methods, and what the report
+# calls them.  "ORACLE" is renamed because it is not one: fine-tuning on the
+# correct parameter alone is a reference point that a mixture beats in both
+# domains, and the word implies a ceiling the numbers contradict.
+METHOD_NAMES = {
+  "ORACLE": "known-parameter, target-only",
+  "B0_prior_refit": "source-prior refit (control)",
+  "DA": "decision-aware",
+  "B4_action": "B4 latent+action",
+  "B3_state": "B3 state matching",
+  "B2_classifier": "B2 classifier",
+  "B1b_img_proprio": "B1b image→proprio",
+}
+
 PRETTY = {
   "B0_prior": "B0 prior",
   "B1a_cmd_joint": "B1a command→joint",
@@ -178,7 +192,7 @@ def adaptation() -> str:
     probs = "[" + ", ".join(f"{x:.2f}" for x in e["probs"]) + "]"
     out.append(
       f"| `{cfg}` | {e['alpha']:.2f} | {probs} | "
-      f"{', '.join(sorted(e['methods']))} | "
+      f"{', '.join(METHOD_NAMES.get(m, m) for m in sorted(e['methods']))} | "
       f"{tb['mean']:.2f} [{tb['ci'][0]:.2f}, {tb['ci'][1]:.2f}] | "
       + (f"{rb['mean']:.2f} [{rb['ci'][0]:.2f}, {rb['ci'][1]:.2f}] | "
          if rb else "— | ")
