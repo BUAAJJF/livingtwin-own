@@ -47,6 +47,7 @@ for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
   os.environ.setdefault(_var, "1")
 
 import argparse                                            # noqa: E402
+import dataclasses                                         # noqa: E402
 import json                                                # noqa: E402
 import pathlib                                             # noqa: E402
 import signal                                              # noqa: E402
@@ -119,9 +120,7 @@ def build(a):
     rig.serial = reader.serial
 
   reproj = rectify.Reprojector(rig, device=a.device)
-  segmenter = (mask.DepthSegmenter(rig, reproj) if a.mask == "depth"
-               else mask.YoloSegmenter(a.yolo_weights, rig, reproj,
-                                       device=a.device))
+  segmenter = _segmenter(a, rig, reproj)
   tracker = mask.TargetTracker()
   builder = proprio.ProprioBuilder()
   mapper = robot.ActionMapper(spec, dt=1.0 / config.CONTROL_HZ)
@@ -142,6 +141,30 @@ def build(a):
   return rig, reader, reproj, segmenter, tracker, builder, mapper, arm, pol
 
 
+def _segmenter(a, rig, reproj):
+  """Build the mask backend the flags asked for.
+
+  Separate from ``setup`` because there are now three of them and the choice
+  has a consequence worth reading in one place: the depth backend is the
+  measurement, the colour backend is the inference, and ``fused`` is the depth
+  backend with the colour one allowed to add instances it did not find.  Only
+  ``fused`` covers the failure that motivated training a model at all without
+  giving up the accuracy of the one that needs no training.
+  """
+  depth_seg = mask.DepthSegmenter(rig, reproj)
+  if a.mask == "depth":
+    return depth_seg
+  cfg = mask.YoloCfg()
+  if getattr(a, "yolo_conf", None) is not None:
+    cfg = dataclasses.replace(cfg, conf=float(a.yolo_conf))
+  yolo_seg = mask.YoloSegmenter(
+    a.yolo_weights, rig, reproj, yolo_cfg=cfg,
+    device=getattr(a, "yolo_device", None) or "cuda:0")
+  if a.mask == "yolo":
+    return yolo_seg
+  return mask.FusedSegmenter(depth_seg, yolo_seg)
+
+
 def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--policy", required=True,
@@ -152,9 +175,24 @@ def main() -> int:
   p.add_argument("--no-arm", action="store_true",
                  help="real camera, simulated arm")
   p.add_argument("--allow-nominal", action="store_true")
-  p.add_argument("--mask", choices=("depth", "yolo"), default="depth")
+  p.add_argument("--mask", choices=("depth", "yolo", "fused"), default="depth",
+                 help="'depth' needs no model and is the accurate one wherever "
+                      "there is depth to segment.  'yolo' reads the mono image "
+                      "instead and works where there is not.  'fused' runs the "
+                      "first and lets the second add what it missed, which is "
+                      "what should be on the robot -- at one forward pass a "
+                      "frame.")
   p.add_argument("--yolo-weights", default=str(
-    pathlib.Path(__file__).resolve().parent / "yolo" / "best.pt"))
+    pathlib.Path(__file__).resolve().parent / "yolo" / "best.pt"),
+                 help="``.pt`` goes through ultralytics and ``.onnx`` through "
+                      "onnxruntime, which drops the torch dependency; see "
+                      "yolo_backend.py for what each costs")
+  p.add_argument("--yolo-conf", type=float, default=None,
+                 help="detection confidence, overriding mask.YoloCfg")
+  p.add_argument("--yolo-device", default=None,
+                 help="where the detector runs.  Defaults to cuda:0 -- it is "
+                      "the only part of the perception path that wants a GPU, "
+                      "and it is 8 ms there against 61 on the CPU")
   p.add_argument("--device", default="cpu",
                  help="where the resampling runs.  CPU is the measured "
                       "default and it is not a fallback: the cloud is 400k "

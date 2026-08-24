@@ -822,3 +822,88 @@ class YoloSegmenter:
     pixel = int(round(v)) * width + int(round(u))
     ray = self.reproj.rays_base(np.array([pixel]), self.rig)[0]
     return place_on_plane(origin, ray, self.plane)
+
+
+class FusedSegmenter:
+  """Both backends, on the full sensor grid, with the depth one deciding.
+
+  Neither backend alone is what should run on the robot, and it is worth being
+  precise about why rather than picking one.
+
+  ``DepthSegmenter`` is more accurate wherever it works.  Its outline is the
+  measured silhouette rather than a network's opinion of one, it needs no
+  training set, and it cannot be wrong about a whole class of object because a
+  whole class of object was missing from a recording.  What it cannot do is
+  work where there is no depth, and the bench measured how often that is: a
+  blank white surface fills 88% of its pixels on average and 42% in the worst
+  shot, with almost every silhouette holed.
+
+  ``YoloSegmenter`` covers exactly that hole and is worse everywhere else.
+
+  So this runs the depth segmenter first and adds the YOLO instances it did not
+  already find, matched by position.  Not "whichever has more instances" and
+  not an average of the two outlines: an object either has depth, in which case
+  the measurement is better than the model, or it does not, in which case there
+  is nothing to average with.
+
+  The cost is one forward pass per frame -- 8 ms on this machine through torch,
+  13 through onnxruntime on the GPU, against the depth backend's 22 -- and it
+  is paid whether or not it turns anything up.  ``skip_when_confident`` makes
+  it conditional, which halves the cost on a good frame and adds a latency
+  step-change on a bad one; off by default, because a perception thread with
+  two different periods is a thing to reason about at 3 a.m.
+  """
+
+  def __init__(self, depth_segmenter: "DepthSegmenter",
+               yolo_segmenter: "YoloSegmenter",
+               match_radius_m: float = 0.05,
+               skip_when_confident: float | None = None):
+    self.depth = depth_segmenter
+    self.yolo = yolo_segmenter
+    self.match_radius_m = float(match_radius_m)
+    self.skip_when_confident = skip_when_confident
+    self.decimate = 1
+    """The output grid is the sensor's, because the YOLO backend's is and the
+    two have to be expressed on one."""
+    self.n_from_yolo = 0
+    """How many of the last frame's instances only the colour model found.  The
+    honest measure of whether this is worth its forward pass."""
+
+  def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
+               arm=None) -> Segmentation:
+    seg_d = self.depth(depth, arm=arm)
+    d = self.depth.decimate
+    labels = (seg_d.labels if d == 1 else
+              np.repeat(np.repeat(seg_d.labels, d, axis=0), d, axis=1))
+    labels = labels[:depth.shape[0], :depth.shape[1]].astype(np.int32).copy()
+    instances = list(seg_d.instances)
+    self.n_from_yolo = 0
+
+    if rgb is None:
+      return Segmentation(labels=labels, instances=instances)
+    if (self.skip_when_confident is not None
+        and float((depth > 0).mean()) >= self.skip_when_confident
+        and instances):
+      return Segmentation(labels=labels, instances=instances)
+
+    seg_y = self.yolo(depth, rgb=rgb, arm=arm)
+    known = np.stack([i.centroid_base for i in instances]) if instances \
+      else np.zeros((0, 3))
+    for inst in seg_y.instances:
+      if known.shape[0]:
+        near = np.linalg.norm(known - inst.centroid_base, axis=1).min()
+        if near < self.match_radius_m:
+          continue
+      label = len(instances) + 1
+      # Only where the depth backend claimed nothing.  Its outline is the
+      # measurement and this one is an inference; where they overlap, the
+      # measurement keeps the pixel.
+      take = (seg_y.labels == inst.label) & (labels == 0)
+      if not take.any():
+        continue
+      labels[take] = label
+      instances.append(dataclasses.replace(inst, label=label,
+                                           n_px=int(take.sum())))
+      known = np.vstack([known, inst.centroid_base[None]])
+      self.n_from_yolo += 1
+    return Segmentation(labels=labels, instances=instances)

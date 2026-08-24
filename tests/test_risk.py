@@ -155,5 +155,28 @@ def test_calibration_bins_report_predicted_against_observed():
     assert b["n"] == 2
 
 
-def test_horizon_is_half_a_second():
-  assert risk.HORIZON == 25
+def test_the_horizon_was_chosen_by_measurement():
+  """0.2 s, and the module docstring carries the sweep that picked it.
+
+  It started at 0.5 s because that seemed a reasonable lead time.  Measured
+  within the target domain -- which is the only place the question "which
+  window trips" is asked -- the best simple velocity feature is at AUC 0.57
+  there and 0.66 at 0.2 s, so the number moved to where the evidence was.
+  This test exists so that moving it again requires editing the recorded
+  sweep, not just the constant.
+  """
+  import inspect
+
+  assert risk.HORIZON == 10
+  src = inspect.getsource(risk)
+  head = src.split("class RiskHead")[0]
+  for token in ("horizon  2 steps", "horizon 25 steps", "AUC"):
+    assert token in head, f"the sweep that chose HORIZON is not recorded: {token}"
+
+
+def test_the_label_horizon_is_a_parameter_not_a_constant():
+  """The sweep that chose it has to be re-runnable at other horizons."""
+  trip = torch.zeros(100, dtype=torch.bool)
+  trip[40] = True                       # in (19, 44] but not in (19, 34]
+  assert float(risk.labels_within_horizon(trip, [0], 20, horizon=25)[0]) == 1.0
+  assert float(risk.labels_within_horizon(trip, [0], 20, horizon=15)[0]) == 0.0

@@ -1,10 +1,20 @@
 """Run a YOLO26-seg model without ultralytics, and export one so you can.
 
-``mask.YoloSegmenter`` needs instance masks and nothing else.  Getting them
-through ultralytics costs a torch import, a CUDA context and 49 ms a frame on
-this machine, against a control loop that has 20 ms and a perception thread
-that was measured at 21.5 ms with the depth backend.  Getting them through
-onnxruntime costs an ``InferenceSession`` and the arithmetic.
+``mask.YoloSegmenter`` needs instance masks and nothing else, and there are two
+ways to get them.  This file exists because the deployment should not have to
+import torch to segment an image -- not because doing so is slow.  That was the
+assumption and it is wrong, measured on this machine over 30 frames of
+848x480:
+
+    ultralytics (.pt) on CUDA      8.3 ms   p95 12.0    120 Hz
+    onnxruntime (.onnx) on CUDA   13.4 ms   p95 15.9     75 Hz
+    onnxruntime (.onnx) on CPU    60.8 ms   p95 65.8     16 Hz   (4 threads)
+
+So torch is the fast path and ONNX is the portable one, and the reason to reach
+for ONNX is that it drops ultralytics, torch and a CUDA context from the robot
+-- which matters if the robot is not this machine -- and not that it is
+quicker.  On CPU it is too slow for the camera's rate and the perception thread
+would run at 16 Hz; that is a real number to plan around and not a footnote.
 
 So there are two detectors behind one call:
 

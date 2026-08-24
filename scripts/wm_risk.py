@@ -38,7 +38,7 @@ LENGTH = 25          # the window the posterior stage uses, so the two agree
 BURN_IN = 0
 
 
-def build_index(sessions, stride: int):
+def build_index(sessions, stride: int, horizon: int = risk.HORIZON):
   """``(session_id, t0, env)`` for every window, with its label and domain."""
   idx, y, dom = [], [], []
   for si, (s, _) in enumerate(sessions):
@@ -48,7 +48,8 @@ def build_index(sessions, stride: int):
         envs=torch.tensor([env]))]
       if not starts:
         continue
-      lab = risk.labels_within_horizon(s.trip[:, env], starts, LENGTH)
+      lab = risk.labels_within_horizon(s.trip[:, env], starts, LENGTH,
+                                       horizon)
       idx.extend((si, t0, env) for t0 in starts)
       y.append(lab)
       dom.extend([float(s.lag)] * len(starts))
@@ -91,14 +92,16 @@ def evaluate(model, sessions, idx, y, dom, device, limit=40000):
   return out
 
 
-def train(model, sessions, idx, y, device, epochs, bs, lr, seed, shuffle=False):
+def train(model, sessions, idx, y, device, epochs, bs, lr, seed, shuffle=False,
+          cap: float = 20.0):
   opt = torch.optim.Adam(model.parameters(), lr=lr)
   g = torch.Generator().manual_seed(seed)
   labels = y[torch.randperm(len(y), generator=g)] if shuffle else y
   # Rare positives: without this the minimiser answers "never" and is right
   # 97% of the time.
   pos = float(labels.mean())
-  pos_weight = torch.tensor((1.0 - pos) / max(pos, 1e-6), device=device)
+  pos_weight = torch.tensor(
+    min((1.0 - pos) / max(pos, 1e-6), cap), device=device)
   hist = []
   for ep in range(epochs):
     perm = torch.randperm(len(idx), generator=g).tolist()
@@ -128,6 +131,12 @@ def main() -> int:
   p.add_argument("--stride", type=int, default=13)
   p.add_argument("--lr", type=float, default=1e-3)
   p.add_argument("--hidden", type=int, default=96)
+  p.add_argument("--horizon", type=int, default=risk.HORIZON)
+  p.add_argument("--pos-weight-cap", type=float, default=20.0,
+                 help="ceiling on the positive class weight.  Uncapped at a "
+                      "0.8%% base rate it is 123, and the minimiser answers "
+                      "0.5 for everything: calibration destroyed, ranking "
+                      "unchanged, and every level-reading metric meaningless.")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--seed", type=int, default=0)
   a = p.parse_args()
@@ -141,9 +150,9 @@ def main() -> int:
       raise SystemExit(f"{name} has files without the trip channel; "
                        "regenerate them with the current collector")
 
-  tr_idx, tr_y, tr_dom = build_index(train_s, a.stride)
-  va_idx, va_y, va_dom = build_index(val_s, a.stride * 2)
-  vh_idx, vh_y, vh_dom = build_index(valh_s, a.stride * 2)
+  tr_idx, tr_y, tr_dom = build_index(train_s, a.stride, a.horizon)
+  va_idx, va_y, va_dom = build_index(val_s, a.stride * 2, a.horizon)
+  vh_idx, vh_y, vh_dom = build_index(valh_s, a.stride * 2, a.horizon)
   print(f"  windows: train {len(tr_idx):,} ({100 * float(tr_y.mean()):.2f}% "
         f"positive)  val {len(va_idx):,}  valh {len(vh_idx):,}")
   for v in damping.VALUES:
@@ -155,7 +164,7 @@ def main() -> int:
   dims = {k: int(probe[k].shape[-1]) for k in risk.RiskHead.CHANNELS}
   print(f"  dims: {dims}")
 
-  report = {"config": vars(a), "dims": dims, "horizon": risk.HORIZON,
+  report = {"config": vars(a), "dims": dims, "horizon": a.horizon,
             "length": LENGTH,
             "n_windows": {"train": len(tr_idx), "val": len(va_idx),
                           "valh": len(vh_idx)},
@@ -182,19 +191,33 @@ def main() -> int:
     torch.manual_seed(a.seed)
     m = risk.RiskHead(dims, hidden=a.hidden).to(dev)
     hist = train(m, subset, idx, y, dev, a.epochs, a.batch, a.lr,
-                 a.seed + 5, shuffle=shuffle)
+                 a.seed + 5, shuffle=shuffle, cap=a.pos_weight_cap)
     ev = {"val": evaluate(m, val_s, va_idx, va_y, va_dom, dev),
           "valh": evaluate(m, valh_s, vh_idx, vh_y, vh_dom, dev)}
+    # The headline is the WITHIN-DOMAIN number.  Pooled across domains the
+    # base rate differs seventyfold, so a head that only knows which domain it
+    # is in scores well and predicts nothing about which window trips.
+    tgt = ev["valh"]["per_domain"].get(str(damping.TARGET), {})
+    lift = (tgt.get("average_precision", 0.0)
+            / max(tgt.get("base_rate", 1e-9), 1e-9))
     print(f"     val  AP {ev['val']['average_precision']:.3f}  "
           f"AUC {ev['val']['roc_auc']:.3f}  base {ev['val']['base_rate']:.4f}")
+    print(f"     WITHIN target domain: AP "
+          f"{tgt.get('average_precision', float('nan')):.3f} vs base "
+          f"{tgt.get('base_rate', float('nan')):.4f} ({lift:.2f}x), AUC "
+          f"{tgt.get('roc_auc', float('nan')):.3f}")
     print(f"     valh AP {ev['valh']['average_precision']:.3f}  "
           f"AUC {ev['valh']['roc_auc']:.3f}")
     for v, d in ev["valh"]["per_domain"].items():
       print(f"       damping {v}: AP {d['average_precision']:.3f} "
             f"base {d['base_rate']:.4f} mean p {d['mean_predicted']:.3f}")
     report[name] = {"history": hist, "eval": ev,
+                    "within_target_domain": ev["valh"]["per_domain"].get(
+                      str(damping.TARGET), {}),
                     "trained_on": keep or list(damping.VALUES)}
-    saved[name] = m.state()
+    st = m.state()
+    st["horizon"] = a.horizon
+    saved[name] = st
 
   outdir = Path(a.out)
   outdir.mkdir(parents=True, exist_ok=True)

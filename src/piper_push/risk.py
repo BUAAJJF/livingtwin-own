@@ -40,12 +40,25 @@ import torch.nn as nn
 
 from piper_push import wm_data
 
-HORIZON = 25
-"""Control steps ahead the head predicts over: 0.5 s at 50 Hz.
+HORIZON = 10
+"""Control steps ahead the head predicts over: 0.2 s at 50 Hz.
 
-Long enough that the answer is about the trajectory the arm is on rather than
-about the current step, short enough that a positive is attributable to what
-the window shows."""
+Chosen by measuring, not by argument.  Sweeping history length in
+{25, 50, 100} against horizon in {2, 5, 10, 25} and scoring the best simple
+velocity feature *within* the target domain -- so the answer is about which
+windows trip rather than which domain they came from -- gives:
+
+    horizon  2 steps   AUC 0.79-0.83, AP 0.008-0.021  (base 0.0024-0.0056)
+    horizon  5 steps   AUC 0.63-0.67, AP 0.012-0.025
+    horizon 10 steps   AUC 0.60-0.66, AP 0.026-0.035
+    horizon 25 steps   AUC 0.57-0.60, AP 0.042-0.058  (base 0.028-0.031)
+
+Two steps is 40 ms and is not prediction -- the joint is already at the
+threshold -- so it is detection wearing a horizon.  Twenty-five is what the
+phase specification suggests and is barely above chance.  Ten is where the
+ratio of average precision to base rate is highest with a lead time still
+worth acting on.  None of these is a strong signal, and the report says so
+rather than picking the flattering pooled number."""
 
 
 class RiskHead(nn.Module):

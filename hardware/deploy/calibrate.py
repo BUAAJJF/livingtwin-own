@@ -38,6 +38,7 @@ the robot is not bolted down, or the table is not the table.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import pathlib
 import sys
@@ -53,10 +54,12 @@ POSES_FILE = HERE / "calib_poses.json"
 BOARD_SQUARES = (5, 5)
 BOARD_SQUARE_M = 0.033
 BOARD_MARKER_M = 0.025
-BOARD_DICT = cv2.aruco.DICT_5X5_100
-"""The board ``hardware/depth_bench/targets/make_board.py`` prints.  Same
-board, same numbers -- there is no reason for the rig to own a second one, and
-one board that both files agree about is one fewer thing to get wrong."""
+BOARD_DICT = "DICT_5X5_100"
+"""The board ``hardware/depth_bench/targets/make_board.py`` prints, and the
+default only because it is the one this repository can produce.  Any board
+works -- see ``Board`` -- and the numbers here are not privileged, they are
+just what you get if you print the sheet in ``hardware/depth_bench/targets``
+rather than buying one."""
 
 MIN_POSES = 8
 MIN_ROT_SPAN_DEG = 30.0
@@ -65,26 +68,153 @@ alone leave the rotation unconstrained and the solver returns something anyway;
 this is the guard that makes that a refusal rather than a silent answer."""
 
 
-def make_board():
-  d = cv2.aruco.getPredefinedDictionary(BOARD_DICT)
-  return cv2.aruco.CharucoBoard(BOARD_SQUARES, BOARD_SQUARE_M, BOARD_MARKER_M, d)
+@dataclasses.dataclass(frozen=True)
+class Board:
+  """Which board is on the gripper, because it is not necessarily this one.
+
+  The rig originally hard-coded the printed A4 sheet, which is fine until
+  somebody buys a board -- and a bought board is the better instrument: glass
+  or aluminium instead of paper on cardboard, and a square size held to
+  micrometres instead of to whatever the printer did.  A calibration is only
+  as good as its ruler, so the ruler has to be describable.
+
+  Two kinds, and the difference is not cosmetic.
+
+  ``charuco`` carries ArUco markers in the white squares, so every detection
+  is anchored to marker *identities*.  The board's origin is therefore the
+  same physical corner in every frame, at any orientation, and it survives the
+  board being half out of view.
+
+  ``checker`` is a plain checkerboard and has a symmetry: rotating it 180
+  degrees about its own normal maps the pattern onto itself, so the corner
+  ordering a detector returns can flip between poses.  Nothing in a single
+  frame can tell which one happened -- the image is identical -- and hand-eye
+  fed a mixture of the two returns nonsense with no obvious symptom beyond a
+  large residual.  ``solve`` undoes it (see ``_unflip``), but the honest
+  summary is that ChArUco does not have the problem and a checkerboard needs
+  the fix to be trusted.
+
+  ``legacy`` is the third trap and the quietest.  OpenCV changed which corner
+  a ChArUco board starts numbering from in 4.6.  A board printed or bought
+  against the old convention still detects perfectly against the new one; its
+  origin is simply somewhere else, which moves the answer by the size of the
+  board and looks like a mounting error.  If the residual is fine but the
+  camera lands a board-width away from where it obviously is, this is why.
+  """
+
+  kind: str = "charuco"
+  squares: tuple[int, int] = BOARD_SQUARES
+  """ChArUco: squares across and down.  Checkerboard: *inner corners*, which
+  is one less than the squares in each direction and the most common way to
+  get a checkerboard wrong."""
+  square_m: float = BOARD_SQUARE_M
+  marker_m: float = BOARD_MARKER_M
+  dictionary: str = BOARD_DICT
+  legacy: bool = False
+  min_corners: int = 6
+
+  def __post_init__(self):
+    if self.kind not in ("charuco", "checker"):
+      raise ValueError(f"unknown board kind {self.kind!r}")
+    if self.kind == "charuco" and not (0 < self.marker_m < self.square_m):
+      raise ValueError(
+        f"marker {self.marker_m * 1000:.1f} mm must be smaller than the "
+        f"square {self.square_m * 1000:.1f} mm")
+
+  # -- construction ---------------------------------------------------------
+
+  @classmethod
+  def from_dict(cls, d: dict) -> "Board":
+    f = {k.name for k in dataclasses.fields(cls)}
+    kw = {k: v for k, v in d.items() if k in f}
+    if "squares" in kw:
+      kw["squares"] = tuple(int(x) for x in kw["squares"])
+    return cls(**kw)
+
+  @classmethod
+  def load(cls, path) -> "Board":
+    """From a JSON file.
+
+    Reads ``hardware/depth_bench/targets/target_a4.json`` as well as this
+    module's own format, because that file already describes a board and
+    having two spellings of the same sheet is how they drift apart.
+    """
+    d = json.loads(pathlib.Path(path).read_text())
+    if "squares_x" in d:              # the depth bench's target description
+      d = {"kind": "charuco",
+           "squares": (d["squares_x"], d["squares_y"]),
+           "square_m": d["square_m"], "marker_m": d["marker_m"],
+           "dictionary": d.get("dictionary", BOARD_DICT)}
+    return cls.from_dict(d)
+
+  def to_dict(self) -> dict:
+    return dataclasses.asdict(self)
+
+  def describe(self) -> str:
+    n = f"{self.squares[0]}x{self.squares[1]}"
+    if self.kind == "charuco":
+      return (f"ChArUco {n}, {self.square_m * 1000:.1f} mm squares, "
+              f"{self.marker_m * 1000:.1f} mm markers, {self.dictionary}"
+              + (", legacy origin" if self.legacy else ""))
+    return (f"checkerboard {n} inner corners, "
+            f"{self.square_m * 1000:.1f} mm squares")
+
+  # -- detection ------------------------------------------------------------
+
+  def _charuco(self):
+    d = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, self.dictionary))
+    b = cv2.aruco.CharucoBoard(self.squares, self.square_m, self.marker_m, d)
+    if self.legacy:
+      b.setLegacyPattern(True)
+    return b
+
+  def object_points(self) -> np.ndarray:
+    """Checkerboard corners in the board frame, z = 0."""
+    nx, ny = self.squares
+    g = np.mgrid[0:nx, 0:ny].T.reshape(-1, 2).astype(np.float64)
+    return np.concatenate([g * self.square_m, np.zeros((nx * ny, 1))], axis=1)
+
+  def detect(self, gray: np.ndarray):
+    """``(object_points, image_points)`` in the board and image frames, or
+    None if the board is not there."""
+    if self.kind == "charuco":
+      board = self._charuco()
+      params = cv2.aruco.DetectorParameters()
+      params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+      det = cv2.aruco.CharucoDetector(board, cv2.aruco.CharucoParameters(),
+                                      params)
+      corners, ids, _, _ = det.detectBoard(gray)
+      if ids is None or len(ids) < self.min_corners:
+        return None
+      return board.matchImagePoints(corners, ids)
+
+    ok, corners = cv2.findChessboardCornersSB(
+      gray, self.squares, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY)
+    if not ok:
+      return None
+    return self.object_points().reshape(-1, 1, 3).astype(np.float32), corners
 
 
-def detect_board(gray: np.ndarray, K: np.ndarray, dist: np.ndarray):
+DEFAULT_BOARD = Board()
+
+
+def make_board(board: Board = DEFAULT_BOARD):
+  """The OpenCV ChArUco object, for callers that want to draw it."""
+  return board._charuco()
+
+
+def detect_board(gray: np.ndarray, K: np.ndarray, dist: np.ndarray,
+                 board: Board = DEFAULT_BOARD):
   """Board pose in the camera frame, or None.
 
   Corner refinement is on.  The bench measured what it buys on this board: the
   pose error fell from 0.92 mm to 0.71 mm, and the calibration residual is the
   thing this whole file is trying to keep small.
   """
-  board = make_board()
-  params = cv2.aruco.DetectorParameters()
-  params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-  det = cv2.aruco.CharucoDetector(board, cv2.aruco.CharucoParameters(), params)
-  corners, ids, _, _ = det.detectBoard(gray)
-  if ids is None or len(ids) < 6:
+  found = board.detect(gray)
+  if found is None:
     return None
-  obj, img = board.matchImagePoints(corners, ids)
+  obj, img = found
   ok, rvec, tvec = cv2.solvePnP(obj, img, K, dist,
                                 flags=cv2.SOLVEPNP_ITERATIVE)
   if not ok:
@@ -92,7 +222,7 @@ def detect_board(gray: np.ndarray, K: np.ndarray, dist: np.ndarray):
   proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
   rms = float(np.sqrt(((proj.reshape(-1, 2) - img.reshape(-1, 2)) ** 2)
                       .sum(1).mean()))
-  return {"rvec": rvec, "tvec": tvec, "n_corners": int(len(ids)),
+  return {"rvec": rvec, "tvec": tvec, "n_corners": int(len(img)),
           "reproj_rms_px": rms}
 
 
@@ -173,7 +303,81 @@ def _compose(R, t, inv: bool = False) -> np.ndarray:
   return np.linalg.inv(T) if inv else T
 
 
-def solve(records: list[dict], gripper_site: str = "grasp_site"):
+def _flip_matrix(board: Board) -> np.ndarray:
+  """The 180-degree rotation about the board normal, as a board-frame pose.
+
+  Maps corner ``(x, y)`` to ``(W - x, H - y)``, which for a checkerboard is
+  the identity on the *image* and a different answer for the pose.
+  """
+  nx, ny = board.squares
+  n = (nx - 1, ny - 1) if board.kind == "checker" else (nx, ny)
+  F = np.eye(4)
+  F[0, 0] = F[1, 1] = -1.0
+  F[0, 3] = n[0] * board.square_m
+  F[1, 3] = n[1] * board.square_m
+  return F
+
+
+def _unflip(records: list[dict], board: Board, gripper_site: str):
+  """Undo the checkerboard's 180-degree corner-ordering ambiguity.
+
+  Done without the hand-eye solution, which is the point: the solution is what
+  the flips would corrupt, so deciding them from it would be circular.
+
+  What is used instead is an invariant of ``A X = X B``.  ``A`` and ``B`` are
+  conjugate -- ``A = X B X^-1`` -- and conjugate rotations have the *same
+  angle*, whatever ``X`` is.  So for every pair of poses the gripper's rotation
+  angle and the board's rotation angle must agree, and a pose whose corners
+  came back rotated by 180 degrees disagrees loudly.  Each pose is assigned the
+  orientation that agrees best with the ones already decided.
+
+  A globally consistent flip is not corrected and does not need to be: it names
+  the opposite corner of the board as the origin, and hand-eye absorbs that
+  into the constant board-in-gripper pose it never reports.
+  """
+  from .proprio import Kinematics
+
+  kin = Kinematics(site_name=gripper_site)
+  T_bg, T_cb = [], []
+  for r in records:
+    kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
+    T = np.eye(4)
+    T[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T[:3, 3] = kin.data.site_xpos[kin.site_id]
+    T_bg.append(T)
+    T_cb.append(_rt(r["rvec"], r["tvec"]))
+
+  F = _flip_matrix(board)
+  flipped = [False] * len(records)
+
+  def angle(T):
+    return abs(float(np.linalg.norm(cv2.Rodrigues(T[:3, :3])[0])))
+
+  for j in range(1, len(records)):
+    cost = [0.0, 0.0]
+    for i in range(j):
+      Ci = T_cb[i] @ F if flipped[i] else T_cb[i]
+      a = angle(np.linalg.inv(T_bg[j]) @ T_bg[i])
+      for k, Cj in enumerate((T_cb[j], T_cb[j] @ F)):
+        cost[k] += abs(a - angle(Cj @ np.linalg.inv(Ci)))
+    if cost[1] < cost[0]:
+      flipped[j] = True
+
+  out = []
+  for r, f in zip(records, flipped):
+    if not f:
+      out.append(r)
+      continue
+    T = _rt(r["rvec"], r["tvec"]) @ F
+    r = dict(r)
+    r["rvec"] = cv2.Rodrigues(T[:3, :3])[0].ravel().tolist()
+    r["tvec"] = T[:3, 3].tolist()
+    out.append(r)
+  return out, sum(flipped)
+
+
+def solve(records: list[dict], gripper_site: str = "grasp_site",
+          board: Board | None = None):
   """Camera pose in the base frame, plus a residual per pose.
 
   The residual is the thing to read.  ``calibrateHandEye`` will return a
@@ -184,6 +388,10 @@ def solve(records: list[dict], gripper_site: str = "grasp_site"):
   error.
   """
   from .proprio import Kinematics
+
+  n_flipped = 0
+  if board is not None and board.kind == "checker":
+    records, n_flipped = _unflip(records, board, gripper_site)
 
   kin = Kinematics(site_name=gripper_site)
   R_bg, t_bg, R_cb, t_cb = [], [], [], []
@@ -210,7 +418,8 @@ def solve(records: list[dict], gripper_site: str = "grasp_site"):
     # is satisfied by any X, and a solver handed this returns one.
     return {"T_base_cam": None, "rot_span_deg": rot_span,
             "n_poses": len(records), "residual_mm": float("nan"),
-            "worst_mm": float("nan"), "worst_pose": -1, "per_pose_mm": []}
+            "worst_mm": float("nan"), "worst_pose": -1, "per_pose_mm": [],
+            "n_flipped": n_flipped}
 
   R, t = calibrate_hand_eye(R_bg, t_bg, R_cb, t_cb)
   T_base_cam = np.eye(4)
@@ -240,6 +449,7 @@ def solve(records: list[dict], gripper_site: str = "grasp_site"):
     "per_pose_mm": per_pose_mm.tolist(),
     "rot_span_deg": rot_span,
     "n_poses": len(records),
+    "n_flipped": n_flipped,
   }
 
 
