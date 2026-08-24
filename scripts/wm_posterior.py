@@ -51,6 +51,28 @@ AXES = {
 AXIS = "obs_latency_steps"
 PRIOR_CLS, VALUES, TARGET, P_SOURCE = AXES[AXIS]
 
+SHIFT_BASELINES_APPLY = {"obs_latency_steps": True,
+                         "servo_damping_scale": False}
+"""Whether B1a and B1b mean anything on this axis.
+
+Both are *shift-scanning* baselines.  B1a correlates the commanded step against
+the joint's response at each candidate shift; B1b fits a ridge from the image
+encoding to the joint state `c` steps earlier.  On the latency axis a candidate
+IS a shift and both are the natural model-free thing to try.
+
+On the damping axis a candidate is a multiplier on the servo's derivative gain.
+There is no shift to scan.  `img[fit] -> q[fit - 0.75]` is not a weaker version
+of the same idea; it is a fractional index into time, and the closest integer
+reading of it would score every candidate identically while looking like a
+measurement.
+
+So they are deprecated here rather than adapted.  Phase WM1-B was asked not to
+guess at an equivalence that does not exist, and the comparison it does need --
+state, proprioception and servo-error trajectory matching -- is `B3_state`,
+which compares a simulated rollout against the observed one and is indexed by
+candidate rather than by shift, so it carries across unchanged.
+"""
+
 
 def set_axis(name: str) -> None:
   global AXIS, PRIOR_CLS, VALUES, TARGET, P_SOURCE
@@ -343,8 +365,10 @@ def analytic_rows(sessions, enc_split, device, limit_envs=None):
       for bud in BUDGETS:
         v = wm_infer.SessionView.from_session(s, env, bud, device=device)
         per_budget[bud] = {
-          "b1a": wm_infer.xcorr_action_joint(v),
-          "b1b": wm_infer.xcorr_latent_proprio(v, enc_split),
+          "b1a": (wm_infer.xcorr_action_joint(v)
+                  if SHIFT_BASELINES_APPLY[AXIS] else None),
+          "b1b": (wm_infer.xcorr_latent_proprio(v, enc_split)
+                  if SHIFT_BASELINES_APPLY[AXIS] else None),
         }
       out.append({"file": name, "env": env, "lag": s.lag, "budgets": per_budget})
   return out
@@ -436,9 +460,10 @@ def main() -> int:
        lambda: session_scores(v60, None, None, None,
                               {"classifier": clfs["classifier"]})
        if "classifier" in clfs else None),
-      ("b1b_ridge_s",
-       lambda: wm_infer.xcorr_latent_proprio(v60, head.obs_dim_1d)),
-      ("b1a_xcorr_s", lambda: wm_infer.xcorr_action_joint(v60)),
+      *((("b1b_ridge_s",
+          lambda: wm_infer.xcorr_latent_proprio(v60, head.obs_dim_1d)),
+         ("b1a_xcorr_s", lambda: wm_infer.xcorr_action_joint(v60)))
+        if SHIFT_BASELINES_APPLY[AXIS] else ()),
     ):
       fn()                                   # warm the kernels
       t0 = time.time()
@@ -475,6 +500,11 @@ def main() -> int:
       w_m5, t_m5 = {"latent": 1 / 3, "action": 1 / 3, "risk": 1 / 3}, 1.0
     entry["da_weights"] = w_da
     entry["m5_weights"] = w_m5
+    if not SHIFT_BASELINES_APPLY[AXIS]:
+      entry["deprecated_methods"] = {
+        "B1a_cmd_joint": "shift-scanning; a damping candidate is not a shift",
+        "B1b_img_proprio": "shift-scanning; a damping candidate is not a shift",
+      }
 
     for name, weights in METHODS.items():
       w = (w_da if name == "DA"
@@ -493,8 +523,10 @@ def main() -> int:
       entry["methods"].setdefault("cal", {})[name] = metrics(
         cal_r, cal_y, temp, name) if cal_r else {}
 
-    # The analytic baselines, which need no model and no cache.
-    for split, rows in analytic.items():
+    # The analytic baselines, which need no model and no cache -- where they
+    # mean anything.  See SHIFT_BASELINES_APPLY.
+    for split, rows in (analytic.items() if SHIFT_BASELINES_APPLY[AXIS]
+                        else ()):
       for key in ("b1a", "b1b"):
         sc = [r["budgets"][bud][key] for r in rows]
         truths = [r["lag"] for r in rows]
@@ -585,6 +617,8 @@ def main() -> int:
   for name in ("B1b_img_proprio", "B2_classifier", "B3_state", "B4_action",
                "DA", "abl_latent_only", "abl_action_only", "M2_broad",
                "M5_risk_score"):
+    if name == "B1b_img_proprio" and not SHIFT_BASELINES_APPLY[AXIS]:
+      continue
     e = report["budgets"]["60.0"]["methods"]["test"].get(name)
     t = (e or {}).get("target_only")
     if not t:

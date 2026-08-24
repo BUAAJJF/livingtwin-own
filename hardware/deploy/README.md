@@ -197,6 +197,32 @@ be gripped is the precision one, print
 precision board still earns its keep on the table, for the depth checks in
 `hardware/depth_bench`, which are about range and not about pose.
 
+**Size it before buying it.** Hand-eye error is set by how many pixels the
+pattern spans and how many corners it has, and a target that is too small
+cannot be rescued by collecting more poses. Measured synthetically — this arm's
+workspace, the D405's intrinsics, 0.2 px of corner-localisation noise, error in
+the recovered `T_base_cam`, median of 40 runs:
+
+| target | corners | span | 12 poses | 30 poses |
+|---|---|---|---|---|
+| one 40 mm ArUco | 4 | 37 px | **122 mm** | **87 mm** |
+| one 80 mm ArUco | 4 | 73 px | 11 mm | — |
+| ChArUco 5×5, 25 mm | 16 | 67 px | 8.1 mm | 5.2 mm |
+| ChArUco 5×5, 33 mm (the A4 sheet) | 16 | 88 px | 6.1 mm | 3.7 mm |
+| ChArUco 9×7, 25 mm | 48 | 137 px | 2.0 mm | 1.4 mm |
+| ChArUco 12×9, 25 mm | 88 | 193 px | 1.1 mm | — |
+
+Two things to read off it. **A single marker is not a calibration target**, at
+any pose count: four coplanar corners spanning 25 pixels leave the planar-pose
+ambiguity nearly degenerate, so the error does not average down — 8 poses and
+30 poses are both about 100 mm, and `--solve` refuses both. And **`--collect`
+is cheap, so collect more than eight**: at fixed board size the error falls
+roughly as 1/√n, which is the only free variable left once the board is bought.
+
+Detection is not the limit and should not be confused with it: a 40 mm marker
+at 0.70 m is 26 px on a side and decodes 100% of the time. It is found
+perfectly and located uselessly.
+
 **Say which board it is.** The defaults describe the printed A4 sheet. Anything
 else needs its numbers, and the failure mode for getting them wrong is not a
 bad answer, it is `board not found` at every pose with nothing saying which of
