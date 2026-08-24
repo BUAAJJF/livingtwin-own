@@ -142,3 +142,17 @@ def test_the_queue_writes_beside_its_plan():
   assert src.index("ADAPT = Path(a.plan).parent") > src.index(
     'ADAPT = Path("results/wm1_latency/adapt")')
   del _P
+
+
+def test_the_queue_passes_its_memory_floor_to_the_shard():
+    """Two numbers that must be one number.
+
+    `wm1_adapt.sh` waits for `MIN_FREE_MIB` before every training and every
+    evaluation, defaulting to 70000.  A queue told `--min-free-mib 45000`
+    admitted jobs at 45000 and the shard then sat waiting for 70000 -- forever,
+    while the queue counted it as running and the card sat half idle.  Nothing
+    failed and nothing progressed.
+    """
+    src = (ROOT / "scripts" / "wm1_queue.py").read_text()
+    assert '"MIN_FREE_MIB": str(a.min_free_mib)' in src
+    assert "env={**os.environ" in src

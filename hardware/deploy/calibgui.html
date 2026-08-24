@@ -1,0 +1,273 @@
+<!-- Served by calibgui.py.  One file, no external anything: it is opened next
+     to a robot that is mid-calibration, and a page that needs the network to
+     render is a page that fails at exactly that moment. -->
+<meta charset="utf-8">
+<title>Eye-to-hand calibration</title>
+<style>
+  :root {
+    --bg:#0e1116; --panel:#161b22; --line:#262c36; --fg:#e6edf3; --dim:#8b949e;
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.55 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+           padding:12px 20px; border-bottom:1px solid var(--line);
+           background:var(--panel); position:sticky; top:0; z-index:10; }
+  h1 { font-size:15px; margin:0; font-weight:600; }
+  h1 span { color:var(--dim); font-weight:400; }
+  .grow { flex:1; }
+  main { display:grid; grid-template-columns:minmax(420px,1.4fr) minmax(360px,1fr);
+         gap:18px; padding:18px 20px; align-items:start; }
+  @media (max-width:980px){ main{ grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+  .card h2 { font-size:13px; margin:0 0 10px; text-transform:uppercase;
+             letter-spacing:.08em; color:var(--dim); font-weight:600; }
+  img#view { width:100%; border-radius:10px; border:1px solid var(--line);
+             display:block; background:#000; }
+  button { font:inherit; font-weight:600; padding:8px 16px; border-radius:7px;
+           border:1px solid var(--line); background:#21262d; color:var(--fg);
+           cursor:pointer; }
+  button:hover:not(:disabled){ border-color:var(--accent); }
+  button:disabled { opacity:.35; cursor:default; }
+  button.go { background:var(--ok); border-color:var(--ok); color:#05130a; }
+  button.big { width:100%; padding:16px; font-size:17px; margin-top:4px; }
+  .check { display:flex; gap:10px; align-items:flex-start; padding:6px 0;
+           border-bottom:1px solid #1d222a; }
+  .check:last-child { border-bottom:0; }
+  .dot { width:9px; height:9px; border-radius:50%; margin-top:7px; flex:none;
+         background:var(--dim); }
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+  .dot.warn{background:var(--warn)}
+  .check .t { flex:1; }
+  .check .t b { font-weight:600; }
+  .check .t i { font-style:normal; color:var(--dim); display:block;
+                font-size:12.5px; }
+  .bar { height:8px; border-radius:4px; background:#0b0e13; overflow:hidden;
+         border:1px solid var(--line); margin:6px 0 2px; }
+  .bar > i { display:block; height:100%; background:var(--accent); }
+  .bar > i.ok { background:var(--ok); }
+  .kv { display:flex; justify-content:space-between; gap:12px; padding:3px 0;
+        font-variant-numeric:tabular-nums; }
+  .kv span:first-child { color:var(--dim); }
+  .steps { display:flex; gap:8px; flex-wrap:wrap; }
+  .steps div { padding:4px 11px; border-radius:20px; border:1px solid var(--line);
+               font-size:12.5px; color:var(--dim); }
+  .steps div.on { border-color:var(--accent); color:var(--accent); }
+  .steps div.done { border-color:var(--ok); color:var(--ok); }
+  ul.poses { list-style:none; margin:0; padding:0; max-height:230px;
+             overflow-y:auto; }
+  ul.poses li { display:flex; align-items:center; gap:10px; padding:5px 0;
+                border-bottom:1px solid #1d222a; font-variant-numeric:tabular-nums; }
+  ul.poses li .n { color:var(--dim); width:28px; }
+  ul.poses li .r { flex:1; }
+  ul.poses li button { padding:2px 9px; font-size:12px; font-weight:400; }
+  ul.poses li.worst { color:var(--warn); }
+  .hint { color:var(--dim); font-size:12.5px; margin:8px 0 0; }
+  .why { color:var(--warn); font-size:12.5px; min-height:1.2em; margin-top:6px; }
+  code { background:#0b0e13; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+</style>
+
+<header>
+  <h1>Eye-to-hand calibration <span id="board"></span></h1>
+  <div class="grow"></div>
+  <div class="steps">
+    <div id="s1">1 · preflight</div><div id="s2">2 · collect</div>
+    <div id="s3">3 · solve</div><div id="s4">4 · save</div>
+  </div>
+</header>
+
+<main>
+  <div>
+    <img id="view" src="/stream">
+    <div class="card" style="margin-top:16px">
+      <h2>Record a pose</h2>
+      <button id="rec" class="big go" disabled>record this pose</button>
+      <div class="why" id="why"></div>
+      <p class="hint">Space also records. Move the arm <b>by hand</b> — it is
+      connected but not enabled. Change the board's <b>orientation</b> between
+      poses, not just its position: hand-eye is determined by rotation, and a
+      set that only translates leaves it undetermined however many poses it
+      has.</p>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Preflight</h2>
+      <div id="pre"></div>
+    </div>
+
+    <div class="card">
+      <h2>Coverage</h2>
+      <div class="kv"><span>poses</span><b id="np">0</b></div>
+      <div class="bar"><i id="npbar" style="width:0"></i></div>
+      <div class="kv"><span>rotation spread</span><b id="rs">0°</b></div>
+      <div class="bar"><i id="rsbar" style="width:0"></i></div>
+      <p class="hint">The solver refuses under <b id="rsmin">30</b>° of
+      spread. Below the target pose count the answer is accepted and still
+      poor — the measured curve is in <code>README.md</code>.</p>
+      <svg id="disc" viewBox="-1.1 -1.1 2.2 2.2" style="width:100%;max-width:230px;display:block;margin:10px auto 0"></svg>
+      <p class="hint" style="text-align:center">Where each recorded pose faces.
+      Spread the dots.</p>
+    </div>
+
+    <div class="card">
+      <h2>Poses</h2>
+      <ul class="poses" id="list"></ul>
+      <button id="solve" style="margin-top:12px" disabled>solve</button>
+      <button id="save" style="margin-top:12px" disabled>write rig.json</button>
+      <div id="result"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let S = null;
+
+function dot(ok, warn) {
+  return `<span class="dot ${ok ? 'ok' : (warn ? 'warn' : 'bad')}"></span>`;
+}
+function row(ok, warn, title, detail) {
+  return `<div class="check">${dot(ok, warn)}<div class="t"><b>${title}</b>` +
+         `<i>${detail}</i></div></div>`;
+}
+
+function preflight(s) {
+  const L = s.live || {}, out = [];
+  const fresh = L.frame_age_s != null && L.frame_age_s < 0.5;
+  out.push(row(fresh, false, "camera",
+    L.frame_age_s == null ? "no frame yet"
+      : `frame ${(L.frame_age_s * 1000).toFixed(0)} ms old`));
+
+  out.push(row(s.has_arm, false, "arm over CAN",
+    !s.has_arm ? "not connected — poses cannot be recorded"
+      : "q = " + (L.arm ? L.arm.q_deg.map(x => x.toFixed(0)).join(", ") + "°"
+                        : "…")));
+
+  out.push(row(!!L.detected, false, "board detected",
+    L.detected ? `${L.n_corners} corners · ${L.reproj_px} px · ${L.range_mm} mm`
+               : "not in view, or the board description is wrong"));
+
+  const g = L.on_gripper;
+  out.push(row(g ? g.ok : false, !g, "board is on the gripper",
+    !g ? "needs the arm and a detected board"
+       : (g.ok
+          ? `${g.separation_mm} mm from the grasp site`
+          : `${g.separation_mm} mm from the grasp site — this board is NOT ` +
+            `held by the arm. Eye-to-hand cannot use a board that does not move ` +
+            `with the gripper: it has an unknown pose in both frames.`)));
+  return out.join("");
+}
+
+function disc(s) {
+  const R = 1.0, parts = [
+    `<circle cx="0" cy="0" r="${R}" fill="#0b0e13" stroke="#262c36" stroke-width=".012"/>`,
+    `<circle cx="0" cy="0" r="${R * .5}" fill="none" stroke="#1d222a" stroke-width=".01"/>`,
+    `<line x1="${-R}" y1="0" x2="${R}" y2="0" stroke="#1d222a" stroke-width=".01"/>`,
+    `<line x1="0" y1="${-R}" x2="0" y2="${R}" stroke="#1d222a" stroke-width=".01"/>`];
+  for (const p of (s.poses || [])) {
+    if (!p.normal) continue;
+    parts.push(`<circle cx="${p.normal[0]}" cy="${p.normal[1]}" r=".055" fill="#58a6ff" opacity=".85"/>`);
+  }
+  const n = s.live && s.live.normal;
+  if (n) parts.push(`<circle cx="${n[0]}" cy="${n[1]}" r=".085" fill="none" stroke="#3fb950" stroke-width=".03"/>`);
+  $("disc").innerHTML = parts.join("");
+}
+
+function render(s) {
+  S = s;
+  $("board").textContent = "· " + s.board.describe + " · " +
+                           s.board.n_corners + " corners";
+  $("pre").innerHTML = preflight(s);
+
+  const want = Math.min(s.board.suggested_poses, 60);
+  $("np").textContent = `${s.n_poses} / ${want}`;
+  const f = Math.min(1, s.n_poses / want);
+  $("npbar").style.width = (100 * f) + "%";
+  $("npbar").className = f >= 1 ? "ok" : "";
+
+  $("rsmin").textContent = s.min_rotation_span_deg;
+  $("rs").textContent = s.rotation_span_deg.toFixed(0) + "°";
+  const rf = Math.min(1, s.rotation_span_deg / s.min_rotation_span_deg);
+  $("rsbar").style.width = (100 * rf) + "%";
+  $("rsbar").className = rf >= 1 ? "ok" : "";
+  disc(s);
+
+  const L = s.live || {}, sol = s.solution;
+  const can = !!(L.detected && L.still && L.novel && s.has_arm);
+  $("rec").disabled = !can;
+  $("why").textContent = can ? ""
+    : (!s.has_arm ? "no arm connected"
+       : !L.detected ? "board not detected"
+       : !L.still ? L.still_detail : L.novel_detail);
+
+  const worst = sol && sol.ok ? sol.worst_pose : -1;
+  $("list").innerHTML = (s.poses || []).map(p =>
+    `<li class="${p.i === worst ? 'worst' : ''}"><span class="n">${p.i}</span>` +
+    `<span class="r">${p.n_corners} corners · ${p.reproj_px} px` +
+    (sol && sol.ok && sol.per_pose_mm ? ` · <b>${sol.per_pose_mm[p.i]} mm</b>` : "") +
+    `</span><button onclick="drop(${p.i})">drop</button></li>`).join("")
+    || `<li style="color:var(--dim)">none yet</li>`;
+
+  $("solve").disabled = s.n_poses < s.min_poses;
+  $("save").disabled = !(sol && sol.ok);
+
+  let html = "";
+  if (sol && !sol.ok) {
+    html = `<div class="why" style="margin-top:12px">refused: ${sol.why}` +
+           (sol.rot_span_deg != null ? ` (${sol.rot_span_deg}°)` : "") + `</div>`;
+  } else if (sol && sol.ok) {
+    const good = sol.residual_mm <= 4.0;
+    html = `<div style="margin-top:12px">` +
+      `<div class="kv"><span>residual</span><b style="color:${good ? 'var(--ok)' : 'var(--bad)'}">` +
+      `${sol.residual_mm} mm rms</b></div>` +
+      `<div class="kv"><span>worst pose</span><b>#${sol.worst_pose} · ${sol.worst_mm} mm</b></div>` +
+      `<div class="kv"><span>rotation spread</span><b>${sol.rot_span_deg}°</b></div>` +
+      `<div class="kv"><span>camera</span><b>${sol.position_m.join(", ")} m</b></div>` +
+      `<div class="kv"><span>vs the simulator</span><b>${sol.vs_sim_mm} mm · ${sol.vs_sim_deg}°</b></div>` +
+      (sol.n_flipped ? `<p class="hint">${sol.n_flipped} pose(s) came back rotated 180° and were corrected.</p>` : "") +
+      (good ? "" : `<p class="why">Over the 4 mm limit. Drop pose #${sol.worst_pose} and solve again, or check the board is rigid on the gripper.</p>`) +
+      `</div>`;
+  }
+  if (s.saved) {
+    html += `<p class="hint" style="color:var(--ok)">wrote ${s.rig_file}` +
+      (s.table && s.table.table_z != null
+        ? ` · table z ${(s.table.table_z * 1000).toFixed(1)} mm, tilt ${s.table.tilt_deg.toFixed(2)}°`
+        : "") +
+      `<br>Next: <code>python scripts/rig_to_sim.py</code></p>`;
+  }
+  if (s.note) html += `<p class="hint">${s.note}</p>`;
+  if (s.error) html += `<p class="why">${s.error}</p>`;
+  $("result").innerHTML = html;
+
+  const step = s.saved ? 4 : (sol && sol.ok ? 3 : (s.n_poses ? 2 : 1));
+  for (let i = 1; i <= 4; i++)
+    $("s" + i).className = i < step ? "done" : (i === step ? "on" : "");
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {})});
+  return r.json();
+}
+async function tick() {
+  try { render(await (await fetch("/state")).json()); } catch (e) {}
+}
+async function drop(i) { await post("/drop", {i}); tick(); }
+$("rec").onclick = async () => {
+  const r = await post("/record");
+  if (!r.ok) $("why").textContent = r.why;
+  tick();
+};
+$("solve").onclick = async () => { await post("/solve"); tick(); };
+$("save").onclick = async () => { await post("/save"); tick(); };
+addEventListener("keydown", e => {
+  if (e.code === "Space" && !$("rec").disabled) { e.preventDefault(); $("rec").click(); }
+});
+tick();
+setInterval(tick, 300);
+</script>

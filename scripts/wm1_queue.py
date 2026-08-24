@@ -22,6 +22,7 @@ stopped.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import subprocess
 import time
@@ -184,8 +185,14 @@ def main() -> int:
         gpu = max(cand, key=lambda g: free[g])
         one = ADAPT / f"queue_{job['tag']}.json"
         one.write_text(json.dumps({**plan, "jobs": [job], "n_runs": 1}, indent=1))
+        # The shard waits on its own memory floor before every training and
+        # every evaluation, and that floor defaulted to 70000 regardless of
+        # what this queue was told.  Admitted at 45000, the shard would then
+        # sit waiting for 70000 forever while the queue counted it as running
+        # and the card sat half idle.  One number, passed down.
         proc = subprocess.Popen(
           ["bash", "scripts/wm1_adapt.sh", str(gpu), "0", "1", str(one)],
+          env={**os.environ, "MIN_FREE_MIB": str(a.min_free_mib)},
           stdout=open(f"logs/wm1_adapt/queue_{job['tag']}.log", "w"),
           stderr=subprocess.STDOUT)
         running[gpu] = (proc, job["tag"], time.time())
