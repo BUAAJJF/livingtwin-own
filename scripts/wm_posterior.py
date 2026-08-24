@@ -43,7 +43,7 @@ from piper_push import (damping, latency, prior, risk, wm_data, wm_infer,
 # and how a draw reaches the simulator, and in nothing else that this script
 # does -- so the script takes the axis as an argument rather than being copied.
 AXES = {
-  "obs_latency_steps": (latency.LatencyPrior, latency.LAGS, TARGET,
+  "obs_latency_steps": (latency.LatencyPrior, latency.LAGS, latency.TARGET_LAG,
                         latency.P_SOURCE),
   "servo_damping_scale": (damping.DampingPrior, damping.VALUES, damping.TARGET,
                           damping.P_SOURCE),
@@ -361,7 +361,7 @@ def main() -> int:
   p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
   p.add_argument("--risk-lambda", type=float, default=None,
                  help="tilt strength.  Default is the pre-registered rule in "
-                      "`default_lambda`; passing a value overrides it and the "
+                      "`prior.risk_lambda`; passing a value overrides it and "
                       "override is recorded in the posterior's provenance.")
   p.add_argument("--risk-head", default=None,
                  help="path to risk_head.pt; enables the risk component")
