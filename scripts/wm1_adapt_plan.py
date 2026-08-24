@@ -68,6 +68,14 @@ def main() -> int:
                                       "B1b_img_proprio")
   p.add_argument("--iterations", type=int, default=2100,
                  help="TARGET TOTAL, not additional: 2100 from 1500 is 600 more")
+  p.add_argument("--seeds", default=None,
+                 help="comma-separated training seeds, overriding the default "
+                      "three.  Phase WM1-A's safety comparison needed more "
+                      "than three: its trip rate is overdispersed by a factor "
+                      "of seven across seeds, and three cannot resolve that.")
+  p.add_argument("--only", default=None,
+                 help="comma-separated method names to keep, for extending a "
+                      "configuration that already has results")
   p.add_argument("--out", required=True)
   a = p.parse_args()
 
@@ -94,6 +102,11 @@ def main() -> int:
       raise SystemExit("--alpha is required for the formal stage")
     alphas = [a.alpha]
     seeds = SEEDS
+  if a.seeds:
+    seeds = tuple(int(x) for x in a.seeds.split(","))
+  if a.only:
+    keep = {m.strip() for m in a.only.split(",")}
+    want = [m for m in want if m in keep]
 
   jobs: dict[tuple, dict] = {}
   for m in want:
@@ -105,21 +118,31 @@ def main() -> int:
         "prior": mixed.to_json()})
       job["methods"].append(m)
 
-  # The oracle: the same budget, from the same checkpoint, told the answer.
+  if a.only and "ORACLE" not in {m.strip() for m in a.only.split(",")}:
+    pass_oracle = False
+  else:
+    pass_oracle = True
+  if not pass_oracle:
+    jobs_extra = []
+  # Known-parameter target-only: the same budget, from the same checkpoint,
+  # told the answer.  Not an upper bound -- Phase WM1-A's alpha = 0.75 mixture
+  # beats it in both domains -- so it is a reference and is named as one.
   oracle = latency.LatencyPrior.point(latency.TARGET_LAG)
-  key = (oracle.fingerprint(), 1.0)
-  job = jobs.setdefault(key, {"probs": list(oracle.probs), "alpha": 1.0,
-                              "methods": [], "prior": oracle.to_json()})
-  job["methods"].append("ORACLE")
+  if pass_oracle:
+    key = (oracle.fingerprint(), 1.0)
+    job = jobs.setdefault(key, {"probs": list(oracle.probs), "alpha": 1.0,
+                                "methods": [], "prior": oracle.to_json()})
+    job["methods"].append("ORACLE")
 
   # p_source itself: adapting to the *wrong* answer with the full budget, so
   # that "PPO for 600 iterations helps a bit whatever you condition on" is
   # measured rather than assumed.
-  key = (latency.P_SOURCE.fingerprint(), 1.0)
-  job = jobs.setdefault(key, {"probs": list(latency.P_SOURCE.probs),
-                              "alpha": 1.0, "methods": [],
-                              "prior": latency.P_SOURCE.to_json()})
-  job["methods"].append("B0_prior_refit")
+  if not a.only or "B0_prior_refit" in {m.strip() for m in a.only.split(",")}:
+    key = (latency.P_SOURCE.fingerprint(), 1.0)
+    job = jobs.setdefault(key, {"probs": list(latency.P_SOURCE.probs),
+                                "alpha": 1.0, "methods": [],
+                                "prior": latency.P_SOURCE.to_json()})
+    job["methods"].append("B0_prior_refit")
 
   # The tag is a function of the distribution and the seed and nothing else,
   # so a run that the alpha screening already did is not repeated by the formal
