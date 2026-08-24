@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import subprocess
 import sys
 from dataclasses import asdict
@@ -125,6 +126,88 @@ def _provenance(checkpoint: str) -> dict:
     return prov
 
 
+FLOOR_DROP_M = 0.75
+"""How far the floor is below the table top, for the ``table<R>`` ablation.
+
+Nothing in the simulator knows this number -- the scene is an infinite plane at
+z=0 and there is no floor -- which is the whole point of the ablation.
+"""
+
+
+def _table_edge(mode: str, device):
+  """Per-pixel fields for a table that stops, or ``None`` if this is not that.
+
+  Returns ``(off, plane, floor)``: which pixels of the nominal view fall past
+  the table's edge, what the bare plane reads there, and what a floor
+  ``FLOOR_DROP_M`` below it would read instead.  All three are normalised the
+  way the observation is, so the substitution is a ``where``.
+
+  Built from the nominal camera pose, and the pose is randomised by 20 mm and
+  2 degrees per reset, so the edge lands within about six pixels of where each
+  environment would actually see it.  That is fine for the question -- is the
+  policy sensitive to what is past the table -- and would not be fine for a
+  calibrated number.
+  """
+  if not mode.startswith("table"):
+    return None
+  radius = float(mode[len("table"):])
+  import numpy as np
+
+  from piper_push import camera as cam
+
+  pos = np.asarray(cam.CAMERA_POS, dtype=np.float64)
+  fwd = np.asarray(cam.CAMERA_AIM, dtype=np.float64) - pos
+  fwd /= np.linalg.norm(fwd)
+  right = np.cross(fwd, (0.0, 0.0, 1.0))
+  right /= np.linalg.norm(right)
+  up = np.cross(right, fwd)
+  ty = math.tan(math.radians(cam.FOVY_DEG) / 2.0)
+  tx = ty * cam.WIDTH / cam.HEIGHT
+  sx = (2.0 * (np.arange(cam.WIDTH) + 0.5) / cam.WIDTH - 1.0) * tx
+  sy = (1.0 - 2.0 * (np.arange(cam.HEIGHT) + 0.5) / cam.HEIGHT) * ty
+  gx, gy = np.meshgrid(sx, sy)
+  d = fwd + gx[..., None] * right + gy[..., None] * up
+  d /= np.linalg.norm(d, axis=-1, keepdims=True)
+
+  down = d[..., 2] < -1e-9
+  safe = np.where(down, d[..., 2], -1.0)
+
+  def _range(z_plane):
+    return np.where(down, (z_plane - pos[2]) / safe, np.inf)
+
+  t_plane = _range(0.0)
+  hit = pos + t_plane[..., None] * d
+  # A ray that never comes down is past the edge of any table there is.
+  off = (~down) | (np.hypot(hit[..., 0], hit[..., 1]) > radius)
+
+  def _norm(t):
+    t = np.where(np.isfinite(t), t, cam.CUTOFF_M)
+    return np.clip(np.clip(t, 0.05, cam.CUTOFF_M) / cam.CUTOFF_M, 0.0, 1.0)
+
+  to_t = lambda x: torch.as_tensor(x, device=device)
+  return (to_t(off), to_t(_norm(t_plane)).float(),
+          to_t(_norm(_range(-FLOOR_DROP_M))).float())
+
+
+def _end_the_table(camera: torch.Tensor, edge) -> torch.Tensor:
+  """Replace the plane past the edge with the floor, in the flat observation.
+
+  Only pixels that are reading the bare plane are touched.  Anything nearer is
+  the arm swinging out over the edge, and rewriting that would be ablating the
+  robot rather than the table.
+  """
+  off, plane, floor = edge
+  n = camera.shape[0]
+  img = camera.view(n, 3, *plane.shape).clone()
+  depth = img[:, 0]
+  bare = depth >= (plane - 0.02).unsqueeze(0)
+  depth = torch.where(bare & off.unsqueeze(0), floor.expand_as(depth), depth)
+  img[:, 0] = depth
+  # The third channel is the product of the first two by construction.
+  img[:, 2] = depth * img[:, 1]
+  return img.reshape(n, -1)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("task")
@@ -138,13 +221,16 @@ def main() -> int:
     p.add_argument("--lift-clear", type=float, default=0.010,
                    help="metres of clearance that make a pad contact a grasp")
     p.add_argument("--camera", default="real",
-                   choices=("real", "blank", "shuffled"),
                    help="ablate the camera channel before the policy sees it.  "
                         "'blank' zeroes it, which is out of distribution and "
                         "tells you little; 'shuffled' hands each environment "
                         "another environment's image -- a real, correctly "
                         "normalised picture of the wrong table -- and a policy "
-                        "that scores the same on it is not using the camera.")
+                        "that scores the same on it is not using the camera.  "
+                        "'table<R>', e.g. table0.8, ends the table at R metres "
+                        "from the base and drops the floor 0.75 m below it, "
+                        "which is the one thing about the real scene the "
+                        "simulator's infinite plane cannot represent.")
     p.add_argument("--sensor", default="clean", choices=("clean", "measured"),
                    help="depth realism to EVALUATE under.  'clean' is the "
                         "protocol every number in docs/results.md was measured "
@@ -368,13 +454,17 @@ def main() -> int:
     # The camera ablation, applied to the observation the policy is about to
     # read.  Rolled by one so no environment can be handed back its own image.
     cam_perm = torch.randperm(n, device=dev).roll(1)
+    edge = _table_edge(a.camera, dev)
 
     def seen(o):
         if a.camera == "real":
             return o
         o = o.clone()
-        o["camera"] = (torch.zeros_like(o["camera"]) if a.camera == "blank"
-                       else o["camera"][cam_perm])
+        if edge is not None:
+            o["camera"] = _end_the_table(o["camera"], edge)
+        else:
+            o["camera"] = (torch.zeros_like(o["camera"]) if a.camera == "blank"
+                           else o["camera"][cam_perm])
         return o
 
     with torch.inference_mode():

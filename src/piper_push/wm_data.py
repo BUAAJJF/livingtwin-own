@@ -41,9 +41,21 @@ import torch
 DEPLOYABLE: tuple[str, ...] = ("enc", "hidden", "proprio", "action", "servo", "done")
 """Channels an estimator may read.  All of them exist on the real robot."""
 
-SIM_ONLY: tuple[str, ...] = ("lag", "shape")
-"""Channels that exist only in simulation.  ``lag`` is the label; ``shape`` is
-metadata used to build held-out splits.  Neither is ever an input."""
+SIM_ONLY: tuple[str, ...] = ("lag", "shape", "trip")
+"""Channels that exist only in simulation and are never an estimator input.
+
+``lag`` is the domain parameter's value -- the label.  It keeps the name it had
+in Phase WM1-A, where the axis was a lag in control steps, so that phase's
+files still load; ``meta["axis"]`` says which parameter it is, and for Phase
+WM1-B it holds a damping multiplier.
+
+``shape`` is the object class, used to build held-out splits.
+
+``trip`` is whether the safety shell fired on that step.  It is here because
+the deployable risk head of Phase WM1-B is *trained* on simulator safety
+labels, which the phase specification allows; what it must never do is read
+them in the target domain, and it cannot, because the risk head takes only
+:data:`DEPLOYABLE` channels as input."""
 
 PROPRIO_NAMES: tuple[str, ...] = (
   *(f"joint{i}_pos" for i in range(1, 7)),
@@ -68,8 +80,12 @@ CHANNEL_DOC: dict[str, str] = {
           "set, with a done-only control reported instead, because reset "
           "cadence is a physical consequence of the domain and would be an "
           "accuracy the estimator did not earn from the plant.",
-  "lag": "SIMULATOR LABEL.  Observation delay in control steps.",
+  "lag": "SIMULATOR LABEL, scalar: the domain parameter's value.  Named for "
+         "Phase WM1-A's axis, where it was an observation delay in control "
+         "steps; meta['axis'] says which parameter it is.",
   "shape": "SIMULATOR METADATA, (T, N) uint8: object shape class index.",
+  "trip": "SIMULATOR LABEL, (T, N) bool: the safety shell fired on this step. "
+          "Trains the risk head; never an input to it.",
 }
 
 
@@ -140,7 +156,8 @@ class SessionSet:
   servo: torch.Tensor     # (T, N, 1)  fp32
   done: torch.Tensor      # (T, N)     bool
   shape: torch.Tensor     # (T, N)     uint8
-  lag: int
+  lag: float
+  trip: torch.Tensor | None = None    # (T, N) bool, absent in WM1-A files
   meta: dict = field(default_factory=dict)
 
   @property
@@ -155,7 +172,8 @@ class SessionSet:
     return {
       "enc": self.enc, "hidden": self.hidden, "proprio": self.proprio,
       "action": self.action, "servo": self.servo, "done": self.done,
-      "shape": self.shape, "lag": self.lag, "meta": self.meta,
+      "shape": self.shape, "lag": self.lag, "trip": self.trip,
+      "meta": self.meta,
     }
 
   def save(self, path: str | Path) -> None:
@@ -167,7 +185,9 @@ class SessionSet:
   def load(cls, path: str | Path, device="cpu") -> "SessionSet":
     d = torch.load(path, map_location=device, weights_only=False)
     meta = d.pop("meta", {})
-    lag = int(d.pop("lag"))
+    lag = d.pop("lag")
+    # Phase WM1-A files predate the trip channel; they load without it.
+    d.setdefault("trip", None)
     return cls(lag=lag, meta=meta, **d)
 
   def describe(self) -> dict:
@@ -182,7 +202,9 @@ class SessionSet:
                "proprio": int(self.proprio.shape[-1]),
                "action": int(self.action.shape[-1])},
       "lag": self.lag,
+      "axis": self.meta.get("axis", "obs_latency_steps"),
       "episode_boundaries": int(self.done.sum()),
+      "safety_trips": (int(self.trip.sum()) if self.trip is not None else None),
       "shape_class_counts": [int(x) for x in cls_counts[:5]],
       "bytes": int(sum(t.numel() * t.element_size() for t in
                        (self.enc, self.hidden, self.proprio, self.action,

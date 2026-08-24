@@ -34,7 +34,12 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
-from piper_push import latency, shapes, wm_data
+from piper_push import damping, latency, shapes, wm_data
+
+AXES = {
+  "obs_latency_steps": (latency.LatencyPrior, latency.apply_latency_prior),
+  "servo_damping_scale": (damping.DampingPrior, damping.apply_damping_prior),
+}
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
 CKPT = ("logs/rsl_rl/piperx_pick_place_vision/"
@@ -89,15 +94,17 @@ def _provenance(checkpoint: str) -> dict:
 
 
 @torch.inference_mode()
-def collect(task: str, ckpt: str, lag: int, n_envs: int, steps: int,
-            device: str, seed: int, shape_weights, chunk_log: int = 500):
+def collect(task: str, ckpt: str, axis: str, value: float, n_envs: int,
+            steps: int, device: str, seed: int, shape_weights,
+            chunk_log: int = 500):
   cfg = load_env_cfg(task, play=True)
   agent = load_rl_cfg(task)
   cfg.scene.num_envs = n_envs
   cfg.seed = seed
 
-  prior = latency.LatencyPrior.point(lag)
-  applied = latency.apply_latency_prior(cfg, prior, seed=seed)
+  prior_cls, apply = AXES[axis]
+  prior = prior_cls.point(value)
+  applied = apply(cfg, prior, seed=seed)
 
   if shape_weights is not None:
     for name, ev in cfg.events.items():
@@ -127,7 +134,7 @@ def collect(task: str, ckpt: str, lag: int, n_envs: int, steps: int,
 
   cols: dict[str, list[torch.Tensor]] = {
     k: [] for k in ("enc", "hidden", "proprio", "action", "servo", "done",
-                    "shape")}
+                    "shape", "trip")}
   t_start = time.time()
   for t in range(steps):
     # The hidden state BEFORE this step's latent is consumed: the pair
@@ -155,6 +162,11 @@ def collect(task: str, ckpt: str, lag: int, n_envs: int, steps: int,
     out = env.step(act)
     obs, dones = out[0], out[2]
     cols["done"].append(dones.bool().cpu())
+    # The safety shell, read after the step and from the same termination term
+    # accept_s1.py counts.  A simulator label, and the only one the risk head
+    # is allowed to see -- during its own training, never at inference.
+    cols["trip"].append(
+      u.termination_manager.get_term("over_speed").bool().cpu())
     policy.reset(dones)
 
     if chunk_log and (t + 1) % chunk_log == 0:
@@ -170,8 +182,10 @@ def collect(task: str, ckpt: str, lag: int, n_envs: int, steps: int,
     servo=torch.stack(cols["servo"]),
     done=torch.stack(cols["done"]),
     shape=torch.stack(cols["shape"]),
-    lag=lag,
-    meta={"latency": applied, "seed": seed, "wall_clock_s": time.time() - t_start},
+    lag=value,
+    trip=torch.stack(cols["trip"]),
+    meta={"axis": axis, "applied": applied, "seed": seed,
+          "wall_clock_s": time.time() - t_start},
   )
 
 
@@ -179,7 +193,12 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--task", default=TASK)
   p.add_argument("--checkpoint", default=CKPT)
-  p.add_argument("--lag", type=int, required=True, choices=list(latency.LAGS))
+  p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
+  p.add_argument("--lag", type=float, default=None,
+                 help="the domain parameter's value; kept as --lag because "
+                      "Phase WM1-A's collection scripts pass it by that name")
+  p.add_argument("--value", type=float, default=None,
+                 help="synonym for --lag, for axes that are not a lag")
   p.add_argument("--seed", type=int, required=True)
   p.add_argument("--num-envs", type=int, default=64)
   p.add_argument("--steps", type=int, default=1500)
@@ -190,25 +209,34 @@ def main() -> int:
   p.add_argument("--out", default="results/wm1_latency/data")
   a = p.parse_args()
 
+  value = a.value if a.value is not None else a.lag
+  if value is None:
+    p.error("pass --value (or --lag)")
+  if value not in AXES[a.axis][0].VALUES:
+    p.error(f"{value} is not one of {AXES[a.axis][0].VALUES} for {a.axis}")
+  tag = (f"lag{int(value)}" if a.axis == "obs_latency_steps"
+         else f"{a.axis.split('_')[0]}{value:g}".replace(".", "p"))
   out = Path(a.out)
-  name = f"{a.split}__lag{a.lag}__seed{a.seed}"
-  print(f"  collecting {name}: {a.num_envs} envs x {a.steps} steps "
-        f"({a.num_envs * a.steps / 50.0 / 60.0:.1f} arm-minutes), "
-        f"shapes={a.shapes}")
-  s = collect(a.task, a.checkpoint, a.lag, a.num_envs, a.steps, a.device,
-              a.seed, SHAPE_PRESETS[a.shapes])
+  name = f"{a.split}__{tag}__seed{a.seed}"
+  print(f"  collecting {name}: {a.axis}={value}, {a.num_envs} envs x "
+        f"{a.steps} steps ({a.num_envs * a.steps / 50.0 / 60.0:.1f} "
+        f"arm-minutes), shapes={a.shapes}")
+  s = collect(a.task, a.checkpoint, a.axis, value, a.num_envs, a.steps,
+              a.device, a.seed, SHAPE_PRESETS[a.shapes])
   s.meta.update(split=a.split, shapes=a.shapes,
                 shape_weights=SHAPE_PRESETS[a.shapes],
                 provenance=_provenance(a.checkpoint))
   s.save(out / f"{name}.pt")
 
   desc = s.describe()
-  desc.update(file=f"{name}.pt", split=a.split, shapes=a.shapes, seed=a.seed)
+  desc.update(file=f"{name}.pt", split=a.split, shapes=a.shapes, seed=a.seed,
+              axis=a.axis)
   (out / f"{name}.json").write_text(json.dumps(desc, indent=1))
   print(f"  wrote {out / name}.pt  "
         f"({desc['bytes'] / 1e6:.0f} MB, {desc['arm_seconds'] / 60:.1f} "
         f"arm-minutes, {desc['episode_boundaries']} episode boundaries)")
   print(f"  shape class counts: {desc['shape_class_counts']}")
+  print(f"  safety-shell trips in this rollout: {desc['safety_trips']}")
   return 0
 
 
