@@ -659,6 +659,22 @@ Three limits, stated because the result is strong enough to be over-read:
 
 ### 8.1 What the oracle is and is not
 
+> **Correction, added after Phase WM1-A.** The word *oracle* and the phrase
+> *ceiling* below both overclaim, and the later phase measured the fact that
+> refutes them. At α = 0.75 a posterior-guided fine-tune reached **49.89
+> obj/min** in the target domain against this run's **49.72** — better, in the
+> same domain, without being told the parameter — and it retained **54.32**
+> against this run's **49.79**. Extended to eight training seeds the
+> known-parameter run's safety record is worse still: **7.22** trips per
+> arm-hour, against the **4.83** recorded here on three seeds.
+>
+> So what §8 measures is **known-parameter target-only adaptation**: what one
+> particular fine-tuning recipe achieves when the inference problem is
+> removed. That is a useful reference point and it is what `recovery` is
+> measured against. It is not an upper bound, and a method exceeding it is not
+> evidence of a mistake. The WM1-A report and `scripts/wm1_gate.py` use the
+> longer name; the numbers in this section are unchanged and correct.
+
 The oracle is **handed the target parameter**. It is not a method; it is the
 bound a method would be trying to reach. Four quantities:
 
