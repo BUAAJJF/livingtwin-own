@@ -337,6 +337,48 @@ at 2.9% for a single command -- 1.2 objects/min here. The gap is more than
 twice that, which is suggestive and is not the same as three training seeds.
 Reproduce with `scripts/analyze_depth_sensor.py`.
 
+### The table has no edge in simulation, and that is nearly free
+
+The scene is `terrain_type="plane"` -- an infinite flat surface at z=0. There
+is no table, no floor below it, no wall behind it, and none of it is
+randomised. The camera does not just look at the workspace: it looks *across*
+the plane, and only 56% of the frame lands on the worked area. The top corner
+rays hit the plane at 2.29 m, past the 1.5 m far plane.
+
+So the question is what a real table's edge costs, and it is measurable without
+a robot. `--camera table<R>` ends the table at R metres from the base and puts
+a floor 0.75 m below it, on the pixels that are reading the bare plane:
+
+| what the policy sees | pixels rewritten | mean change over the frame | objects/min |
+|---|---|---|---|
+| the trained infinite plane | -- | -- | 41.4 |
+| a table 0.8 m across | 2.7% | 5 mm | 41.2 |
+| a table 0.6 m across | 22.8% | 140 mm | 39.8 |
+
+Most of the difference cancels at the far plane: past the edge the floor is
+already out of range, and out of range reads as 1.0 on both sides. What is left
+costs 0.5% at 0.8 m -- inside the 0.92 objects/min spread over rollout seeds --
+and 3.9% at 0.6 m, which is outside it but small for an image a fifth of which
+is wrong by 14 cm.
+
+The deployment consequence is a single number: **the table should extend at
+least 0.8 m from the robot base**, and past that nothing about the room needs
+to match. It is worth being precise about why this is so cheap. A depth image
+has no appearance -- the wood grain, the tablecloth, the colour and the
+lighting that make RGB sim2real hard do not exist in it -- so the only thing
+the background can be wrong about is its geometry, and geometry past the far
+plane is clamped away.
+
+Two things this does *not* cover. Clutter inside the workspace box
+(`config.WORKSPACE`, 0.85 x 0.90 x 0.42 m) is segmented as an object, because
+that is exactly what the segmenter is for; a mug left at the edge of the mat is
+a target the policy will fetch. And the table's *tilt* is not randomised
+anywhere: the segmenter fits the plane every frame so the mask does not care,
+but the depth channel is raw and a 2-degree tilt is 21 mm across the workspace.
+The camera pose randomisation covers plane tilts of roughly that size for
+incidental reasons rather than by design, which is a thin argument to rest on
+and a cheap axis to add.
+
 ---
 
 ## 5. What is still open

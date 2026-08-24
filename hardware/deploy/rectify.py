@@ -186,6 +186,29 @@ class Reprojector:
     view are dropped before anything looks at them."""
     return (pts @ R.T + t).cpu().numpy()
 
+  def rays_base(self, idx: np.ndarray, rig: "config.Rig") -> np.ndarray:
+    """Unit rays for the given source pixels, ``(N, 3)`` in the base frame.
+
+    For placing something the depth could not measure.  A detection whose
+    pixels are all holes has no cloud to average, and dropping it would defeat
+    the backend that exists for exactly that case -- so the ray through it is
+    intersected with the fitted table plane instead.  The answer is the point
+    on the table under the object rather than the object, which is half its
+    height low and well inside the tracker's 60 mm gate.
+    """
+    r = self._rays[torch.as_tensor(np.asarray(idx, dtype=np.int64),
+                                   device=self.device)]
+    R = torch.as_tensor(rig.T_base_cam[:3, :3], dtype=torch.float32,
+                        device=self.device)
+    out = (r @ R.T).cpu().numpy()
+    return out / np.linalg.norm(out, axis=-1, keepdims=True)
+
+  @staticmethod
+  def camera_origin_base(rig: "config.Rig") -> np.ndarray:
+    """Where the camera is, in the base frame -- the origin those rays start
+    from."""
+    return np.asarray(rig.T_base_cam[:3, 3], dtype=np.float64)
+
   def source(self, depth: np.ndarray) -> np.ndarray:
     """The frame at this reprojector's own resolution."""
     if self.decimate == 1:

@@ -160,8 +160,13 @@ def main() -> int:
 
     if len(running) < a.max_concurrent:
       free = gpu_free_mib()
-      stable = {g for g in free if free[g] >= a.min_free_mib} & was_free
-      was_free = {g for g in free if free[g] >= a.min_free_mib}
+      # `allowed` has to survive the stability filter.  It did not: rewriting
+      # the candidate list to come from `stable` dropped the allow-list, so
+      # --gpus was accepted, printed, and then ignored -- a queue told to use
+      # four cards took all eight.
+      ready = {g for g in free if g in allowed and free[g] >= a.min_free_mib}
+      stable = ready & was_free
+      was_free = ready
       now = time.time()
       pending = [j for j in pending
                  if now - failed_at.get(j["tag"], 0.0) >= a.backoff]

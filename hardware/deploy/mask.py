@@ -175,6 +175,121 @@ def full_mask(seg: "Segmentation", label: int, decimate: int) -> np.ndarray:
                    axis=1).astype(np.int32)
 
 
+def workspace_mask(pts: np.ndarray) -> np.ndarray:
+  """Which points are inside the box anything interesting is inside.
+
+  Shared by both backends rather than written twice.  The depth backend applies
+  it to every point before it looks for components; the YOLO backend applies it
+  to a detection after the fact, because a network that was trained on this
+  table will occasionally fire on something across the room and the cheapest
+  way to know is to ask where it is.
+  """
+  (xlo, xhi), (ylo, yhi), (zlo, zhi) = config.WORKSPACE
+  return ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
+          & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
+          & (pts[:, 2] > zlo) & (pts[:, 2] < zhi))
+
+
+def arm_mask(pts: np.ndarray, arm, clearance_m: float,
+             within: np.ndarray | None = None) -> np.ndarray:
+  """Which points are the robot, from the sphere cover of its own geometry.
+
+  Bounding box first.  Twenty-four sphere tests over a quarter of a million
+  points is 116 ms -- six control periods -- and the arm occupies a few percent
+  of the frame, so almost all of that work is spent proving that the table is
+  not the robot.  Three comparisons reject it instead, and the spheres then run
+  on what is left.
+  """
+  out = np.zeros(pts.shape[0], dtype=bool)
+  if arm is None:
+    return out
+  centres = np.asarray(arm[0], dtype=pts.dtype)
+  radii = np.asarray(arm[1], dtype=pts.dtype) + clearance_m
+  if centres.size == 0:
+    return out
+  lo = (centres - radii[:, None]).min(axis=0)
+  hi = (centres + radii[:, None]).max(axis=0)
+  near = ((pts > lo) & (pts < hi)).all(axis=1)
+  if within is not None:
+    near &= within
+  idx = np.flatnonzero(near)
+  if idx.size == 0:
+    return out
+  sub = pts[idx]
+  drop = np.zeros(idx.size, dtype=bool)
+  # One geom at a time.  The broadcast form is two lines shorter and allocates
+  # an (N, G, 3), which is 300 MB at full frame.
+  for centre, radius in zip(centres, radii):
+    drop |= ((sub - centre) ** 2).sum(axis=1) < radius * radius
+  out[idx[drop]] = True
+  return out
+
+
+def bin_mask(pts: np.ndarray, footprint, margin_m: float) -> np.ndarray:
+  """Which points are the bin.  It is scenery, and its rim is the most
+  object-like thing in frame that is not an object."""
+  if footprint is None:
+    return np.zeros(pts.shape[0], dtype=bool)
+  (bx, by), (hx, hy) = footprint
+  return ((np.abs(pts[:, 0] - bx) < hx + margin_m)
+          & (np.abs(pts[:, 1] - by) < hy + margin_m))
+
+
+def fit_table_plane(pts: np.ndarray, near: np.ndarray, table_z: float,
+                    max_points: int = 20000):
+  """Signed height above a plane fitted to the table, robustly.
+
+  Returns ``(height, (normal, offset), sigma)``.
+
+  Three rounds of reweighting rather than RANSAC: the table is most of what is
+  in the box by a wide margin, so the only job is to stop the objects and the
+  arm from tilting the fit, and a Tukey-ish weight does that in three passes
+  over a few hundred thousand points.  RANSAC would be the right tool if the
+  inlier fraction were in doubt; it is not.
+
+  Fitted every frame rather than taken from the calibration.  The camera's
+  range bias is a per-unit unknown -- the bench measured -14 mm at 0.7 m on
+  this one and randomises +-15 mm around it, because the next one will be
+  different -- and a bias that size against a fixed 8 mm threshold either turns
+  the whole table into objects or hides the short ones.
+  """
+  sel = np.flatnonzero(near & (np.abs(pts[:, 2] - table_z) < 0.05))
+  if sel.size < 500:
+    return pts[:, 2] - table_z, (np.array([0.0, 0.0, 1.0]), table_z), 0.0
+  # A plane has three parameters and this has a quarter of a million points.
+  # Fitting it on all of them costs 51 ms of a 20 ms control period and buys
+  # nothing: the standard error on the fit is already a hundredth of the
+  # sensor's noise at twenty thousand.  Strided rather than randomly sampled so
+  # the same frame gives the same plane twice.
+  if sel.size > max_points:
+    sel = sel[::max(1, sel.size // max_points)]
+  q = pts[sel]
+  wgt = np.ones(q.shape[0])
+  for _ in range(3):
+    mu = (q * wgt[:, None]).sum(0) / wgt.sum()
+    cov = ((q - mu) * wgt[:, None]).T @ (q - mu) / wgt.sum()
+    n = np.linalg.eigh(cov)[1][:, 0]
+    if n[2] < 0:
+      n = -n
+    r = (q - mu) @ n
+    s = 1.4826 * np.median(np.abs(r)) + 1e-4
+    wgt = 1.0 / (1.0 + (r / (2.5 * s)) ** 2)
+  sigma = float(1.4826 * np.median(np.abs((q - mu) @ n)))
+  return pts @ n - float(mu @ n), (n, float(mu @ n)), sigma
+
+
+def place_on_plane(origin: np.ndarray, ray: np.ndarray, plane) -> np.ndarray:
+  """Where a ray meets the table, or NaN if it runs parallel to it."""
+  n, d = plane
+  denom = float(np.dot(ray, n))
+  if abs(denom) < 1e-6:
+    return np.full(3, np.nan)
+  t = (d - float(np.dot(origin, n))) / denom
+  if t <= 0:
+    return np.full(3, np.nan)
+  return origin + t * np.asarray(ray, dtype=np.float64)
+
+
 class DepthSegmenter:
   """Table-plane removal and connected components, no training required."""
 
@@ -197,41 +312,11 @@ class DepthSegmenter:
       else (config.BIN_CENTER, config.BIN_OUTER)
 
   def _height_above_table(self, pts: np.ndarray, in_box: np.ndarray) -> np.ndarray:
-    """Signed height above a plane fitted to the table, robustly.
-
-    Three rounds of reweighting rather than RANSAC: the table is most of what
-    is in the box by a wide margin, so the only job is to stop the objects and
-    the arm from tilting the fit, and a Tukey-ish weight does that in three
-    passes over a few hundred thousand points.  RANSAC would be the right tool
-    if the inlier fraction were in doubt; it is not.
-    """
-    near = np.flatnonzero(in_box
-                          & (np.abs(pts[:, 2] - self.rig.table_z) < 0.05))
-    if near.size < 500:
-      self.plane = (np.array([0.0, 0.0, 1.0]), self.rig.table_z)
-      self.plane_sigma = 0.0
-      return pts[:, 2] - self.rig.table_z
-    # A plane has three parameters and this has a quarter of a million points.
-    # Fitting it on all of them costs 51 ms of a 20 ms control period and buys
-    # nothing: the standard error on the fit is already a hundredth of the
-    # sensor's noise at twenty thousand.  Strided rather than randomly sampled
-    # so the same frame gives the same plane twice.
-    if near.size > self.cfg.plane_fit_points:
-      near = near[::max(1, near.size // self.cfg.plane_fit_points)]
-    q = pts[near]
-    wgt = np.ones(q.shape[0])
-    for _ in range(3):
-      mu = (q * wgt[:, None]).sum(0) / wgt.sum()
-      cov = ((q - mu) * wgt[:, None]).T @ (q - mu) / wgt.sum()
-      n = np.linalg.eigh(cov)[1][:, 0]
-      if n[2] < 0:
-        n = -n
-      r = (q - mu) @ n
-      s = 1.4826 * np.median(np.abs(r)) + 1e-4
-      wgt = 1.0 / (1.0 + (r / (2.5 * s)) ** 2)
-    self.plane = (n, float(mu @ n))
-    self.plane_sigma = float(1.4826 * np.median(np.abs((q - mu) @ n)))
-    return pts @ n - self.plane[1]
+    """Signed height above the table.  See ``fit_table_plane``; this only keeps
+    the fit where the rest of the class can read it."""
+    height, self.plane, self.plane_sigma = fit_table_plane(
+      pts, in_box, self.rig.table_z, self.cfg.plane_fit_points)
+    return height
 
   def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
                arm=None) -> Segmentation:
@@ -251,10 +336,7 @@ class DepthSegmenter:
     # view, so this is its index, not every valid pixel in the frame.
     flat_idx = self.reproj.last_src
 
-    (xlo, xhi), (ylo, yhi), (zlo, zhi) = config.WORKSPACE
-    in_box = ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
-              & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
-              & (pts[:, 2] > zlo) & (pts[:, 2] < zhi))
+    in_box = workspace_mask(pts)
 
     # The table plane is measured every frame, not taken from the calibration.
     # The camera's range bias is a per-unit unknown -- the bench measured -14 mm
@@ -271,33 +353,8 @@ class DepthSegmenter:
     # are not inside any exclusion sphere, and they come back as tall thin
     # slivers hugging the arm's outline -- which is exactly what this produced
     # on the first run, three of them, and the tracker reached for one.
-    usable = in_box.copy()
-    if arm is not None:
-      centres = np.asarray(arm[0], dtype=pts.dtype)
-      radii = np.asarray(arm[1], dtype=pts.dtype) + c.arm_clearance_m
-      # Bounding box first.  Twenty-four sphere tests over a quarter of a
-      # million points is 116 ms -- six control periods -- and the arm occupies
-      # a few percent of the frame, so almost all of that work is spent proving
-      # that the table is not the robot.  Three comparisons reject it instead,
-      # and the spheres then run on what is left.
-      lo = (centres - radii[:, None]).min(axis=0)
-      hi = (centres + radii[:, None]).max(axis=0)
-      near_arm = np.flatnonzero(
-        ((pts > lo) & (pts < hi)).all(axis=1) & in_box)
-      if near_arm.size:
-        sub = pts[near_arm]
-        drop = np.zeros(near_arm.size, dtype=bool)
-        # One geom at a time.  The broadcast form is two lines shorter and
-        # allocates an (N, G, 3), which is 300 MB at full frame.
-        for centre, radius in zip(centres, radii):
-          drop |= ((sub - centre) ** 2).sum(axis=1) < radius * radius
-        usable[near_arm[drop]] = False
-
-    if self.bin_footprint is not None:
-      (bx, by), (hx, hy) = self.bin_footprint
-      m = c.bin_margin_m
-      usable &= ~((np.abs(pts[:, 0] - bx) < hx + m)
-                  & (np.abs(pts[:, 1] - by) < hy + m))
+    usable = in_box & ~arm_mask(pts, arm, c.arm_clearance_m, within=in_box)
+    usable &= ~bin_mask(pts, self.bin_footprint, c.bin_margin_m)
 
     # Smoothed before thresholding, in the image.  At 0.7 m the sensor's noise
     # is 10 mm and correlated across 8 pixels, so it is not something a
@@ -536,74 +593,231 @@ class TargetTracker:
     self._missing = 0
 
 
+@dataclasses.dataclass
+class YoloCfg:
+  """Everything about the colour backend that is not about geometry.
+
+  The geometric filters are ``SegmenterCfg``'s and are shared with the depth
+  backend on purpose: whatever finds a candidate, the tests for "is that thing
+  in the workspace, is it the arm, is it the bin" have one implementation.
+  """
+
+  conf: float = 0.25
+  """Detection confidence.  Low, because a false positive here still has to
+  survive the base-frame filters and then three frames of tracking, while a
+  false negative is an object that never gets picked up."""
+
+  iou: float = 0.50
+  """NMS overlap.  Only the ONNX path uses it; ultralytics does its own."""
+
+  mask_threshold: float = 0.5
+
+  min_placed_px: int = 20
+  """Valid depth samples a detection needs before its own points decide where
+  it is.  Below that the ray through it is intersected with the table plane
+  instead -- see ``__call__``."""
+
+  max_arm_fraction: float = 0.5
+  """How much of a detection may be the robot before it is the robot."""
+
+  max_detections: int = 32
+
+
 class YoloSegmenter:
   """Instance masks from the colour image, for when the depth has holes.
 
-  Trained by ``train_yolo.py`` on labels that ``DepthSegmenter`` produced --
-  see the module docstring.  Falls back to raising rather than silently
-  returning nothing if the weights are missing, because a mask channel that is
-  quietly all zeros looks exactly like "there is nothing on the table".
+  Trained by ``train_yolo.py`` on labels ``DepthSegmenter`` produced -- see
+  ``autolabel.py``.  What this class adds on top of the network is everything
+  that stops a detection from becoming a target it should not be, and it is
+  most of the file, because a segmentation network trained on one table will
+  fire on the chair behind it and nothing in the network knows that the chair
+  is not on the table.
+
+  Three things the previous version of this class did not do, each of which is
+  a way to reach for the wrong thing:
+
+  * **The workspace box.**  ``DepthSegmenter`` throws away everything outside
+    ``config.WORKSPACE`` before it looks for anything.  A detection is now
+    placed in the base frame and tested against the same box, so the room
+    behind the table cannot produce a target.
+  * **The arm.**  The model was trained on frames the arm was in, and its
+    labels excluded the arm -- but "was not labelled" is not "will never be
+    detected", and the gripper is the most object-shaped thing in frame.
+  * **The bin.**  Same argument, and its rim is 60 mm of vertical wall standing
+    in the middle of the range the objects occupy.
+
+  And one thing that was worse than not doing it: a detection whose pixels are
+  all holes used to be kept with a NaN centroid, on the reasoning that it would
+  only be chosen if nothing else was.  It could not be chosen at all --
+  ``TargetTracker`` skips instances it cannot place -- so the backend that
+  exists to find objects the depth cannot see was dropping exactly those.  They
+  are now placed by intersecting the ray through the detection with the fitted
+  table plane, which gives the point on the table under the object: half its
+  height low, and well inside the tracker's 60 mm association gate.
   """
 
   def __init__(self, weights: str, rig: "config.Rig", reproj,
-               cfg: SegmenterCfg | None = None, conf: float = 0.25,
-               device: str = "cuda:0"):
-    from ultralytics import YOLO       # imported here: an optional dependency
-
-    self.model = YOLO(weights)
+               cfg: SegmenterCfg | None = None, conf: float | None = None,
+               device: str = "cuda:0", yolo_cfg: "YoloCfg | None" = None,
+               bin_footprint=None):
     self.rig = rig
     self.reproj = reproj
     self.cfg = cfg or SegmenterCfg()
-    self.conf = conf
+    self.yolo = yolo_cfg or YoloCfg()
+    if conf is not None:
+      self.yolo = dataclasses.replace(self.yolo, conf=float(conf))
     self.device = device
+    self.bin_footprint = bin_footprint if bin_footprint is not None \
+      else (config.BIN_CENTER, config.BIN_OUTER)
     self.decimate = 1
     """Full resolution.  The depth backend halves it to afford the per-point
     arithmetic; this one's cost is a forward pass and does not care."""
+    self.detector = load_detector(weights, device=device, cfg=self.yolo)
+    self.rejected: list[tuple[str, float]] = []
+    self.plane = (np.array([0.0, 0.0, 1.0]), float(rig.table_z))
+    self.plane_sigma = 0.0
+    self.noise_per_m = 0.0
+    self.n_unplaced = 0
+    """How many of the last frame's instances were positioned from the plane
+    rather than from their own depth.  This is the number that says whether the
+    backend is earning its place: if it is zero, the depth segmenter would have
+    found everything."""
 
   def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
                arm=None) -> Segmentation:
+    """Args:
+      depth: ``(480, 848)`` metres from the sensor, 0 where invalid.  Used to
+        place the detections, not to find them.
+      rgb: the colour frame at the same resolution.  Required -- working
+        without depth is the whole reason this backend exists.
+      arm: ``(centres, radii)`` from ``proprio.Kinematics.link_spheres``.
+    """
     if rgb is None:
       raise ValueError(
         "the YOLO backend reads the colour image and was given none.  That is "
         "the whole reason it exists -- it works where the depth does not."
       )
-    del arm      # the model was trained on frames the arm was already in
+    c = self.cfg
     h, w = depth.shape
-    res = self.model.predict(rgb, conf=self.conf, device=self.device,
-                             verbose=False)[0]
     out = np.zeros((h, w), dtype=np.int32)
     instances: list[Instance] = []
-    if res.masks is None:
+    self.rejected = []
+    self.n_unplaced = 0
+
+    masks = self.detector(rgb, (h, w))
+    if masks.shape[0] == 0:
       return Segmentation(labels=out, instances=instances)
 
-    pts_full = np.full((h * w, 3), np.nan, dtype=np.float64)
-    # Indexed by ``last_src``, not by "every valid pixel": the resampler drops
-    # the third of the frame that lies outside the policy's field of view
-    # before it transforms anything, so those two sets are not the same.
     pts = self.reproj.points_base(depth, self.rig)
-    pts_full[self.reproj.last_src] = pts
+    src = self.reproj.last_src
+    in_box = workspace_mask(pts)
+    height, self.plane, self.plane_sigma = fit_table_plane(
+      pts, in_box, self.rig.table_z, c.plane_fit_points)
+    is_arm = arm_mask(pts, arm, c.arm_clearance_m, within=in_box)
+    is_bin = bin_mask(pts, self.bin_footprint, c.bin_margin_m)
+    usable = in_box & ~is_arm & ~is_bin
 
-    for i, m in enumerate(res.masks.data.cpu().numpy()):
-      m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST) > 0.5
-      area = int(m.sum())
-      if area < self.cfg.min_area_px:
+    # The table's scatter, as a coefficient on z^2, so the height test below
+    # scales with range the way the sensor's error does.  Measured here rather
+    # than assumed, for the same reason the depth backend measures it.
+    rng = np.asarray(depth, dtype=np.float64).reshape(-1)[src]
+    table = usable & (np.abs(height) < 0.02)
+    self.noise_per_m = float(
+      1.4826 * np.median(np.abs(height[table])
+                         / np.maximum(rng[table], 1e-3) ** 2)
+    ) if int(table.sum()) > 500 else 0.0
+
+    # Source pixel -> row of ``pts``, so a detection's mask can be turned into
+    # its points in one gather instead of a search.
+    row = np.full(h * w, -1, dtype=np.int64)
+    row[src] = np.arange(src.shape[0])
+    origin = self.reproj.camera_origin_base(self.rig)
+
+    for m in masks:
+      flat = m.reshape(-1)
+      area = int(flat.sum())
+      if area < c.min_area_px or area > c.max_area_px:
+        self.rejected.append(("area", float(area)))
         continue
-      p = pts_full[m.reshape(-1)]
-      p = p[np.isfinite(p).all(axis=1)]
-      if p.size == 0:
-        # A detection the depth cannot place.  Kept -- this is the case the
-        # model exists for -- but with no base-frame position, so the tracker
-        # cannot match it and it will only be chosen if nothing else is.
-        centroid = np.full(3, np.nan)
-        top = float("nan")
+      r = row[flat]
+      r = r[r >= 0]
+      if r.size and float(is_arm[r].mean()) > self.yolo.max_arm_fraction:
+        self.rejected.append(("arm", float(is_arm[r].mean())))
+        continue
+      good = r[usable[r]] if r.size else r
+
+      if good.size >= self.yolo.min_placed_px:
+        centroid, top, why = self._from_points(pts[good], height[good],
+                                               rng[good])
+        if why:
+          self.rejected.append(why)
+          continue
       else:
-        centroid = p.mean(axis=0)
-        top = float(p[:, 2].max() - self.rig.table_z)
-      out[m] = i + 1
+        centroid = self._from_plane(flat, origin, w)
+        top = float("nan")
+        self.n_unplaced += 1
+
+      if not np.isfinite(centroid).all():
+        self.rejected.append(("unplaceable", float(good.size)))
+        continue
+      # The same three tests the points would have failed, applied to the one
+      # position we have.  A detection placed on the plane has no height and no
+      # footprint, so this is all there is to go on -- and it is the test that
+      # matters, because it is the one that rejects the room.
+      if not bool(workspace_mask(centroid[None])[0]):
+        self.rejected.append(("outside the workspace",
+                              float(np.linalg.norm(centroid[:2]))))
+        continue
+      if bool(bin_mask(centroid[None], self.bin_footprint, c.bin_margin_m)[0]):
+        self.rejected.append(("the bin", 0.0))
+        continue
+      if bool(arm_mask(centroid[None], arm, c.arm_clearance_m)[0]):
+        self.rejected.append(("the arm", 0.0))
+        continue
+
+      label = len(instances) + 1
+      out[m] = label
       ys, xs = np.nonzero(m)
       instances.append(Instance(
-        label=i + 1, n_px=area, centroid_base=centroid, top_z=top,
+        label=label, n_px=area, centroid_base=centroid, top_z=top,
         bbox=(int(xs.min()), int(ys.min()),
               int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)),
       ))
     return Segmentation(labels=out, instances=instances)
+
+  def _from_points(self, p, height, rng):
+    """Position and height from a detection's own cloud, with the depth
+    backend's filters.  Returns ``(centroid, top, reason_or_None)``."""
+    c = self.cfg
+    # Median, not mean.  A detection that clips a few pixels of the table
+    # behind the object drags a mean several centimetres; the median does not
+    # notice, and this position feeds a 60 mm association gate.
+    centroid = np.median(p, axis=0)
+    top = float(np.percentile(height, 97))
+    z = float(np.median(rng))
+    floor_z = max(c.min_top_z_floor_m, c.min_top_z_sigmas * self.noise_per_m * z * z)
+    if not (floor_z <= top <= c.max_height_m):
+      return centroid, top, ("height", top)
+    lo, hi = np.percentile(p[:, :2], [2, 98], axis=0)
+    span = np.sort(hi - lo)
+    extent = float(span[-1])
+    if not (c.width_range_m[0] <= extent <= c.width_range_m[1]):
+      return centroid, top, ("footprint", extent)
+    if extent / max(float(span[0]), 1e-4) > c.max_elongation:
+      return centroid, top, ("elongation", extent / max(float(span[0]), 1e-4))
+    return centroid, top, None
+
+  def _from_plane(self, flat: np.ndarray, origin: np.ndarray,
+                  width: int) -> np.ndarray:
+    """Where a detection with no usable depth is, assuming it is on the table.
+
+    The ray is taken through the mask's centroid pixel rather than its bounding
+    box centre, because the objects are not convex and a bracket's box centre
+    is not on the bracket.
+    """
+    idx = np.flatnonzero(flat)
+    u = float(np.mean(idx % width))
+    v = float(np.mean(idx // width))
+    pixel = int(round(v)) * width + int(round(u))
+    ray = self.reproj.rays_base(np.array([pixel]), self.rig)[0]
+    return place_on_plane(origin, ray, self.plane)
