@@ -39,3 +39,6 @@ hardware/deploy/calib_poses.json
 
 # ultralytics writes its validation output here
 runs/
+results/wm1_damping/data/*.pt
+results/wm1_damping/**/*.log
+results/wm1_damping/adapt/*__r*.json
