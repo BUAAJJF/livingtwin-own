@@ -20,6 +20,7 @@ Run with:  micromamba run -n mjlab python -m pytest tests -q
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -138,10 +139,44 @@ def test_the_verdict_needs_seeds_as_well_as_significance():
 def test_the_roles_cover_every_method_the_plans_emit():
   """A method in a plan that no role claims is silently dropped from the gate,
   which is how a comparison quietly loses an arm."""
-  named = {m for names in gate.ROLES.values() for m in names}
+  named = {m for r in gate.ROLES.values() for m in r["methods"]}
   for m in ("B3_state", "KNOWN_PARAM", "M2_broad", "M5_risk_aware",
-            "B0_prior_refit", "KNOWN_PARAM_MIX"):
+            "B0_prior_refit", "KNOWN_PARAM_MIX", "B3_state_risk_tilted"):
     assert m in named, f"{m} is in the plans but no gate role claims it"
+
+
+def test_the_tilted_mixture_has_its_own_role():
+  """C4 is the only comparison in this phase where risk-awareness has a
+  mechanism to act through, so the tilted arm must not be filed elsewhere."""
+  assert gate.ROLES["mixture_tilted"]["methods"] == ("B3_state_risk_tilted",)
+  keys = list(gate.ROLES)
+  assert keys.index("mixture_tilted") < keys.index("mixture")
+
+
+def test_a_role_is_an_alpha_as_well_as_a_name(tmp_path):
+  """`B3_state` at alpha=1 is a point mass at the target; `B3_state` at
+  alpha=0.5 is an even split with the source prior.  Two different training
+  distributions.  Matching on the name alone pools them and reports one rate
+  for two experiments.
+  """
+  assert gate.ROLES["trajectory_matching"]["alpha"] == 1.0
+  assert gate.ROLES["mixture"]["alpha"] == 0.5
+  assert "B3_state" in gate.ROLES["trajectory_matching"]["methods"]
+  assert "B3_state" in gate.ROLES["mixture"]["methods"]
+
+  # and `load` honours it
+  plan = {"jobs": [
+    {"tag": "qaaaa_a1.00_s42", "methods": ["B3_state"]},
+    {"tag": "qbbbb_a0.50_s42", "methods": ["B3_state"]}]}
+  (tmp_path / "plan.json").write_text(json.dumps(plan))
+  for tag, trips in (("qaaaa_a1.00_s42", 5.0), ("qbbbb_a0.50_s42", 50.0)):
+    (tmp_path / f"{tag}_target__r0.json").write_text(json.dumps({
+      "metrics": {"trips_total": trips, "throughput_per_min": 50.0,
+                  "success": 0.99},
+      "config": {"arm_hours": 6.8}}))
+  runs, _ = gate.load(tmp_path)
+  assert runs["trajectory_matching"]["target"][42][0]["trips"] == 5.0
+  assert runs["mixture"]["target"][42][0]["trips"] == 50.0
 
 
 def test_the_seed_floor_is_the_one_the_specification_asked_for():

@@ -402,10 +402,56 @@ randomisation against the same broad prior risk-tilted.
 
 ## 6. Posterior-guided adaptation — PENDING
 
-Three distinct distributions × **8 training seeds**, plus two controls at three
-seeds: a refit conditioned on the source prior, and the known-parameter mixture
-at α = 0.5. Every checkpoint evaluated at 512 environments × 2400 steps, three
-process repeats, in both the target and the source domain.
+Every checkpoint is evaluated at 512 environments × 2400 steps, three process
+repeats, in both the target and the source domain.
+
+| arm | training distribution | seeds |
+|---|---|---|
+| trajectory matching = known-parameter | `[1.000, 0.000, 0.000]` | 8 |
+| broad domain randomisation | `[0.333, 0.333, 0.333]` | 8 |
+| risk-aware (broad, tilted) | `[0.816, 0.093, 0.091]` | 8 |
+| **mixture, untilted** (α = 0.5) | `[0.500, 0.500, 0.000]` | 8 |
+| **mixture, risk-tilted** (α = 0.5) | `[0.898, 0.102, 0.000]` | 8 |
+| source-prior refit | `[0.000, 1.000, 0.000]` | 3 |
+
+### 6.1 What is expected, written down before the runs finished
+
+This section was written while the queue was still running and has not been
+edited since. It is here so that §7's outcome cannot be dressed up afterwards.
+
+**C2 — risk-aware against trajectory matching — is expected to FAIL, and the
+reason is structural rather than a fact about risk-awareness.** Every estimator
+on this axis returns a point mass at the target (§5.4). Trajectory matching
+therefore spends **100%** of its PPO budget in the dangerous domain and the
+risk-aware arm spends **81.6%** of its budget there. On target-domain safety
+the arm with more exposure to the target should win. A point mass cannot be
+tilted, so there was no uncertainty for risk-awareness to act on and C2 asks a
+question with no mechanism behind it. It is still reported, because the phase
+specification asks for it in those words.
+
+**C3 — risk-aware against broad domain randomisation — is expected to PASS**,
+for the same structural reason read the other way: 81.6% of the budget in the
+target domain against 33.3%. This is a real effect and it is also a weak claim.
+It says the tilt moved mass towards the domain that turned out to be the true
+one, which on a three-value axis where the truth is also the most dangerous
+candidate is close to unfalsifiable.
+
+**C4 is the comparison that can actually fail.** The α = 0.5 pair holds
+everything constant except whether the surviving uncertainty is resolved
+towards danger: same posterior, same mixing, same PPO budget, same amount of
+uncertainty, `[0.898, 0.102, 0]` against `[0.500, 0.500, 0]`. If risk-awareness
+buys safety anywhere in this phase, it is here. If it does not buy it here, the
+mechanism does not work and C3 was measuring the tilt's direction rather than
+its value.
+
+**A caveat that applies to C3 and C4 both, and that no amount of seeds fixes.**
+The cost vector the tilt reads is a *simulator* quantity, and on this axis the
+most dangerous candidate happens to be the true one. A tilt towards danger is
+therefore also a tilt towards truth, and the two cannot be separated by this
+experiment. The counter-direction candidate at 1.5 is in the design partly to
+limit this — it is *safer* than nominal, so the tilt actively moves mass away
+from it — but a clean separation would need an axis whose dangerous candidate
+is not the target, which this phase was told not to open.
 
 ---
 

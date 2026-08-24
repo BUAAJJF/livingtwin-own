@@ -11,12 +11,30 @@ own central question, split into the pieces that can each fail separately:
     C1  identification clears its controls
     C2  risk-aware trips < trajectory matching
     C3  risk-aware trips < broad domain randomisation
-    C4  throughput in the target domain is not paid away for it
-    C5  retention in the source domain is not paid away for it
-    C6  every new feature is default-off with provenance
+    C4  tilted mixture trips < untilted mixture, at the same alpha
+    C5  throughput in the target domain is not paid away for it
+    C6  retention in the source domain is not paid away for it
+    C7  every new feature is default-off with provenance
 
-C2 and C3 are the question. C4 and C5 are the constraint that makes the answer
-mean something: a policy that never moves trips nothing.
+C2 and C3 are the specification's two comparisons verbatim. C5 and C6 are the
+constraint that makes an answer mean something: a policy that never moves trips
+nothing.
+
+**C4 is here because C2 is structurally rigged and it was clear before the runs
+finished, not after.** Every estimator on this axis returns a point mass at the
+target, so trajectory matching trains 100% of its PPO budget in the dangerous
+domain and the risk-aware arm trains 81.6% of it there. On target-domain
+safety the arm with *more* exposure to the target should win, and that has
+nothing to do with whether risk-awareness works -- a point mass cannot be
+tilted, so there is no uncertainty for it to act on and C2 asks a question with
+no mechanism behind it.
+
+C4 is the comparison where the mechanism can operate: the same posterior mixed
+with the source prior at alpha = 0.5, tilted against untilted -- [0.898, 0.102,
+0] against [0.5, 0.5, 0]. Same data, same PPO budget, same amount of
+uncertainty; the only difference is whether that uncertainty is resolved
+towards danger. If risk-awareness buys safety anywhere in this phase, it is
+here, and if it does not buy it here it does not work.
 
 **How a rate comparison is decided.** Counts are clustered on the *training
 seed*, never on the evaluation repeat. Repeats inside a seed agree closely and
@@ -60,12 +78,20 @@ THROUGHPUT_BUDGET = 0.05
 
 # The three distributions the phase compares.  Named by what they are rather
 # than by the hash of their probability vector.
+# A role is a method name *and* an alpha.  Both, because `B3_state` at alpha=1
+# is a point mass at the target and `B3_state` at alpha=0.5 is an even split
+# with the source prior -- two different training distributions that a
+# name-only match pools into one arm and reports as one rate.
 ROLES = {
-  "trajectory_matching": ("B3_state", "KNOWN_PARAM"),
-  "broad_dr": ("M2_broad",),
-  "risk_aware": ("M5_risk_aware",),
-  "source_refit": ("B0_prior_refit",),
-  "known_mixture": ("KNOWN_PARAM_MIX",),
+  "trajectory_matching": {"methods": ("B3_state", "KNOWN_PARAM"), "alpha": 1.0},
+  "broad_dr":            {"methods": ("M2_broad",), "alpha": 1.0},
+  "risk_aware":          {"methods": ("M5_risk_aware",), "alpha": 1.0},
+  "source_refit":        {"methods": ("B0_prior_refit",), "alpha": 1.0},
+  # The alpha = 0.5 pair, which is C4.  The tilted entry is listed first so a
+  # plan that labels the tilted job with both names still files it as tilted.
+  "mixture_tilted":      {"methods": ("B3_state_risk_tilted",), "alpha": 0.5},
+  "mixture":             {"methods": ("B3_state", "KNOWN_PARAM_MIX"),
+                          "alpha": 0.5},
 }
 
 
@@ -101,7 +127,9 @@ def load(adapt: Path) -> tuple[dict, dict]:
     qhash, alpha, seed, domain, _ = m.groups()
     names = set(method_of.get(f"{qhash}_a{alpha}", []))
     for role, want in ROLES.items():
-      if names & set(want):
+      if abs(float(alpha) - want["alpha"]) > 1e-9:
+        continue
+      if names & set(want["methods"]):
         runs[role][domain][int(seed)].append(rec)
         break
   return runs, anchors
@@ -257,7 +285,9 @@ def main() -> int:
       ("C2  risk-aware trips < trajectory matching",
        ("risk_aware", "trajectory_matching")),
       ("C3  risk-aware trips < broad domain randomisation",
-       ("risk_aware", "broad_dr"))):
+       ("risk_aware", "broad_dr")),
+      ("C4  tilted mixture trips < untilted, same alpha",
+       ("mixture_tilted", "mixture"))):
     A = seed_level.get((num, "target"))
     B = seed_level.get((den, "target"))
     if not A or not B or min(len(A["seeds"]), len(B["seeds"])) < 2:
@@ -292,10 +322,10 @@ def main() -> int:
 
   # -- C4, C5: what it cost -------------------------------------------------
   for name, domain, ref, why in (
-      ("C4  target throughput not paid away", "target", "trajectory_matching",
+      ("C5  target throughput not paid away", "target", "trajectory_matching",
        "against the best comparator in the same domain, so a method cannot "
        "pass by being safe and slow"),
-      ("C5  source retention not paid away", "retention", None,
+      ("C6  source retention not paid away", "retention", None,
        "against the unadapted policy in the source domain")):
     A = seed_level.get(("risk_aware", domain))
     if not A:
@@ -333,7 +363,7 @@ def main() -> int:
       "risk_tilt" in (root / "scripts" / "wm_posterior.py").read_text(),
   }
   c6["pass"] = all(v for k, v in c6.items() if k != "checked")
-  report["criteria"]["C6  default-off with provenance"] = c6
+  report["criteria"]["C7  default-off with provenance"] = c6
 
   # -- print ----------------------------------------------------------------
   print()

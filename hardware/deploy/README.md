@@ -88,8 +88,11 @@ $M -c "from hardware.deploy import robot; a=robot.PiperArm(); a.connect(); \
 # 4. mount the camera near the nominal pose, then measure where it really is.
 #    The board goes ON THE GRIPPER -- see "Calibration" below for why, and for
 #    what to pass if it is not the sheet in hardware/depth_bench/targets.
+#    Either the guided page -- preflight, live coverage, solve, save:
+$M -m hardware.deploy.calibgui                # http://127.0.0.1:8771
+#    or the same steps from the prompt:
 $M -m hardware.deploy.calibrate --preview     # does the detector see the board?
-$M -m hardware.deploy.calibrate --collect     # 8+ poses, vary the ORIENTATION
+$M -m hardware.deploy.calibrate --collect     # vary the ORIENTATION
 $M -m hardware.deploy.calibrate --solve
 $M scripts/rig_to_sim.py                      # what the simulator now gets wrong
 
@@ -233,6 +236,37 @@ Detection is not the limit and should not be confused with it: a 40 mm marker
 at 0.70 m is 26 px on a side and decodes 100% of the time. It is found
 perfectly and located uselessly.
 
+**Motion-capture spheres**, measured the same way — the same arm poses, the
+same 0.2 px of feature noise, only the target geometry changed:
+
+| target | 12 poses | 30 poses |
+|---|---|---|
+| 3 spheres, 80 mm, coplanar | 536 mm | 404 mm |
+| 3 spheres, 80 mm, 20 mm relief | 614 mm | 469 mm |
+| 4 spheres, 80 mm, 30 mm relief | 10.5 mm | 8.4 mm |
+| 5 spheres, 120 mm, 40 mm relief | 10.9 mm | 6.2 mm |
+| 8 spheres, 150 mm, 50 mm relief | **3.4 mm** | **2.8 mm** |
+| the A4 ChArUco sheet, 16 corners | 4.6 mm | 4.1 mm |
+
+The interesting row is the last two. A well-spread **non-coplanar** cluster
+beats the flat board, and it should: a plane is the worst-conditioned case for
+PnP, and 50 mm of relief removes the ambiguity the board has to live with. So
+the idea is sound and it is not sound in its usual form — three spheres is not
+a pose, it is a P3P problem with up to four solutions, and it comes out
+hundreds of millimetres wrong.
+
+Three practical reasons it still loses here, none of them geometric. **This
+camera has no IR projector** (`hardware/depth_bench/README.md`), so a
+retroreflective sphere has no co-axial illuminator to retro-reflect to and is
+simply a white ball — and a matte white surface is the one this bench measured
+as the camera's worst case. **Spheres have no identity**, so correspondence has
+to be inferred from the geometry and a wrong permutation is a wrong pose with
+no symptom, where every ArUco marker states which one it is. And **the cluster
+has to be measured**: the whole argument above assumes the ball positions are
+known to a fraction of a millimetre, and a hand-built cluster whose model is
+wrong is a uniformly wrong ruler — self-consistent, small residual, wrong
+answer, exactly the failure the square size has.
+
 **Say which board it is.** The defaults describe the printed A4 sheet. Anything
 else needs its numbers, and the failure mode for getting them wrong is not a
 bad answer, it is `board not found` at every pose with nothing saying which of
@@ -267,6 +301,23 @@ detectable by looking at the image:
   which moves the answer by the width of the board and looks exactly like a
   mounting error. `--legacy` if the residual is fine and the camera lands a
   board-width from where it obviously is.
+
+**Or drive it from the page.** `python -m hardware.deploy.calibgui` serves
+`http://127.0.0.1:8771` and walks the same four steps, which exists because the
+CLI asks the operator to track four things at once and shows one of them. It
+gates the record button on the three that are checkable — the board is
+detected, the view has stopped moving, and this pose is actually different from
+the ones already recorded — and draws the fourth, the rotation spread, as a
+disc of where each recorded pose faces. Spreading those dots *is* the task, and
+a picture of where they are not beats a number that says 24°.
+
+Its preflight also answers the question that is expensive to get wrong: **is the
+board on the gripper at all.** It runs forward kinematics on the live joint
+angles, puts the detected board into the base frame through the *nominal*
+extrinsic, and reports the separation. On the rig this was written against it
+read 411 mm — the board was propped on the table, where it constrains nothing,
+and every one of the thirty poses would have been wasted before `--solve` said
+so.
 
 **Then take it back to the simulator.** `scripts/rig_to_sim.py` reads
 `rig.json` and states the calibration as the axes `piper_push.perturb` already
@@ -353,6 +404,7 @@ policy.py       the exported ONNX actor, hidden state carried by hand
 robot.py        action mapping, a PiPER CAN backend, and a dry-run stand-in
 sensor.py       the D405 on its own thread, at the settings the bench measured
 calibrate.py    eye-to-hand, any board, residuals reported, refuses to guess
+calibgui.py     the same calibration, guided, in a browser -- + calibgui.html
 run.py          the 50 Hz loop, and what it does when something is wrong
 jointcheck.py   one joint, five degrees: the CAN units, before anything else
 selftest.py     all of the above, against the simulator, nothing plugged in

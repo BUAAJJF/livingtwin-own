@@ -63,12 +63,24 @@ RING = 8
 -- long enough that a settling arm has not finished, short enough that holding
 a pose deliberately does not feel like waiting."""
 
-STILL_MM = 1.5
-STILL_DEG = 0.35
-"""How far the board's pose may wander across the ring and still count as
-still.  Set just above what the detector's own noise does at this range: the
-bench measured 0.71 mm of pose error on this board, and a threshold below that
-never goes green."""
+STILL_MM = 6.0
+STILL_DEG = 1.0
+"""How far the board's pose may wander across the ring and still count as still.
+
+Set from what a *stationary* board actually does on this rig, which is not the
+bench's 0.71 mm -- that was absolute pose error against a known target, a
+different quantity.  Measured here instead: ten consecutive frames of an
+untouched board at 0.69 m reported ranges spanning 693-696 mm, so the
+frame-to-frame spread along the view axis alone is about 3 mm.  These are twice
+that, which leaves the gate closed for anything a hand is doing and open for a
+board that has been let go of.
+
+The first pass at this file used 1.5 mm and 0.35 deg, reasoning from the bench
+number, and the gate never went green -- the record button would have been
+permanently disabled with no indication why.  The live numbers are therefore
+shown in the button's own explanation, so a threshold that is wrong for some
+other rig is diagnosable by looking at it rather than by reading this comment.
+Override with ``--still-mm`` and ``--still-deg``."""
 
 NOVEL_MM = 25.0
 NOVEL_DEG = 8.0
@@ -95,8 +107,10 @@ class Session:
   """
 
   def __init__(self, board: calibrate.Board, serial: str | None,
-               can: str, no_arm: bool, poses_file: Path):
+               can: str, no_arm: bool, poses_file: Path,
+               still_mm: float = STILL_MM, still_deg: float = STILL_DEG):
     self.board = board
+    self.still_mm, self.still_deg = float(still_mm), float(still_deg)
     self.poses_file = poses_file
     self.records: list[dict] = []
     self.solution: dict | None = None
@@ -151,7 +165,21 @@ class Session:
     if frame is None:
       return
     gray = frame.gray
-    pose = calibrate.detect_board(gray, self.reader.K, np.zeros(5), self.board)
+    # Detected once and reused by the overlay: the detection is the expensive
+    # part of the tick and doing it twice halves the preview rate.
+    found = self.board.detect(gray)
+    pose = None
+    if found is not None:
+      obj, img = found
+      ok, rvec, tvec = cv2.solvePnP(obj, img, self.reader.K, np.zeros(5),
+                                    flags=cv2.SOLVEPNP_ITERATIVE)
+      if ok:
+        proj, _ = cv2.projectPoints(obj, rvec, tvec, self.reader.K,
+                                    np.zeros(5))
+        pose = {"rvec": rvec, "tvec": tvec, "n_corners": int(len(img)),
+                "reproj_rms_px": float(np.sqrt(
+                  ((proj.reshape(-1, 2) - img.reshape(-1, 2)) ** 2)
+                  .sum(1).mean()))}
 
     live: dict = {
       "detected": pose is not None,
@@ -183,7 +211,7 @@ class Session:
 
     with self.lock:
       self._live = live
-      self._jpeg = self._render(gray, pose, live)
+      self._jpeg = self._render(gray, found, live)
       self._last = (T_cb, st)
 
   def _normal(self, T_cb: np.ndarray) -> list[float]:
@@ -205,7 +233,7 @@ class Session:
     ref = Ts[-1]
     dt = max(float(np.linalg.norm(T[:3, 3] - ref[:3, 3])) for T in Ts) * 1000
     dr = max(_ang(T[:3, :3], ref[:3, :3]) for T in Ts)
-    if dt > STILL_MM or dr > STILL_DEG:
+    if dt > self.still_mm or dr > self.still_deg:
       return False, f"moving ({dt:.1f} mm, {dr:.2f} deg over {RING} frames)"
     return True, f"still ({dt:.1f} mm, {dr:.2f} deg)"
 
@@ -245,9 +273,8 @@ class Session:
 
   # -- the preview -----------------------------------------------------------
 
-  def _render(self, gray: np.ndarray, pose, live: dict) -> bytes:
+  def _render(self, gray: np.ndarray, found, live: dict) -> bytes:
     img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-    found = self.board.detect(gray)
     if found is not None:
       _, pts = found
       ok = live.get("still") and live.get("novel")
@@ -484,6 +511,8 @@ def main() -> int:
                  help="camera only; poses cannot be recorded, but the board "
                       "and the framing can be checked without CAN")
   p.add_argument("--poses", default=str(calibrate.POSES_FILE))
+  p.add_argument("--still-mm", type=float, default=STILL_MM)
+  p.add_argument("--still-deg", type=float, default=STILL_DEG)
   calibrate_group = p.add_argument_group("the board")
   calibrate_group.add_argument("--board", default=None)
   calibrate_group.add_argument("--board-kind",
@@ -497,7 +526,8 @@ def main() -> int:
 
   board = calibrate.board_from_args(a)
   print(f"board: {board.describe()}")
-  sess = Session(board, a.serial, a.can, a.no_arm, Path(a.poses))
+  sess = Session(board, a.serial, a.can, a.no_arm, Path(a.poses),
+                 a.still_mm, a.still_deg)
   httpd = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
   httpd.session = sess
   print(f"\n  open http://127.0.0.1:{a.port}\n")

@@ -33,7 +33,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from piper_push import damping, latency
+from piper_push import damping, latency, prior
 
 SEEDS = (42, 20260824, 31415927)
 """Training seeds.
@@ -91,6 +91,12 @@ def main() -> int:
                  help="comma-separated method names to keep, for extending a "
                       "configuration that already has results")
   p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
+  p.add_argument("--risk-tilt", action="store_true",
+                 help="also emit a risk-tilted copy of every posterior, "
+                      "tilted AFTER mixing with the source prior.  The tilt "
+                      "belongs on the distribution PPO actually trains under, "
+                      "not on the estimate before it is mixed: what matters "
+                      "for safety is where the budget is spent.")
   p.add_argument("--out", required=True)
   a = p.parse_args()
   PRIOR_CLS, TARGET, P_SOURCE, PROBS_FLAG, EVAL_FLAG = AXES[a.axis]
@@ -124,15 +130,51 @@ def main() -> int:
     keep = {m.strip() for m in a.only.split(",")}
     want = [m for m in want if m in keep]
 
+  # The risk tilt, when asked for, is applied to the MIXED distribution.
+  #
+  # Tilting the posterior before mixing would be tilting an estimate; tilting
+  # after is tilting the thing PPO actually trains under, which is what decides
+  # where the budget is spent and therefore what the safety consequence is.
+  #
+  # It is also the only place the tilt can do anything on this axis.  Every
+  # estimator here returns a point mass at the target, and a point mass cannot
+  # be tilted -- there is no surviving candidate to move mass towards.  Mixing
+  # with the source prior at alpha < 1 is what puts uncertainty back, and the
+  # tilted-against-untilted pair at the same alpha is the only comparison in
+  # this phase where risk-awareness has a mechanism to act through.
+  tilt_cfg = None
+  if a.risk_tilt:
+    if a.axis != "servo_damping_scale":
+      raise SystemExit("--risk-tilt has a cost vector only for "
+                       "servo_damping_scale")
+    tilt_cfg = (damping.trip_costs(), prior.risk_lambda(damping.trip_costs()))
+
   jobs: dict[tuple, dict] = {}
   for m in want:
     for al in alphas:
       mixed = post[m].mix(P_SOURCE, al)
-      key = (mixed.fingerprint(), al)
-      job = jobs.setdefault(key, {
-        "probs": list(mixed.probs), "alpha": al, "methods": [],
-        "prior": mixed.to_json()})
-      job["methods"].append(m)
+      variants = [(m, mixed)]
+      if tilt_cfg is not None:
+        costs, lam = tilt_cfg
+        tilted = mixed.tilt(costs, lam)
+        if tilted.total_variation(mixed) > 1e-9:
+          variants.append((f"{m}_risk_tilted", tilted))
+        else:
+          print(f"  -- {m} at alpha={al:.2f} is a point mass; the tilt moves "
+                f"nothing and no tilted arm is emitted")
+      for label, q in variants:
+        key = (q.fingerprint(), al)
+        job = jobs.setdefault(key, {
+          "probs": list(q.probs), "alpha": al, "methods": [],
+          "prior": q.to_json()})
+        job["methods"].append(label)
+        if label.endswith("_risk_tilted"):
+          job["risk_tilt"] = {
+            "base_probs": list(mixed.probs), "lam": tilt_cfg[1],
+            "costs": list(tilt_cfg[0]),
+            "cost_units": "safety-shell firings per arm-hour, in simulation",
+            "total_variation_from_base": q.total_variation(mixed),
+            "reads_no_target_label": True}
 
   only = {m.strip() for m in a.only.split(",")} if a.only else set()
   if a.only and not ({"KNOWN_PARAM", "ORACLE"} & only):
