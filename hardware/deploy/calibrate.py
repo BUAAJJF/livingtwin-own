@@ -219,6 +219,24 @@ class Board:
 DEFAULT_BOARD = Board()
 
 
+def board_image(frame) -> np.ndarray:
+  """The image to find the board in.
+
+  The left infrared imager when the reader was opened for it, and the
+  depth-aligned colour frame otherwise.  They are not interchangeable and the
+  difference is not subtle: ``frame.gray`` is warped into the depth grid, so it
+  is black wherever the stereo matcher returned nothing and displaced wherever
+  the depth is noisy.  Both happen at depth discontinuities, a ChArUco board is
+  nothing but discontinuities, and the board is carried by the arm -- which
+  casts the largest alignment shadow in the frame.
+
+  Measured on this rig: the aligned image drops out over whole regions of the
+  scene and carries a black halo around the arm; the infrared one has neither.
+  """
+  ir = getattr(frame, "ir", None)
+  return frame.gray if ir is None else ir
+
+
 def make_board(board: Board = DEFAULT_BOARD):
   """The OpenCV ChArUco object, for callers that want to draw it."""
   return board._charuco()
@@ -575,15 +593,18 @@ def preview(args) -> int:
 
   board = board_from_args(args)
   print(f"board: {board.describe()}\n")
-  reader = sensor.Reader(serial=args.serial)
-  reader.wait_for_first()
+  reader = sensor.Reader(serial=args.serial, infrared=True)
+  first = reader.wait_for_first()
+  if getattr(first, "ir", None) is None:
+    print("WARNING: no infrared stream; falling back to the depth-aligned "
+          "colour frame, which is holed wherever the depth is.\n")
   try:
     for i in range(args.frames):
       frame = reader.latest()
       if frame is None:
         print("no frame")
         continue
-      pose = detect_board(frame.gray, reader.K, np.zeros(5), board)
+      pose = detect_board(board_image(frame), reader.K, np.zeros(5), board)
       if pose is None:
         print(f"[{i:3d}] not found")
       else:
@@ -607,7 +628,7 @@ def collect(args) -> int:
   """
   from . import robot, sensor
 
-  reader = sensor.Reader(serial=args.serial)
+  reader = sensor.Reader(serial=args.serial, infrared=True)
   reader.wait_for_first()
   # Connected but deliberately not enabled: a disabled PiPER is back-drivable,
   # so the poses are set by moving the arm with a hand, and the drives still
@@ -655,7 +676,7 @@ def collect(args) -> int:
       if frame is None:
         print("  no frame")
         continue
-      pose = detect_board(frame.gray, reader.K, np.zeros(5), board)
+      pose = detect_board(board_image(frame), reader.K, np.zeros(5), board)
       if pose is None:
         print("  board not found -- move it into view, add light, or check "
               "the board description with --preview")

@@ -135,7 +135,7 @@ class Session:
                      f"({stored.describe()}); they are not loaded")
 
     from . import sensor
-    self.reader = sensor.Reader(serial=serial)
+    self.reader = sensor.Reader(serial=serial, infrared=True)
     self.reader.wait_for_first()
 
     self.arm = None
@@ -164,7 +164,9 @@ class Session:
     frame = self.reader.latest()
     if frame is None:
       return
-    gray = frame.gray
+    # The left infrared imager, not the depth-aligned colour: see
+    # calibrate.board_image for why they are not interchangeable.
+    gray = calibrate.board_image(frame)
     # Detected once and reused by the overlay: the detection is the expensive
     # part of the tick and doing it twice halves the preview rate.
     found = self.board.detect(gray)

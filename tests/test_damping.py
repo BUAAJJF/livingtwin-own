@@ -330,3 +330,41 @@ def test_the_tilt_at_the_registered_lambda_does_what_the_report_will_claim():
   u = damping.DampingPrior.uniform().tilt(c, lam)
   assert u.mass(damping.TARGET) == pytest.approx(0.816, abs=0.002)
   assert u.mass(damping.NOMINAL) == pytest.approx(0.093, abs=0.002)
+
+
+def test_a_zero_probability_candidate_is_never_drawn():
+  """WM1-B's C4 pair both put exactly zero on the counter-direction candidate.
+
+  `[0.898, 0.102, 0]` against `[0.5, 0.5, 0]` is meant to isolate one thing:
+  whether the surviving uncertainty is resolved towards danger. If 1.5 leaked
+  into either arm at any rate it would be a *third* difference between them --
+  and 1.5 is the safest candidate on the axis, so a leak into the untilted arm
+  would flatter the tilted one.
+  """
+  g = torch.Generator().manual_seed(0)
+  for probs in ((0.898, 0.102, 0.0), (0.5, 0.5, 0.0)):
+    q = damping.DampingPrior(probs)
+    drawn = q.sample(200_000, generator=g)
+    assert not bool((drawn == damping.COUNTER).any())
+    assert set(drawn.unique().tolist()) == {damping.TARGET, damping.NOMINAL}
+
+
+def test_the_realised_proportions_match_the_tilted_posterior():
+  """Within sampling error at 200k draws, which is far more environments than
+  any run uses -- so a systematic bias would show here and a per-run wobble
+  would not be mistaken for one."""
+  g = torch.Generator().manual_seed(1)
+  q = damping.DampingPrior((0.898, 0.102, 0.0))
+  drawn = q.sample(200_000, generator=g)
+  got = float((drawn == damping.TARGET).double().mean())
+  assert got == pytest.approx(0.898, abs=0.005)
+
+
+def test_the_c4_pair_differs_only_in_where_the_mass_sits():
+  """Same support, same alpha, same source prior -- one difference."""
+  untilted = damping.DampingPrior((0.5, 0.5, 0.0))
+  tilted = untilted.tilt(damping.trip_costs(), prior.risk_lambda(
+    damping.trip_costs()))
+  assert untilted.support == tilted.support == (damping.TARGET, damping.NOMINAL)
+  assert tilted.mass(damping.TARGET) > untilted.mass(damping.TARGET)
+  assert tilted.mass(damping.COUNTER) == 0.0

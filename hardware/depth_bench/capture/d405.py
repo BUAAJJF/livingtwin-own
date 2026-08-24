@@ -126,6 +126,25 @@ class Stream:
                       args.fps)
     cfg.enable_stream(rs.stream.color, args.width, args.height, rs.format.bgr8,
                       args.fps)
+    # The left infrared imager, optionally, and NOT aligned to anything.
+    #
+    # The colour stream below is warped into the depth grid, which is right for
+    # the bench -- it puts colour and depth on one grid so a region measured in
+    # one is the same region in the other.  It is wrong for anything that has
+    # to *locate* something in the image, because the warp is driven by the
+    # depth map: where depth is missing the output is black, and where depth is
+    # noisy the colour pixel lands somewhere else.  A calibration target is
+    # mostly edges, edges are where this camera drops out, and the target ends
+    # up holed exactly along the features being measured.
+    #
+    # The left imager needs no warp at all: RealSense defines the depth frame
+    # as that imager's frame, so its intrinsics are the depth intrinsics --
+    # checked on this camera, identical to five decimal places and zero
+    # distortion, where the colour stream carries -0.052 of radial.
+    self.infrared = bool(getattr(args, "infrared", False))
+    if self.infrared:
+      cfg.enable_stream(rs.stream.infrared, 1, args.width, args.height,
+                        rs.format.y8, args.fps)
 
     self._pipe = rs.pipeline()
     profile = self._pipe.start(cfg)
@@ -170,7 +189,17 @@ class Stream:
 
   def read(self) -> tuple[np.ndarray, np.ndarray]:
     """One aligned pair: depth in metres (0 = invalid) and greyscale."""
-    frames = self._align.process(self._pipe.wait_for_frames())
+    return self.read3()[:2]
+
+  def read3(self) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """The aligned pair, plus the raw left infrared frame if it was enabled."""
+    raw = self._pipe.wait_for_frames()
+    ir = None
+    if self.infrared:
+      f = raw.get_infrared_frame(1)
+      if f:
+        ir = np.asanyarray(f.get_data()).copy()
+    frames = self._align.process(raw)
     d = frames.get_depth_frame()
     for f in self._filters:
       d = f.process(d)
@@ -180,7 +209,7 @@ class Stream:
     if not c:
       raise RuntimeError("no colour frame; cannot locate the target")
     gray = cv2.cvtColor(np.asanyarray(c.get_data()), cv2.COLOR_BGR2GRAY)
-    return depth, gray
+    return depth, gray, ir
 
   def close(self) -> None:
     try:

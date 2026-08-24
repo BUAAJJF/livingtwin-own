@@ -56,13 +56,26 @@ class Frame:
   """``(480, 848)`` uint8, resampled into the depth frame by the driver."""
   stamp: float
   index: int
+  ir: np.ndarray | None = None
+  """``(480, 848)`` uint8 from the left infrared imager, unwarped, or None
+  unless the reader was opened with ``infrared=True``.
+
+  This is the image to *locate* things in.  ``gray`` is the colour stream
+  warped into the depth grid, so it is black wherever the depth is missing and
+  displaced wherever the depth is noisy -- and both of those happen at edges,
+  which is what a calibration target is made of.  ``ir`` has neither problem
+  and its intrinsics are the depth intrinsics, so a pose measured in it needs
+  no further transform to mean something in the depth frame."""
 
 
 class Reader:
   """Latest-frame-wins reader for the D405."""
 
-  def __init__(self, serial: str | None = None, **overrides):
+  def __init__(self, serial: str | None = None, infrared: bool = False,
+               **overrides):
+    overrides.setdefault("infrared", infrared)
     self._d405 = _bench_backend()
+    self._infrared = bool(overrides.get("infrared", False))
     args = _Args(serial=serial, **overrides)
     self._stream = self._d405.Stream(args)
     self.K = self._stream.K
@@ -81,7 +94,7 @@ class Reader:
     index = 0
     while not self._stop.is_set():
       try:
-        depth, gray = self._stream.read()
+        depth, gray, ir = self._stream.read3()
         self._errors = 0
       except Exception:
         self._errors += 1
@@ -93,15 +106,16 @@ class Reader:
           try:
             self._stream.close()
             self._d405.reset(self.serial)
-            self._stream = self._d405.Stream(_Args(serial=self.serial))
+            self._stream = self._d405.Stream(
+              _Args(serial=self.serial, infrared=self._infrared))
             self._errors = 0
           except Exception:
             time.sleep(0.5)
         continue
       index += 1
       with self._lock:
-        self._frame = Frame(depth=depth, gray=gray, stamp=time.time(),
-                            index=index)
+        self._frame = Frame(depth=depth, gray=gray, ir=ir,
+                            stamp=time.time(), index=index)
 
   def latest(self) -> Frame | None:
     with self._lock:
@@ -160,6 +174,8 @@ class _Args:
   fps: int = config.D405_FPS
   preset: str = "default"
   depth_units: float = 1e-4
+  infrared: bool = False
+  """Also stream the raw left infrared imager; see ``Frame.ir``."""
   filters: bool = False
   """Raw, because the noise model was fitted to raw.  Turning the stock spatial
   and temporal filters on here would make the robot's depth quieter than the
