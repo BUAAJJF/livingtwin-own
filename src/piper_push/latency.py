@@ -28,10 +28,10 @@ redrawn at the episode boundary.  One control step is 20 ms at the task's
 from __future__ import annotations
 
 import dataclasses
-import math
-from dataclasses import dataclass
 
 import torch
+
+from piper_push import prior
 
 CONTROL_HZ = 50.0
 STEP_MS = 1000.0 / CONTROL_HZ
@@ -50,122 +50,32 @@ that posterior has been produced, and in the runners that construct the target
 domain in the first place."""
 
 
-@dataclass(frozen=True)
-class LatencyPrior:
-  """A categorical distribution over :data:`LAGS`, in control steps."""
+class LatencyPrior(prior.CategoricalPrior):
+  """A categorical distribution over :data:`LAGS`, in control steps.
 
-  probs: tuple[float, ...]
+  The algebra -- mixing, temperature-scaled construction from costs,
+  fingerprinting -- is :class:`piper_push.prior.CategoricalPrior`, shared with
+  the servo-damping axis of Phase WM1-B.  What is here is the lag-specific
+  reading of it: the buffer needs a maximum, and a report wants milliseconds.
+  """
 
-  def __post_init__(self) -> None:
-    if len(self.probs) != len(LAGS):
-      raise ValueError(f"expected {len(LAGS)} probabilities, got {len(self.probs)}")
-    if any(p < 0.0 for p in self.probs):
-      raise ValueError(f"negative probability in {self.probs}")
-    total = sum(self.probs)
-    if not math.isclose(total, 1.0, abs_tol=1e-6):
-      raise ValueError(f"probabilities sum to {total}, not 1")
-
-  # -- constructors ---------------------------------------------------------
-
-  @classmethod
-  def point(cls, lag: int) -> "LatencyPrior":
-    if lag not in LAGS:
-      raise ValueError(f"{lag} is not one of {LAGS}")
-    return cls(tuple(1.0 if v == lag else 0.0 for v in LAGS))
-
-  @classmethod
-  def uniform(cls) -> "LatencyPrior":
-    return cls(tuple(1.0 / len(LAGS) for _ in LAGS))
-
-  @classmethod
-  def from_logits(cls, logits, temperature: float = 1.0) -> "LatencyPrior":
-    t = torch.as_tensor(logits, dtype=torch.float64).flatten()
-    p = torch.softmax(t / temperature, dim=0)
-    return cls(tuple(float(x) for x in p))
-
-  @classmethod
-  def from_scores(cls, scores, temperature: float = 1.0,
-                  prior: "LatencyPrior | None" = None) -> "LatencyPrior":
-    """``q(theta) ~ p(theta) * exp(-S(theta) / temperature)``.
-
-    Scores are costs, so the sign is flipped relative to
-    :meth:`from_logits`.  The base measure defaults to uniform, which is the
-    honest one for inference: a base measure peaked at the source domain would
-    make the method look better exactly where it should look worse.
-    """
-    s = torch.as_tensor(scores, dtype=torch.float64).flatten()
-    logp = -s / max(temperature, 1e-12)
-    if prior is not None:
-      logp = logp + torch.log(torch.as_tensor(prior.probs, dtype=torch.float64)
-                              .clamp_min(1e-300))
-    return cls(tuple(float(x) for x in torch.softmax(logp, dim=0)))
-
-  # -- combination ----------------------------------------------------------
-
-  def mix(self, other: "LatencyPrior", alpha: float) -> "LatencyPrior":
-    """``alpha * self + (1 - alpha) * other``."""
-    if not 0.0 <= alpha <= 1.0:
-      raise ValueError(f"alpha must be in [0, 1], got {alpha}")
-    return LatencyPrior(tuple(alpha * a + (1.0 - alpha) * b
-                              for a, b in zip(self.probs, other.probs)))
-
-  # -- summaries ------------------------------------------------------------
-
-  @property
-  def argmax(self) -> int:
-    return LAGS[max(range(len(LAGS)), key=lambda i: self.probs[i])]
-
-  @property
-  def entropy_bits(self) -> float:
-    return float(-sum(p * math.log2(p) for p in self.probs if p > 0.0))
+  VALUES = LAGS
+  UNIT = "control steps"
 
   @property
   def mean_lag(self) -> float:
-    return float(sum(p * v for p, v in zip(self.probs, LAGS)))
-
-  def mass(self, lag: int) -> float:
-    return float(self.probs[LAGS.index(lag)])
-
-  def is_point_at(self, lag: int, tol: float = 1e-9) -> bool:
-    return abs(self.mass(lag) - 1.0) <= tol
-
-  def total_variation(self, other: "LatencyPrior") -> float:
-    return 0.5 * sum(abs(a - b) for a, b in zip(self.probs, other.probs))
-
-  def fingerprint(self, places: int = 3) -> tuple[float, ...]:
-    """Rounded probabilities, for de-duplicating adaptation runs.
-
-    Two methods whose adaptation distributions round to the same vector would
-    produce the *same* PPO run, not merely a similar one.  Training both and
-    reporting them as independent evidence would be inventing agreement.
-    """
-    return tuple(round(p, places) for p in self.probs)
-
-  # -- use ------------------------------------------------------------------
-
-  def sample(self, n: int, generator: torch.Generator | None = None,
-             device: str | torch.device = "cpu") -> torch.Tensor:
-    w = torch.tensor(self.probs, dtype=torch.float64)
-    idx = torch.multinomial(w, n, replacement=True, generator=generator)
-    return torch.tensor(LAGS, dtype=torch.long)[idx].to(device)
-
-  @property
-  def support(self) -> tuple[int, ...]:
-    return tuple(v for v, p in zip(LAGS, self.probs) if p > 0.0)
+    return self.mean
 
   @property
   def max_lag(self) -> int:
-    return max(self.support)
+    return int(max(self.support))
 
   def to_json(self) -> dict:
-    return {
-      "lags": list(LAGS),
-      "probs": list(self.probs),
-      "argmax": self.argmax,
-      "mean_lag_steps": self.mean_lag,
-      "mean_lag_ms": self.mean_lag * STEP_MS,
-      "entropy_bits": self.entropy_bits,
-    }
+    d = super().to_json()
+    d["lags"] = list(LAGS)
+    d["mean_lag_steps"] = self.mean
+    d["mean_lag_ms"] = self.mean * STEP_MS
+    return d
 
 
 P_SOURCE = LatencyPrior.point(0)
