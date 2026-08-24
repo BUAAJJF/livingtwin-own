@@ -589,6 +589,10 @@ def collect(args) -> int:
 
   reader = sensor.Reader(serial=args.serial)
   reader.wait_for_first()
+  # Connected but deliberately not enabled: a disabled PiPER is back-drivable,
+  # so the poses are set by moving the arm with a hand, and the drives still
+  # report their angles.  Enabling it here would mean jogging a robot towards a
+  # fixed camera with a board on the end, one pose at a time.
   arm = robot.PiperArm(args.can) if not args.dry_run else None
   if arm is not None:
     arm.connect()
@@ -609,6 +613,7 @@ def collect(args) -> int:
   print(f"board: {board.describe()}")
   print(f"{len(records)} pose(s) already recorded.  Move the arm so the board "
         "is fully visible, then press enter.  'q' to stop.")
+  print("The arm is connected but NOT enabled -- move it by hand.")
   print("Vary the ORIENTATION, not just the position: hand-eye is determined "
         f"by rotation and this needs at least {MIN_ROT_SPAN_DEG:.0f} degrees "
         "of spread.")
