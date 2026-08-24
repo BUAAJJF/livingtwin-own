@@ -33,7 +33,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from piper_push import latency
+from piper_push import damping, latency
 
 SEEDS = (42, 20260824, 31415927)
 """Training seeds.
@@ -46,9 +46,23 @@ path against runs from the other, and calling the difference a method effect,
 is exactly the kind of thing that is invisible afterwards."""
 
 
-def load_posteriors(path: Path) -> dict[str, latency.LatencyPrior]:
+# Which simulator parameter the plan is about.  WM1-A's observation delay and
+# WM1-B's servo damping differ in their candidate set, their target and their
+# source prior, and in nothing else this script does.
+AXES = {
+  # class, target value, source prior, training flag, evaluation flag
+  "obs_latency_steps": (latency.LatencyPrior, latency.TARGET_LAG,
+                        latency.P_SOURCE, "--latency-probs",
+                        "--obs-latency-steps"),
+  "servo_damping_scale": (damping.DampingPrior, damping.TARGET,
+                          damping.P_SOURCE, "--damping-probs",
+                          "--servo-damping-scale"),
+}
+
+
+def load_posteriors(path: Path, cls) -> dict:
   raw = json.loads(path.read_text())
-  return {k: latency.LatencyPrior(tuple(v["probs"])) for k, v in raw.items()}
+  return {k: cls(tuple(v["probs"])) for k, v in raw.items()}
 
 
 def main() -> int:
@@ -76,14 +90,16 @@ def main() -> int:
   p.add_argument("--only", default=None,
                  help="comma-separated method names to keep, for extending a "
                       "configuration that already has results")
+  p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
   p.add_argument("--out", required=True)
   a = p.parse_args()
+  PRIOR_CLS, TARGET, P_SOURCE, PROBS_FLAG, EVAL_FLAG = AXES[a.axis]
 
   # The anchor stage is the two runs that do not depend on any posterior --
   # the oracle and a refit conditioned on the source prior -- so it can be
   # planned and launched before inference has finished.
   post = ({} if a.stage == "anchor"
-          else load_posteriors(Path(a.posteriors)))
+          else load_posteriors(Path(a.posteriors), PRIOR_CLS))
   want = [m for m in a.methods.split(",") if m in post]
   missing = [m for m in a.methods.split(",") if m not in post]
   if missing and a.stage != "anchor":
@@ -111,14 +127,15 @@ def main() -> int:
   jobs: dict[tuple, dict] = {}
   for m in want:
     for al in alphas:
-      mixed = post[m].mix(latency.P_SOURCE, al)
+      mixed = post[m].mix(P_SOURCE, al)
       key = (mixed.fingerprint(), al)
       job = jobs.setdefault(key, {
         "probs": list(mixed.probs), "alpha": al, "methods": [],
         "prior": mixed.to_json()})
       job["methods"].append(m)
 
-  if a.only and "ORACLE" not in {m.strip() for m in a.only.split(",")}:
+  only = {m.strip() for m in a.only.split(",")} if a.only else set()
+  if a.only and not ({"KNOWN_PARAM", "ORACLE"} & only):
     pass_oracle = False
   else:
     pass_oracle = True
@@ -127,21 +144,21 @@ def main() -> int:
   # Known-parameter target-only: the same budget, from the same checkpoint,
   # told the answer.  Not an upper bound -- Phase WM1-A's alpha = 0.75 mixture
   # beats it in both domains -- so it is a reference and is named as one.
-  oracle = latency.LatencyPrior.point(latency.TARGET_LAG)
+  known = PRIOR_CLS.point(TARGET)
   if pass_oracle:
-    key = (oracle.fingerprint(), 1.0)
-    job = jobs.setdefault(key, {"probs": list(oracle.probs), "alpha": 1.0,
-                                "methods": [], "prior": oracle.to_json()})
-    job["methods"].append("ORACLE")
+    key = (known.fingerprint(), 1.0)
+    job = jobs.setdefault(key, {"probs": list(known.probs), "alpha": 1.0,
+                                "methods": [], "prior": known.to_json()})
+    job["methods"].append("KNOWN_PARAM")
 
   # p_source itself: adapting to the *wrong* answer with the full budget, so
   # that "PPO for 600 iterations helps a bit whatever you condition on" is
   # measured rather than assumed.
   if not a.only or "B0_prior_refit" in {m.strip() for m in a.only.split(",")}:
-    key = (latency.P_SOURCE.fingerprint(), 1.0)
-    job = jobs.setdefault(key, {"probs": list(latency.P_SOURCE.probs),
+    key = (P_SOURCE.fingerprint(), 1.0)
+    job = jobs.setdefault(key, {"probs": list(P_SOURCE.probs),
                                 "alpha": 1.0, "methods": [],
-                                "prior": latency.P_SOURCE.to_json()})
+                                "prior": P_SOURCE.to_json()})
     job["methods"].append("B0_prior_refit")
 
   # The tag is a function of the distribution and the seed and nothing else,
@@ -156,12 +173,16 @@ def main() -> int:
       probs = ",".join(f"{x:.6f}" for x in job["probs"])
       tag = f"q{h}_a{job['alpha']:.2f}_s{seed}"
       out.append({**job, "tag": tag, "seed": seed, "probs_arg": probs,
-                  "iterations": a.iterations})
+                  "iterations": a.iterations, "axis": a.axis,
+                  "probs_flag": PROBS_FLAG, "eval_flag": EVAL_FLAG,
+                  "eval_value": TARGET})
 
   path = Path(a.out)
   path.parent.mkdir(parents=True, exist_ok=True)
   path.write_text(json.dumps(
-    {"stage": a.stage, "seeds": list(seeds), "alphas": alphas,
+    {"stage": a.stage, "axis": a.axis, "probs_flag": PROBS_FLAG,
+     "eval_flag": EVAL_FLAG, "eval_target_value": TARGET,
+     "seeds": list(seeds), "alphas": alphas,
      "n_distinct": len(jobs), "n_runs": len(out), "jobs": out}, indent=1))
 
   print(f"  {len(want)} methods x {len(alphas)} alphas -> "

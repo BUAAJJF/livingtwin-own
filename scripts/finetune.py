@@ -33,7 +33,7 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
-from piper_push import latency, perturb
+from piper_push import damping, latency, perturb
 from piper_push.checkpoints import as_actor_checkpoint
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
@@ -80,6 +80,7 @@ def main() -> int:
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
   perturb.add_mismatch_args(p)
   latency.add_latency_args(p)
+  damping.add_damping_args(p)
   a = p.parse_args()
 
   if not a.resume and not a.student:
@@ -105,8 +106,10 @@ def main() -> int:
     print(f"[INFO] training cadence: redraw_on_place={redraw}")
 
   # Session-persistent simulator mismatch to TRAIN in.  This is what makes the
-  # Phase WM0 oracle possible: fine-tune with the target parameters known, to
-  # measure the ceiling a learned calibration would be trying to reach.
+  # Phase WM0 known-parameter reference possible: fine-tune with the target
+  # parameters supplied, to measure what a learned calibration is being
+  # compared against.  It is a reference point and not a ceiling -- WM1-A's
+  # posterior-guided run beat it in both domains.
   mismatch = perturb.mismatch_from_args(a)
   applied_mismatch = perturb.apply_session_mismatch(env_cfg, mismatch)
   if applied_mismatch:
@@ -123,6 +126,18 @@ def main() -> int:
           f"(mean {prior.mean_lag * latency.STEP_MS:.0f} ms)")
   if applied_prior and mismatch.obs_latency_steps:
     p.error("--latency-probs and --obs-latency-steps both set the same axis")
+
+  # Phase WM1-B's axis, installed the same way.  A point mass at nominal
+  # returns {} and leaves the config untouched, so a latency-only run is
+  # byte-identical to what it was before this axis existed.
+  dprior = damping.prior_from_args(a)
+  applied_damping = damping.apply_damping_prior(
+    env_cfg, dprior, seed=getattr(a, "damping_seed", 0) or a.seed)
+  if applied_damping:
+    print(f"[INFO] training under servo-damping prior: {dprior.probs} "
+          f"over {damping.VALUES}")
+  if applied_damping and mismatch.servo_damping_scale != 1.0:
+    p.error("--damping-probs and --servo-damping-scale both set the same axis")
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger

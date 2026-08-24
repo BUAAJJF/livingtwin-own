@@ -57,6 +57,7 @@ TAG = re.compile(r"^(q[0-9a-f]+)_a([0-9.]+)_s(\d+)_(target|retention)__r(\d+)$")
 
 DISPLAY = {
   "ORACLE": "known-parameter target-only adaptation",
+  "KNOWN_PARAM": "known-parameter target-only adaptation",
   "ORACLE_MIX": "known-parameter mixture",
   "DA": "decision-aware",
   "B1b": "broad posterior (B1b)",

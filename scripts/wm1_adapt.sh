@@ -70,14 +70,22 @@ echo "=== $PLAN: $N jobs, shard $SHARD of $NSHARD on cuda:$GPU"
 
 for ((i = 0; i < N; i++)); do
   [ $((i % NSHARD)) -eq "$SHARD" ] || continue
-  read -r TAG PROBS SEED ITERS METHODS < <("$PY" -c "
+  # The axis flag comes from the plan.  Hard-coding `--latency-probs` would
+  # have silently trained WM1-B's damping runs at nominal damping while
+  # reporting them as adapted, which is the kind of failure that produces a
+  # clean-looking table and a wrong conclusion.
+  read -r TAG PROBS SEED ITERS FLAG SEEDFLAG EFLAG EVAL METHODS < <("$PY" -c "
 import json
 j = json.load(open('$PLAN'))['jobs'][$i]
-print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
+flag = j.get('probs_flag', '--latency-probs')
+print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
+      flag.replace('-probs', '-seed'),
+      j.get('eval_flag', '--obs-latency-steps'), j.get('eval_value', 3),
       '+'.join(j['methods']))")
-  [ -n "$TAG" ] && [ -n "$PROBS" ] && [ -n "$SEED" ] \
-    || { echo "!!! job $i did not parse: tag='$TAG' probs='$PROBS'" >&2; exit 4; }
-  echo "=== [gpu $GPU] job $i: $TAG  probs=$PROBS  seed=$SEED  ($METHODS)"
+  [ -n "$TAG" ] && [ -n "$PROBS" ] && [ -n "$SEED" ] && [ -n "$FLAG" ] \
+    && [ -n "$EFLAG" ] && [ -n "$EVAL" ] \
+    || { echo "!!! job $i did not parse: tag='$TAG' probs='$PROBS' flag='$FLAG' eval='$EFLAG $EVAL'" >&2; exit 4; }
+  echo "=== [gpu $GPU] job $i: $TAG  $FLAG=$PROBS  seed=$SEED  ($METHODS)"
 
   # A configuration appears in more than one plan -- the oracle is in the
   # anchor stage, in the alpha screening at alpha = 1 whenever the posterior is
@@ -97,7 +105,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
     micromamba run -n mjlab python scripts/finetune.py \
       --task "$TASK" --resume "$BASE" \
       --num-envs 512 --iterations "$ITERS" \
-      --latency-probs "$PROBS" --latency-seed "$SEED" --seed "$SEED" \
+      "$FLAG" "$PROBS" "$SEEDFLAG" "$SEED" --seed "$SEED" \
       --run-name "wm1_$TAG" --device "cuda:$GPU" --logger tensorboard \
       > "logs/wm1_adapt/$TAG.train.log" 2>&1 \
       || { echo "!!! $TAG training FAILED" >&2; exit 5; }
@@ -131,12 +139,15 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'],
   # oracle -- is one run and one set of evaluations, not two.
   r=0
   for SEED_E in 20260823 31415926 27182818; do
-    # target: the hidden domain, 60 ms of observation delay
+    # target: the hidden domain -- 60 ms of observation delay for WM1-A,
+    # servo damping 0.75 for WM1-B.  Read from the plan, because a hard-coded
+    # flag here would evaluate every WM1-B run in the *nominal* domain and
+    # report the result as a recovery.
     if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
       wait_for_gpu
       micromamba run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
-        --obs-latency-steps 3 \
+        "$EFLAG" "$EVAL" \
         --label "${TAG}_target__r$r" --json "$OUT/${TAG}_target__r$r.json" \
         > "$OUT/${TAG}_target__r$r.log" 2>&1
     fi

@@ -323,7 +323,7 @@ def rederived_thresholds(analysis: dict | None, formal: dict | None) -> dict:
   oracle_t = oracle_r = None
   if formal:
     for job in formal["jobs"]:
-      if "ORACLE" in job["methods"]:
+      if {"ORACLE", "KNOWN_PARAM"} & set(job["methods"]):
         cfg = re.sub(r"_s\d+$", "", job["tag"])
         oracle_t, oracle_r = _group(analysis, cfg, "target"), _group(
           analysis, cfg, "retention")
