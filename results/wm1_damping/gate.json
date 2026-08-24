@@ -1,0 +1,43 @@
+{
+ "criteria": {
+  "C1  identification clears its controls": {
+   "checked": true,
+   "best": "abl_latent_only",
+   "best_balanced": 1.0,
+   "worst_control": "ctrl_wm_shuffled",
+   "control_balanced": 0.4895833333333333,
+   "margin": 0.5104166666666667,
+   "pass": true,
+   "note": "ctrl_wm_shuffled is not a chance-level control on this axis -- the magnitude of world-model prediction error differs by domain even unconditioned -- so the margin is taken against the strongest control, not the mean of them"
+  },
+  "C2  risk-aware trips < trajectory matching": {
+   "checked": false,
+   "why": "need both risk_aware and trajectory_matching in the target domain, on 2+ seeds each"
+  },
+  "C3  risk-aware trips < broad domain randomisation": {
+   "checked": false,
+   "why": "need both risk_aware and broad_dr in the target domain, on 2+ seeds each"
+  },
+  "C4  target throughput not paid away": {
+   "checked": false,
+   "why": "no risk-aware runs in target"
+  },
+  "C5  source retention not paid away": {
+   "checked": false,
+   "why": "no risk-aware runs in retention"
+  },
+  "C6  default-off with provenance": {
+   "checked": true,
+   "point_mass_at_nominal_installs_nothing": true,
+   "writes_from_the_default_field": true,
+   "gripper_skipped": true,
+   "risk_head_asserts_deployable": true,
+   "tilt_records_its_provenance": true,
+   "pass": true
+  }
+ },
+ "roles_found": [],
+ "min_seeds": 8,
+ "anchors": {},
+ "verdict": "NOT RUN"
+}
