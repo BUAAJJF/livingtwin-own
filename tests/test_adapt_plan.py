@@ -112,3 +112,33 @@ def test_seeds_are_settable_and_recorded(tmp_path, axis):
            "--seeds", "7,13,101")
   assert d["seeds"] == [7, 13, 101]
   assert {j["seed"] for j in d["jobs"]} == {7, 13, 101}
+
+
+# ---------------------------------------------------------------------------
+# Where the results land
+# ---------------------------------------------------------------------------
+
+
+def test_the_runner_writes_beside_its_plan():
+  """`OUT` was `results/wm1_latency/adapt`, a constant.
+
+  Pointed at a WM1-B plan it put damping evaluations into WM1-A's directory,
+  where `wm1_seeds.py` globs `*__r*.json` -- two phases' trip rates silently
+  pooled into one number, with matching filenames and no error anywhere.
+  """
+  src = RUNNER.read_text()
+  assert "OUT=results/wm1_latency/adapt" not in src, (
+    "the output directory is hard-coded to WM1-A again")
+  assert 'OUT=${OUT:-$(dirname "$PLAN")}' in src
+
+
+def test_the_queue_writes_beside_its_plan():
+  from pathlib import Path as _P
+
+  src = (ROOT / "scripts" / "wm1_queue.py").read_text()
+  assert "ADAPT = Path(a.plan).parent" in src, (
+    "the queue's output directory no longer follows its plan")
+  # and the default is only a default
+  assert src.index("ADAPT = Path(a.plan).parent") > src.index(
+    'ADAPT = Path("results/wm1_latency/adapt")')
+  del _P

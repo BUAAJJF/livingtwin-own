@@ -28,6 +28,10 @@ import time
 from pathlib import Path
 
 ADAPT = Path("results/wm1_latency/adapt")
+"""Default only.  `main` replaces it with the plan's own directory, so a
+WM1-B plan does not write its one-job shards -- or its evaluations -- into
+WM1-A's results.  They pooled silently when this was a constant: `wm1_seeds.py`
+globs `*__r*.json`, and two phases' trip rates became one number."""
 RUNS = Path("logs/rsl_rl/piperx_pick_place_vision")
 
 
@@ -111,6 +115,8 @@ def main() -> int:
   p.add_argument("--backoff", type=float, default=900.0,
                  help="seconds to leave a tag alone after it fails")
   a = p.parse_args()
+  global ADAPT
+  ADAPT = Path(a.plan).parent
 
   plan = json.loads(Path(a.plan).read_text())
   jobs = plan["jobs"]

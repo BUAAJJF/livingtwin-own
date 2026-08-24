@@ -51,7 +51,11 @@ wait_for_gpu() {
 
 BASE=logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt
 TASK=Mjlab-Pick-Place-PiperX-Vision
-OUT=results/wm1_latency/adapt
+# The output directory follows the PLAN, not the phase this script was first
+# written for.  Hard-coded, it put WM1-B's damping evaluations into WM1-A's
+# adapt directory, where `wm1_seeds.py` globs `*__r*.json` -- two phases'
+# results pooled into one trip rate, silently.
+OUT=${OUT:-$(dirname "$PLAN")}
 mkdir -p "$OUT" logs/wm1_adapt
 
 # The env's interpreter directly, not `micromamba run`: that wrapper merges
