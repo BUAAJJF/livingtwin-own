@@ -35,7 +35,26 @@ from pathlib import Path
 
 import torch
 
-from piper_push import latency, wm_data, wm_infer, wm_model
+from piper_push import damping, latency, risk, wm_data, wm_infer, wm_model
+
+# Which simulator parameter this run is about.  Phase WM1-A's observation delay
+# and Phase WM1-B's servo damping differ in their candidate set, their target
+# and how a draw reaches the simulator, and in nothing else that this script
+# does -- so the script takes the axis as an argument rather than being copied.
+AXES = {
+  "obs_latency_steps": (latency.LatencyPrior, latency.LAGS, TARGET,
+                        latency.P_SOURCE),
+  "servo_damping_scale": (damping.DampingPrior, damping.VALUES, damping.TARGET,
+                          damping.P_SOURCE),
+}
+AXIS = "obs_latency_steps"
+PRIOR_CLS, VALUES, TARGET, P_SOURCE = AXES[AXIS]
+
+
+def set_axis(name: str) -> None:
+  global AXIS, PRIOR_CLS, VALUES, TARGET, P_SOURCE
+  AXIS = name
+  PRIOR_CLS, VALUES, TARGET, P_SOURCE = AXES[name]
 
 BURN_IN = 8
 HORIZON = 16
@@ -52,7 +71,7 @@ of them.  One second is two non-overlapping windows."""
 # The components a session's score vector is built from.  Named here so that
 # a method is a *subset of these names* plus weights, and adding a method
 # cannot silently change what another one reads.
-COMPONENTS = ("state", "latent", "action", "clf",
+COMPONENTS = ("state", "latent", "action", "risk", "clf",
               "state_ctrl", "latent_ctrl", "action_ctrl", "clf_shuf", "clf_done")
 
 METHODS: dict[str, dict] = {
@@ -66,6 +85,11 @@ METHODS: dict[str, dict] = {
   # number.  Free: the components are already cached.
   "abl_latent_only": {"latent": 1.0},
   "abl_action_only": {"action": 1.0},
+  # Phase WM1-B.  The risk-aware score asks what the *safety* consequence of
+  # the predicted future would have been, which is the question a tail-only
+  # mismatch makes different from every other score here.
+  "M5_risk_aware": {"latent": None, "action": None, "risk": None},  # fitted
+  "abl_risk_only": {"risk": 1.0},
   # Controls.
   "ctrl_wm_shuffled":  {"state_ctrl": 1.0, "latent_ctrl": 1.0,
                         "action_ctrl": 1.0},
@@ -81,7 +105,7 @@ METHODS: dict[str, dict] = {
 
 @torch.no_grad()
 def session_scores(v: wm_infer.SessionView, ens, ens_ctrl, head, clfs,
-                   batch: int = 256) -> dict[str, torch.Tensor]:
+                   batch: int = 256, risk_head=None) -> dict[str, torch.Tensor]:
   """``(n_windows, n_candidates)`` for every component."""
   starts = v.windows(LENGTH)
   out = {k: [] for k in COMPONENTS}
@@ -89,18 +113,21 @@ def session_scores(v: wm_infer.SessionView, ens, ens_ctrl, head, clfs,
     sel = starts[i:i + batch]
     b = v.stack(sel, LENGTH)                 # (LENGTH, B, C)
     for tag, e in (("", ens), ("_ctrl", ens_ctrl)):
+      keys = ("state", "latent", "action", "risk") if not tag else (
+        "state", "latent", "action")
       if e is None:
-        for k in ("state", "latent", "action"):
-          out[k + tag].append(torch.zeros(len(sel), len(latency.LAGS)))
+        for k in keys:
+          out[k + tag].append(torch.zeros(len(sel), len(VALUES)))
         continue
-      per = _model_scores_per_window(e, head, b)
-      for k in ("state", "latent", "action"):
+      per = _model_scores_per_window(e, head, b,
+                                     risk_head if not tag else None)
+      for k in keys:
         out[k + tag].append(per[k].cpu())
     for name, key in (("classifier", "clf"), ("shuffled", "clf_shuf"),
                       ("done_only", "clf_done")):
       m = clfs.get(name)
       if m is None:
-        out[key].append(torch.zeros(len(sel), len(latency.LAGS)))
+        out[key].append(torch.zeros(len(sel), len(VALUES)))
         continue
       feed = dict(b)
       dev_ = v.done.device
@@ -109,22 +136,22 @@ def session_scores(v: wm_infer.SessionView, ens, ens_ctrl, head, clfs,
       feed["done"] = v.done[ts].float()
       # Cost, not logit: the rest of the pipeline minimises.
       out[key].append((-torch.log_softmax(m(feed), dim=-1)).cpu())
-  return {k: (torch.cat(v_) if v_ else torch.zeros(0, len(latency.LAGS)))
+  return {k: (torch.cat(v_) if v_ else torch.zeros(0, len(VALUES)))
           for k, v_ in out.items()}
 
 
 @torch.no_grad()
-def _model_scores_per_window(ens, head, b):
+def _model_scores_per_window(ens, head, b, risk_head=None):
   """:func:`wm_infer.model_scores` without the average over windows."""
   norms = ens.norms
   z, p = norms["z"](b["enc"]), norms["p"](b["proprio"])
   a, e = norms["a"](b["action"]), norms["e"](b["servo"])
   lo, hi = BURN_IN, BURN_IN + HORIZON
   nb = z.shape[1]
-  out = {k: torch.zeros(nb, len(latency.LAGS), device=z.device)
-         for k in ("state", "latent", "action")}
-  for ci, c in enumerate(latency.LAGS):
-    theta = torch.full((nb,), c, dtype=torch.long, device=z.device)
+  out = {k: torch.zeros(nb, len(VALUES), device=z.device)
+         for k in ("state", "latent", "action", "risk")}
+  for ci, c in enumerate(VALUES):
+    theta = torch.full((nb,), ci, dtype=torch.long, device=z.device)
     for m in ens.members:
       _, h = m.teacher_forced(z[:lo], p[:lo], a[:lo], theta, None)
       (z_mu, z_lv, dp, p_lv, e_mu, e_lv), _ = m.teacher_forced(
@@ -142,6 +169,23 @@ def _model_scores_per_window(ens, head, b):
         real = b["action"][lo + 1:hi + 1]
         d = ((act.reshape(real.shape) - real) ** 2).sum(-1).mean(0)
         out["action"][:, ci] += d
+      if risk_head is not None:
+        # What the *safety* consequence of the predicted future would have
+        # been, against the one that happened.  Same shape as the action score
+        # with the risk head in place of the actor: replace the window's last
+        # observed step with the candidate's prediction and ask C_obs both
+        # ways.  A tail-only mismatch is exactly the case where the plant's
+        # state trajectory and the policy's action barely move and the risk
+        # does.
+        real_w = {k: b[k] for k in risk.RiskHead.CHANNELS}
+        pred_w = {k: v.clone() for k, v in real_w.items()}
+        pred_w["enc"][-1] = pred_enc[-1]
+        pred_w["proprio"][-1] = (
+          b["proprio"][hi - 1]
+          + dp[-1] * norms["p"].std)
+        p_real = risk_head.probability(real_w)
+        p_pred = risk_head.probability(pred_w)
+        out["risk"][:, ci] += (p_real - p_pred).abs()
   for k in out:
     out[k] /= len(ens.members)
   return out
@@ -168,11 +212,12 @@ def combine(comp: dict[str, torch.Tensor], k: int,
     part = w * x.sum(0)
     total = part if total is None else total + part
   if total is None:
-    return [0.0] * len(latency.LAGS)
+    return [0.0] * len(VALUES)
   return [float(x) for x in total]
 
 
-def fit_da_weights(cal_rows, budget_k, grid_steps: int = 6):
+def fit_da_weights(cal_rows, budget_k, grid_steps: int = 6,
+                   names=("state", "latent", "action")):
   """Choose (lambda_state, lambda_latent, lambda_action) and the temperature.
 
   A simplex grid, because three weights and one temperature over a few hundred
@@ -184,11 +229,11 @@ def fit_da_weights(cal_rows, budget_k, grid_steps: int = 6):
     for j in range(grid_steps + 1 - i):
       ls, lz = i / grid_steps, j / grid_steps
       la = 1.0 - ls - lz
-      w = {"state": ls, "latent": lz, "action": la}
+      w = dict(zip(names, (ls, lz, la)))
       rows = [combine(c, budget_k(c), w) for c, _ in cal_rows]
       truths = [y for _, y in cal_rows]
-      t = wm_infer.fit_temperature(rows, truths)
-      total = sum(wm_infer.nll(wm_infer.posterior(r, t), y)
+      t = wm_infer.fit_temperature(rows, truths, cls=PRIOR_CLS)
+      total = sum(wm_infer.nll(wm_infer.posterior(r, t, cls=PRIOR_CLS), y)
                   for r, y in zip(rows, truths))
       if total < best[0]:
         best = (total, w, t)
@@ -196,20 +241,20 @@ def fit_da_weights(cal_rows, budget_k, grid_steps: int = 6):
 
 
 def metrics(rows, truths, temperature, tag) -> dict:
-  qs = [wm_infer.posterior(r, temperature) for r in rows]
+  qs = [wm_infer.posterior(r, temperature, cls=PRIOR_CLS) for r in rows]
   preds = [q.argmax for q in qs]
   n = len(qs)
   return {
     "method": tag,
     "n_sessions": n,
     "top1": sum(1 for q, y in zip(qs, truths) if q.argmax == y) / max(n, 1),
-    "balanced_accuracy": wm_infer.balanced_accuracy(preds, truths),
+    "balanced_accuracy": wm_infer.balanced_accuracy(preds, truths, VALUES),
     "mass_on_truth": sum(q.mass(y) for q, y in zip(qs, truths)) / max(n, 1),
     "entropy_bits": sum(q.entropy_bits for q in qs) / max(n, 1),
     "nll": sum(wm_infer.nll(q, y) for q, y in zip(qs, truths)) / max(n, 1),
     "brier": sum(wm_infer.brier(q, y) for q, y in zip(qs, truths)) / max(n, 1),
     "ece": wm_infer.ece(qs, truths),
-    "confusion": wm_infer.confusion(preds, truths),
+    "confusion": wm_infer.confusion(preds, truths, VALUES),
     "temperature": temperature,
     "target_only": _target_only(qs, truths),
   }
@@ -224,17 +269,17 @@ def _target_only(qs, truths) -> dict:
   what pooling every session gives.  If the two differ, the adaptation result
   depends on which session was collected, and that has to be visible.
   """
-  sel = [i for i, y in enumerate(truths) if y == latency.TARGET_LAG]
+  sel = [i for i, y in enumerate(truths) if y == TARGET]
   if not sel:
     return {}
-  masses = [qs[i].mass(latency.TARGET_LAG) for i in sel]
+  masses = [qs[i].mass(TARGET) for i in sel]
   return {
     "n": len(sel),
-    "top1": sum(1 for i in sel if qs[i].argmax == latency.TARGET_LAG) / len(sel),
+    "top1": sum(1 for i in sel if qs[i].argmax == TARGET) / len(sel),
     "mass_on_truth": sum(masses) / len(sel),
     "mass_min": min(masses), "mass_max": max(masses),
     "mean_posterior": [sum(qs[i].probs[k] for i in sel) / len(sel)
-                       for k in range(len(latency.LAGS))],
+                       for k in range(len(VALUES))],
     "session0_posterior": list(qs[sel[0]].probs),
   }
 
@@ -243,7 +288,7 @@ def _target_only(qs, truths) -> dict:
 
 
 def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
-                   tag: str, limit_envs: int | None = None):
+                   tag: str, limit_envs: int | None = None, risk_head=None):
   if cache.exists():
     d = torch.load(cache, map_location="cpu", weights_only=False)
     print(f"  {tag}: {len(d)} cached session score sets")
@@ -253,7 +298,8 @@ def collect_scores(sessions, ens, ens_ctrl, head, clfs, device, cache: Path,
   for s, name in sessions:
     for env in range(min(s.n_envs, limit_envs or s.n_envs)):
       v = wm_infer.SessionView.from_session(s, env, 1e9, device=device)
-      comp = session_scores(v, ens, ens_ctrl, head, clfs)
+      comp = session_scores(v, ens, ens_ctrl, head, clfs,
+                            risk_head=risk_head)
       rows.append({"file": name, "env": env, "lag": s.lag,
                    "n_windows": int(comp["state"].shape[0]),
                    "comp": comp})
@@ -289,6 +335,9 @@ def main() -> int:
   p.add_argument("--checkpoint",
                  default="logs/rsl_rl/piperx_pick_place_vision/"
                          "2026-08-22_17-15-09_f3/model_1500.pt")
+  p.add_argument("--axis", default="obs_latency_steps", choices=sorted(AXES))
+  p.add_argument("--risk-head", default=None,
+                 help="path to risk_head.pt; enables the risk component")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--recompute", action="store_true")
   p.add_argument("--limit-envs", type=int, default=None,
@@ -296,6 +345,7 @@ def main() -> int:
                       "set is marked in its report and is not a formal result.")
   a = p.parse_args()
 
+  set_axis(a.axis)
   data, mdir, out = Path(a.data), Path(a.model), Path(a.out)
   out.mkdir(parents=True, exist_ok=True)
   dev = a.device
@@ -314,6 +364,13 @@ def main() -> int:
     m = wm_infer.DoneOnlyClassifier(saved["done_only"]["n_theta"])
     m.load_state_dict(saved["done_only"]["state_dict"])
     clfs["done_only"] = m.eval().to(dev)
+  risk_head = None
+  if a.risk_head and Path(a.risk_head).exists():
+    saved_r = torch.load(a.risk_head, map_location=dev, weights_only=False)
+    risk_head = risk.RiskHead.load(saved_r["risk"], dev)
+    print(f"  risk head: horizon {saved_r['risk']['horizon']} steps, "
+          f"trained on {len(saved_r)} variants")
+  print(f"  axis {AXIS}, candidates {VALUES}, target {TARGET}")
   print(f"  ensemble {len(ens.members)} members; controls: "
         f"wm={'yes' if ens_ctrl else 'NO'}, clf={sorted(clfs)}")
   print(f"  encoder latent split at {head.obs_dim_1d} "
@@ -332,7 +389,7 @@ def main() -> int:
     if a.recompute and cache.exists():
       cache.unlink()
     scores[s] = collect_scores(sess, ens, ens_ctrl, head, clfs, dev, cache, s,
-                               a.limit_envs)
+                               a.limit_envs, risk_head=risk_head)
 
   analytic = {s: analytic_rows(sess, head.obs_dim_1d, dev, a.limit_envs)
               for s, sess in splits.items()}
@@ -368,7 +425,8 @@ def main() -> int:
   (out / "inference_timing.json").write_text(json.dumps(timing, indent=1))
 
   # -- per budget -----------------------------------------------------------
-  report = {"budgets": {}, "smoke": a.limit_envs is not None,
+  report = {"axis": AXIS, "candidates": list(VALUES), "target": TARGET,
+            "budgets": {}, "smoke": a.limit_envs is not None,
             "length": LENGTH, "burn_in": BURN_IN,
             "horizon": HORIZON, "enc_split": head.obs_dim_1d,
             "n_members": len(ens.members),
@@ -383,16 +441,21 @@ def main() -> int:
     cal_rows = [(r["comp"], r["lag"]) for r in scores.get("cal", [])]
     if cal_rows:
       w_da, t_da, _ = fit_da_weights(cal_rows, k_of)
+      w_m5, t_m5, _ = fit_da_weights(cal_rows, k_of,
+                                     names=("latent", "action", "risk"))
     else:
       w_da, t_da = {"state": 1 / 3, "latent": 1 / 3, "action": 1 / 3}, 1.0
+      w_m5, t_m5 = {"latent": 1 / 3, "action": 1 / 3, "risk": 1 / 3}, 1.0
     entry["da_weights"] = w_da
+    entry["m5_weights"] = w_m5
 
     for name, weights in METHODS.items():
-      w = w_da if name == "DA" else weights
+      w = (w_da if name == "DA"
+           else w_m5 if name == "M5_risk_aware" else weights)
       cal_r = [combine(c, k_of(c), w) for c, _ in cal_rows]
       cal_y = [y for _, y in cal_rows]
-      temp = (t_da if name == "DA" else
-              (wm_infer.fit_temperature(cal_r, cal_y) if cal_r else 1.0))
+      temp = (t_da if name == "DA" else t_m5 if name == "M5_risk_aware" else
+              (wm_infer.fit_temperature(cal_r, cal_y, cls=PRIOR_CLS) if cal_r else 1.0))
       for split in ("test", "calh"):
         rows = [combine(r["comp"], k_of(r["comp"]), w) for r in scores.get(split, [])]
         truths = [r["lag"] for r in scores.get(split, [])]
@@ -410,32 +473,58 @@ def main() -> int:
         truths = [r["lag"] for r in rows]
         temp = 1.0
         if split == "cal":
-          temp = wm_infer.fit_temperature(sc, truths)
+          temp = wm_infer.fit_temperature(sc, truths, cls=PRIOR_CLS)
         else:
           cal_sc = [r["budgets"][bud][key] for r in analytic.get("cal", [])]
           cal_y = [r["lag"] for r in analytic.get("cal", [])]
           if cal_sc:
-            temp = wm_infer.fit_temperature(cal_sc, cal_y)
+            temp = wm_infer.fit_temperature(cal_sc, cal_y, cls=PRIOR_CLS)
         entry["methods"].setdefault(split, {})[
           {"b1a": "B1a_cmd_joint", "b1b": "B1b_img_proprio"}[key]] = metrics(
             sc, truths, temp, key)
+
+    # The broad-DR comparator: a fixed uniform posterior over the candidate
+    # set, which is what "do not identify anything, randomise instead" means.
+    # Not an estimator -- it reads nothing -- so it is constructed rather than
+    # scored, exactly like B0.
+    for split in ("test", "cal", "calh"):
+      truths = [r["lag"] for r in scores.get(split, [])] or [
+        r["lag"] for r in analytic.get(split, [])]
+      if not truths:
+        continue
+      qs = [PRIOR_CLS.uniform()] * len(truths)
+      preds = [q.argmax for q in qs]
+      entry["methods"].setdefault(split, {})["M2_broad"] = {
+        "method": "M2_broad", "n_sessions": len(truths),
+        "top1": sum(1 for q, y in zip(qs, truths) if q.argmax == y) / len(truths),
+        "balanced_accuracy": wm_infer.balanced_accuracy(preds, truths, VALUES),
+        "mass_on_truth": sum(q.mass(y) for q, y in zip(qs, truths)) / len(truths),
+        "entropy_bits": qs[0].entropy_bits,
+        "nll": sum(wm_infer.nll(q, y) for q, y in zip(qs, truths)) / len(truths),
+        "brier": sum(wm_infer.brier(q, y) for q, y in zip(qs, truths)) / len(truths),
+        "ece": wm_infer.ece(qs, truths),
+        "confusion": wm_infer.confusion(preds, truths, VALUES),
+        "temperature": float("nan"),
+        "target_only": _target_only(qs, truths),
+      }
 
     # B0: no target data at all.
     for split in ("test", "cal", "calh"):
       truths = [r["lag"] for r in analytic.get(split, [])]
       if truths:
-        qs = [latency.P_SOURCE] * len(truths)
+        qs = [P_SOURCE] * len(truths)
         entry["methods"].setdefault(split, {})["B0_prior"] = {
           "method": "B0_prior", "n_sessions": len(truths),
-          "top1": sum(1 for y in truths if y == 0) / len(truths),
+          "top1": sum(1 for y in truths if y == P_SOURCE.argmax) / len(truths),
           "balanced_accuracy": wm_infer.balanced_accuracy(
-            [0] * len(truths), truths),
+            [P_SOURCE.argmax] * len(truths), truths, VALUES),
           "mass_on_truth": sum(q.mass(y) for q, y in zip(qs, truths)) / len(truths),
           "entropy_bits": 0.0,
           "nll": sum(wm_infer.nll(q, y) for q, y in zip(qs, truths)) / len(truths),
           "brier": sum(wm_infer.brier(q, y) for q, y in zip(qs, truths)) / len(truths),
           "ece": wm_infer.ece(qs, truths),
-          "confusion": wm_infer.confusion([0] * len(truths), truths),
+          "confusion": wm_infer.confusion(
+            [P_SOURCE.argmax] * len(truths), truths, VALUES),
           "temperature": float("nan"),
           "target_only": _target_only(qs, truths),
         }
@@ -474,7 +563,7 @@ def main() -> int:
       continue
     def _norm(v):
       total = sum(v)
-      return latency.LatencyPrior(tuple(x / total for x in v))
+      return PRIOR_CLS(tuple(x / total for x in v))
 
     single = _norm(t["session0_posterior"])
     pooled = _norm(t["mean_posterior"])

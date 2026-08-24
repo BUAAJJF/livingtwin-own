@@ -318,8 +318,8 @@ def model_scores(ens: wm_model.Ensemble, head: wm_model.ActorHead | None,
 # ---------------------------------------------------------------------------
 
 
-def posterior(scores, temperature: float,
-              prior: latency.LatencyPrior | None = None) -> latency.LatencyPrior:
+def posterior(scores, temperature: float, prior=None,
+              cls=latency.LatencyPrior):
   """``q(theta) ~ p(theta) exp(-S(theta) / T)``, with the scores centred first.
 
   Centring changes nothing about the result and everything about whether it
@@ -327,15 +327,15 @@ def posterior(scores, temperature: float,
   raw exponent overflows long before the ratio does.
   """
   s = torch.as_tensor(scores, dtype=torch.float64).flatten()
-  return latency.LatencyPrior.from_scores(s - s.min(), temperature, prior)
+  return cls.from_scores(s - s.min(), temperature, prior)
 
 
-def brier(q: latency.LatencyPrior, truth: int) -> float:
-  onehot = [1.0 if v == truth else 0.0 for v in latency.LAGS]
+def brier(q, truth) -> float:
+  onehot = [1.0 if v == truth else 0.0 for v in q.values]
   return float(sum((a - b) ** 2 for a, b in zip(q.probs, onehot)))
 
 
-def nll(q: latency.LatencyPrior, truth: int, floor: float = 1e-12) -> float:
+def nll(q, truth, floor: float = 1e-12) -> float:
   import math
   return float(-math.log(max(q.mass(truth), floor)))
 
@@ -359,26 +359,26 @@ def ece(qs: list[latency.LatencyPrior], truths: list[int],
   return float(total)
 
 
-def balanced_accuracy(pred: list[int], truth: list[int]) -> float:
+def balanced_accuracy(pred, truth, values=latency.LAGS) -> float:
   """Per-class recall, averaged.  With unequal session counts per domain a
   plain accuracy rewards guessing whichever domain has the most sessions."""
   recalls = []
-  for c in latency.LAGS:
+  for c in values:
     sel = [i for i, t in enumerate(truth) if t == c]
     if sel:
       recalls.append(sum(1 for i in sel if pred[i] == c) / len(sel))
   return float(sum(recalls) / max(len(recalls), 1))
 
 
-def confusion(pred: list[int], truth: list[int]) -> list[list[int]]:
-  m = [[0] * len(latency.LAGS) for _ in latency.LAGS]
+def confusion(pred, truth, values=latency.LAGS) -> list[list[int]]:
+  m = [[0] * len(values) for _ in values]
   for p, t in zip(pred, truth):
-    m[latency.LAGS.index(t)][latency.LAGS.index(p)] += 1
+    m[list(values).index(t)][list(values).index(p)] += 1
   return m
 
 
-def fit_temperature(score_rows: list[list[float]], truths: list[int],
-                    grid=None, prior=None) -> float:
+def fit_temperature(score_rows, truths, grid=None, prior=None,
+                    cls=latency.LatencyPrior) -> float:
   """The temperature that minimises posterior NLL on the given (non-target)
   sessions.  A grid rather than a gradient because the objective is cheap, one
   dimensional, and not convex in general."""
@@ -386,7 +386,7 @@ def fit_temperature(score_rows: list[list[float]], truths: list[int],
     grid = [10.0 ** k for k in torch.arange(-3, 5.01, 0.25).tolist()]
   best, best_t = float("inf"), grid[0]
   for t in grid:
-    total = sum(nll(posterior(s, t, prior), y)
+    total = sum(nll(posterior(s, t, prior, cls), y)
                 for s, y in zip(score_rows, truths))
     if total < best:
       best, best_t = total, t
