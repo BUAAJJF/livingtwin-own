@@ -34,14 +34,35 @@ RESULTS = ROOT / "results" / "wm1_latency"
 # -- inherited from Phase WM0, docs/sim2real_sweep_phase_wm0.md -------------
 J_NOMINAL = 55.86
 J_ZERO = 42.19
-J_ORACLE = 49.72
+J_KNOWN_PARAM = 49.72
+"""Throughput of a policy fine-tuned in the target domain *with the true
+latency supplied*.
+
+Formerly named ``J_ORACLE``.  It is not an upper bound and the name should not
+have implied one: at alpha=0.75 the posterior-guided run reached 49.89 against
+this 49.72, in the same domain, without being told the parameter.  What it is
+is a reference point -- what one particular training recipe achieves when the
+inference problem is removed -- and the recovery fraction below is measured
+against it in exactly that sense.
+"""
 TRIPS_NOMINAL = 2.29
 TRIPS_ZERO = 8.69
-TRIPS_ORACLE = 4.83
+TRIPS_KNOWN_PARAM = 4.83
+"""Measured on three training seeds.  The seed extension puts the same
+configuration at 7.22 trips/arm-hour pooled over eight seeds -- so this anchor
+was drawn from an optimistic sample, and G3's threshold below, which is derived
+from it, is *harder* than the recipe that set it intended.
+
+The threshold is not being recomputed.  Recomputing it from 7.22 would raise
+it to 7.59 and turn several failures into passes, which is repairing a result
+by moving the gate.  It stays at 6.00, and this note is the record of what the
+number would have been had the anchor been measured with the seeds the
+specification now asks for.
+"""
 
 RECOVERY_TARGET = 0.70
-G2_THRESHOLD = J_ZERO + RECOVERY_TARGET * (J_ORACLE - J_ZERO)       # 47.46
-G3_THRESHOLD = TRIPS_ZERO - RECOVERY_TARGET * (TRIPS_ZERO - TRIPS_ORACLE)  # 6.00
+G2_THRESHOLD = J_ZERO + RECOVERY_TARGET * (J_KNOWN_PARAM - J_ZERO)  # 47.46
+G3_THRESHOLD = TRIPS_ZERO - RECOVERY_TARGET * (TRIPS_ZERO - TRIPS_KNOWN_PARAM)  # 6.00
 G4_THRESHOLD = 0.95 * J_NOMINAL                                     # 53.07
 
 # -- G1 ---------------------------------------------------------------------
@@ -146,15 +167,15 @@ def criteria_2_3_4(analysis: dict | None, formal: dict | None) -> dict:
     thr = tgt["throughput"]["bootstrap"]
     rthr = ret["throughput"]["bootstrap"]
     trips = tgt["trips"]
-    rec = ((thr["mean"] - J_ZERO) / (J_ORACLE - J_ZERO)
-           if J_ORACLE > J_ZERO else float("nan"))
+    rec = ((thr["mean"] - J_ZERO) / (J_KNOWN_PARAM - J_ZERO)
+           if J_KNOWN_PARAM > J_ZERO else float("nan"))
     out["runs"].append({
       "tag": tag, "methods": methods,
       "target_throughput": thr["mean"], "target_ci": thr["ci"],
       "target_trips": trips.get("rate"), "target_trips_ci": trips.get("ci_quasi"),
       "target_trip_events": trips.get("events"),
       "retention_throughput": rthr["mean"], "retention_ci": rthr["ci"],
-      "recovery_fraction_of_oracle": rec,
+      "recovery_fraction_of_known_parameter": rec,
       "g2": thr["ci"][0] >= G2_THRESHOLD,
       "g2_point": thr["mean"] >= G2_THRESHOLD,
       "g3": trips.get("ci_quasi", [math.inf, math.inf])[1] <= G3_THRESHOLD,
@@ -484,9 +505,16 @@ def main() -> int:
     "verdict": verdict, "why": why,
     "thresholds": {
       "inherited_from": "docs/sim2real_sweep_phase_wm0.md",
-      "J_nominal": J_NOMINAL, "J_zero_shot": J_ZERO, "J_oracle": J_ORACLE,
+      "J_nominal": J_NOMINAL, "J_zero_shot": J_ZERO,
+      "J_known_parameter_target_only": J_KNOWN_PARAM,
       "trips_nominal": TRIPS_NOMINAL, "trips_zero": TRIPS_ZERO,
-      "trips_oracle": TRIPS_ORACLE,
+      "trips_known_parameter_target_only": TRIPS_KNOWN_PARAM,
+      "trips_known_parameter_at_8_seeds": 7.22,
+      "g3_threshold_not_recomputed": (
+        "G3 stays at 6.00.  Its anchor was measured on three seeds; at eight "
+        "the same configuration trips at 7.22/arm-hour, which would put the "
+        "threshold at 7.59.  Moving it would repair a failure by redefining "
+        "the gate."),
       "g2": G2_THRESHOLD, "g3": G3_THRESHOLD, "g4": G4_THRESHOLD,
       "g1_margin": G1_MARGIN, "recovery_target": RECOVERY_TARGET,
     },

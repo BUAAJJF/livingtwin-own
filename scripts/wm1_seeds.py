@@ -44,6 +44,15 @@ from pathlib import Path
 
 from piper_push import count
 
+# The same anchors the gate uses, so the two cannot quote different recoveries
+# for the same run.  `J_KNOWN_PARAM` is the throughput of a target-only
+# fine-tune that was handed the true latency; recovery is the fraction of the
+# gap from zero-shot to *that* which a method closed, and it exceeds 1 when a
+# method does better without being told the parameter.
+J_ZERO = 42.19
+J_KNOWN_PARAM = 49.72
+J_NOMINAL = 55.86
+
 TAG = re.compile(r"^(q[0-9a-f]+)_a([0-9.]+)_s(\d+)_(target|retention)__r(\d+)$")
 
 DISPLAY = {
@@ -190,34 +199,31 @@ def main() -> int:
   report["anchors"] = anchors
 
   print()
-  if anchors.get("nominal") and anchors.get("zeroshot"):
-    n, z = anchors["nominal"]["throughput"], anchors["zeroshot"]["throughput"]
-    print(f"  Throughput over seeds.  Recovery is (adapted - {z:.2f}) / "
-          f"({n:.2f} - {z:.2f}); retention\n  loss is against the "
-          f"{n:.2f} obj/min source nominal.  Both intervals are over training\n"
-          f"  seeds, so a configuration with many repeats of few seeds cannot "
-          f"look better\n  resolved than one with many seeds.")
-  else:
-    print("  Throughput over seeds (no anchors found; recovery not computed)")
+  print(f"  Throughput over seeds.  Recovery is (adapted - {J_ZERO:.2f}) / "
+        f"({J_KNOWN_PARAM:.2f} - {J_ZERO:.2f}) -- the fraction of the\n"
+        f"  gap to a target-only fine-tune that was handed the true latency, "
+        f"which is\n  a reference point and not a ceiling.  Retention loss "
+        f"is against {J_NOMINAL:.2f} obj/min.\n  Both intervals are over "
+        f"training seeds, so a configuration with many repeats\n  of few "
+        f"seeds cannot look better resolved than one with many seeds.")
   print()
   print(f"  {'configuration':44s} {'dom':9s} {'seeds':>5s} {'obj/min':>8s} "
         f"{'95% CI over seeds':>20s} {'recovery':>9s} {'loss':>7s}")
   for (key, alpha, domain), r in sorted(rows.items()):
     t = r["throughput"]
     rec = loss = float("nan")
-    if anchors.get("nominal") and anchors.get("zeroshot"):
-      n, z = anchors["nominal"]["throughput"], anchors["zeroshot"]["throughput"]
-      if domain == "target" and abs(n - z) > 1e-9:
-        rec = (t["mean"] - z) / (n - z)
-      if domain == "retention":
-        loss = (n - t["mean"]) / n
+    if domain == "target":
+      rec = (t["mean"] - J_ZERO) / (J_KNOWN_PARAM - J_ZERO)
+    else:
+      loss = (J_NOMINAL - t["mean"]) / J_NOMINAL
     ci = (f"[{t['ci'][0]:.2f}, {t['ci'][1]:.2f}]"
           if t["ci"][0] == t["ci"][0] else "(one seed)")
     print(f"  {(r['name'] + f' a={alpha:.2f}')[:44]:44s} {domain:9s} "
           f"{t['n']:5d} {t['mean']:8.2f} {ci:>20s} "
           f"{rec:9.2f} {100 * loss:6.1f}%")
     report["configurations"][f"{key}|a{alpha}|{domain}"].update(
-      {"recovery": rec, "retention_loss": loss})
+      {"recovery_fraction_of_known_parameter": rec,
+       "retention_loss": loss})
 
   # -- the gate, re-decided on the seed-level interval -----------------------
   print()
