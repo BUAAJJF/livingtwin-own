@@ -291,8 +291,12 @@ def load_split(root, split: str) -> list[tuple["SessionSet", str]]:
   different object shape classes.  Nothing downstream re-partitions a tensor.
   """
   root = Path(root)
+  # `{split}__<axis tag>__seed<n>.pt`.  The tag was `lag3` while there was one
+  # axis and is `servo0p75` for the second, so the glob cannot name it: a
+  # hard-coded `lag*` silently found nothing for Phase WM1-B and reported it as
+  # an empty split.
   out = [(SessionSet.load(f), f.name)
-         for f in sorted(root.glob(f"{split}__lag*__seed*.pt"))]
+         for f in sorted(root.glob(f"{split}__*__seed*.pt"))]
   if not out:
     raise FileNotFoundError(f"no {split} files under {root}")
   return out

@@ -41,6 +41,7 @@ import cv2
 import numpy as np
 
 from . import config, rectify
+from .yolo_backend import load_detector
 
 
 @dataclasses.dataclass

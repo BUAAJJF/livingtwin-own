@@ -6,8 +6,9 @@
   "action": "commanded joint targets as the policy emitted them, (T, N, A), before the action manager's rate limits.",
   "servo": "gripper position minus gripper position target, (T, N, 1).  The quantity a real drive reports as current.",
   "done": "(T, N) bool: this step ended an episode.  Deployable -- the robot knows when the task restarts -- but excluded from every feature set, with a done-only control reported instead, because reset cadence is a physical consequence of the domain and would be an accuracy the estimator did not earn from the plant.",
-  "lag": "SIMULATOR LABEL.  Observation delay in control steps.",
-  "shape": "SIMULATOR METADATA, (T, N) uint8: object shape class index."
+  "lag": "SIMULATOR LABEL, scalar: the domain parameter's value.  Named for Phase WM1-A's axis, where it was an observation delay in control steps; meta['axis'] says which parameter it is.",
+  "shape": "SIMULATOR METADATA, (T, N) uint8: object shape class index.",
+  "trip": "SIMULATOR LABEL, (T, N) bool: the safety shell fired on this step. Trains the risk head; never an input to it."
  },
  "deployable_channels": [
   "enc",
@@ -19,7 +20,8 @@
  ],
  "simulator_only_channels": [
   "lag",
-  "shape"
+  "shape",
+  "trip"
  ],
  "proprio_names": [
   "joint1_pos",
@@ -917,12 +919,12 @@
  "splits": {
   "cal": {
    "files": 5,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     5050,
@@ -940,6 +942,7 @@
    "arm_hours": 6.666666666666667,
    "gigabytes": 0.9576,
    "episode_boundaries": 689,
+   "safety_trips": null,
    "shape_class_counts": [
     534884,
     397394,
@@ -950,12 +953,12 @@
   },
   "calh": {
    "files": 5,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     6060,
@@ -973,6 +976,7 @@
    "arm_hours": 6.666666666666667,
    "gigabytes": 0.9576,
    "episode_boundaries": 635,
+   "safety_trips": null,
    "shape_class_counts": [
     0,
     0,
@@ -983,12 +987,12 @@
   },
   "test": {
    "files": 5,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     909,
@@ -1006,6 +1010,7 @@
    "arm_hours": 13.333333333333334,
    "gigabytes": 1.9152,
    "episode_boundaries": 1287,
+   "safety_trips": null,
    "shape_class_counts": [
     0,
     0,
@@ -1016,12 +1021,12 @@
   },
   "train": {
    "files": 10,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     101,
@@ -1044,6 +1049,7 @@
    "arm_hours": 10.666666666666666,
    "gigabytes": 1.53216,
    "episode_boundaries": 294,
+   "safety_trips": null,
    "shape_class_counts": [
     844719,
     638912,
@@ -1054,12 +1060,12 @@
   },
   "val": {
    "files": 5,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     303,
@@ -1077,6 +1083,7 @@
    "arm_hours": 2.6666666666666665,
    "gigabytes": 0.38304,
    "episode_boundaries": 77,
+   "safety_trips": null,
    "shape_class_counts": [
     208532,
     162353,
@@ -1087,12 +1094,12 @@
   },
   "valh": {
    "files": 5,
-   "lags": [
-    0,
-    1,
-    2,
-    3,
-    4
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
    ],
    "seeds": [
     404,
@@ -1110,6 +1117,7 @@
    "arm_hours": 2.6666666666666665,
    "gigabytes": 0.38304,
    "episode_boundaries": 69,
+   "safety_trips": null,
    "shape_class_counts": [
     0,
     0,
@@ -1119,7 +1127,8 @@
    ]
   }
  },
- "candidate_lags": [
+ "axis": "obs_latency_steps",
+ "candidates": [
   0,
   1,
   2,
@@ -1133,7 +1142,7 @@
   "test_shapes_disjoint_from_training": true,
   "one_sequence_length_per_split": true,
   "budgets_nested_within_a_session": true,
-  "balanced_lags_per_split": true
+  "balanced_candidates_per_split": true
  },
  "failures": []
 }

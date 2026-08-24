@@ -35,7 +35,10 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from piper_push import latency, wm_data
+from piper_push import damping, latency, wm_data
+
+AXES = {"obs_latency_steps": latency.LAGS,
+        "servo_damping_scale": damping.VALUES}
 
 TRAIN_CLASSES = {0, 1, 2}
 HOLDOUT_CLASSES = {3, 4}
@@ -44,6 +47,8 @@ HOLDOUT_CLASSES = {3, 4}
 def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--data", default="results/wm1_latency/data")
+  p.add_argument("--axis", default=None, choices=sorted(AXES),
+                 help="default: whichever axis the sidecars name")
   a = p.parse_args()
   root = Path(a.data)
 
@@ -54,6 +59,14 @@ def main() -> int:
     entries.append(json.loads(f.read_text()))
   if not entries:
     raise SystemExit(f"no dataset sidecars under {root}")
+
+  axes = {e.get("axis", "obs_latency_steps") for e in entries}
+  if a.axis:
+    axes = {a.axis}
+  elif len(axes) != 1:
+    raise SystemExit(f"the sidecars name more than one axis: {sorted(axes)}")
+  axis = next(iter(axes))
+  values = AXES[axis]
 
   by_split = defaultdict(list)
   for e in entries:
@@ -100,9 +113,9 @@ def main() -> int:
   for split, es in by_split.items():
     lags = defaultdict(int)
     for e in es:
-      lags[e["lag"]] += 1
-    if set(lags) != set(latency.LAGS):
-      failures.append(f"{split}: lags {sorted(lags)} != {list(latency.LAGS)}")
+      lags[float(e["lag"])] += 1
+    if set(lags) != {float(v) for v in values}:
+      failures.append(f"{split}: values {sorted(lags)} != {list(values)}")
     elif len(set(lags.values())) != 1:
       failures.append(f"{split}: unbalanced lag counts {dict(lags)}")
 
@@ -110,7 +123,7 @@ def main() -> int:
   for split, es in sorted(by_split.items()):
     summary[split] = {
       "files": len(es),
-      "lags": sorted({e["lag"] for e in es}),
+      "values": sorted({float(e["lag"]) for e in es}),
       "seeds": sorted({e["seed"] for e in es}),
       "shapes": sorted({e["shapes"] for e in es}),
       "n_envs": es[0]["n_envs"], "steps": es[0]["steps"],
@@ -118,13 +131,17 @@ def main() -> int:
       "arm_hours": sum(e["arm_seconds"] for e in es) / 3600.0,
       "gigabytes": sum(e["bytes"] for e in es) / 1e9,
       "episode_boundaries": sum(e["episode_boundaries"] for e in es),
+      "safety_trips": (sum(e["safety_trips"] for e in es)
+                       if all(e.get("safety_trips") is not None for e in es)
+                       else None),
       "shape_class_counts": [sum(e["shape_class_counts"][i] for e in es)
                              for i in range(5)],
     }
 
   path = wm_data.write_manifest(root, entries, {
     "splits": summary,
-    "candidate_lags": list(latency.LAGS),
+    "axis": axis,
+    "candidates": list(values),
     "step_ms": latency.STEP_MS,
     "leakage_checks": {
       "label_is_not_a_channel": True,
@@ -132,7 +149,7 @@ def main() -> int:
       "test_shapes_disjoint_from_training": True,
       "one_sequence_length_per_split": True,
       "budgets_nested_within_a_session": True,
-      "balanced_lags_per_split": True,
+      "balanced_candidates_per_split": True,
     },
     "failures": failures,
   })
