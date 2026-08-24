@@ -32,6 +32,7 @@
   button:hover:not(:disabled){ border-color:var(--accent); }
   button:disabled { opacity:.35; cursor:default; }
   button.go { background:var(--ok); border-color:var(--ok); color:#05130a; }
+  button.auto { background:#1f6feb; border-color:#388bfd; color:white; }
   button.big { width:100%; padding:16px; font-size:17px; margin-top:4px; }
   .check { display:flex; gap:10px; align-items:flex-start; padding:6px 0;
            border-bottom:1px solid #1d222a; }
@@ -82,14 +83,25 @@
   <div>
     <img id="view" src="/stream">
     <div class="card" style="margin-top:16px">
+      <h2>Next automatic target</h2>
+      <div id="target"></div>
+      <button id="move" class="big auto" disabled>move arm to the previewed target</button>
+      <div class="why" id="movewhy"></div>
+      <p class="hint">The cyan outline in the D405 grayscale image is the
+      predicted board position. The planner checks camera visibility, joint
+      limits and new model self-collisions. Keep the physical path clear and
+      click once to confirm each slow move; the stillness gate decides when it
+      is safe to record.</p>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h2>Record a pose</h2>
       <button id="rec" class="big go" disabled>record this pose</button>
       <div class="why" id="why"></div>
-      <p class="hint">Space also records. Move the arm <b>by hand</b> — it is
-      connected but not enabled. Change the board's <b>orientation</b> between
-      poses, not just its position: hand-eye is determined by rotation, and a
-      set that only translates leaves it undetermined however many poses it
-      has.</p>
+      <p class="hint">Space also records. Seed the first five varied poses by
+      hand. Once they span 15°, the page computes a navigation-only rough
+      extrinsic and starts proposing targets; the final calibration still
+      requires the full 30° spread. Change <b>orientation</b>, not just
+      position.</p>
     </div>
   </div>
 
@@ -148,8 +160,8 @@ function preflight(s) {
                         : "…")));
 
   out.push(row(!!L.detected, false, "board detected",
-    L.detected ? `${L.n_corners} corners · ${L.reproj_px} px · ${L.range_mm} mm`
-               : "not in view, or the board description is wrong"));
+    L.detected ? `${L.n_corners} corners · ${L.reproj_px} px · ${L.range_mm} mm · ${s.image_source}`
+               : `not found in ${s.image_source}, or the board description is wrong`));
 
   const g = L.on_gripper;
   out.push(row(g ? g.ok : false, !g, "board is on the gripper",
@@ -197,12 +209,48 @@ function render(s) {
   disc(s);
 
   const L = s.live || {}, sol = s.solution;
-  const can = !!(L.detected && L.still && L.novel && s.has_arm);
+  const moving = s.motion && s.motion.status === "moving";
+  const can = !!(L.detected && L.still && L.novel && s.has_arm && !moving);
   $("rec").disabled = !can;
   $("why").textContent = can ? ""
-    : (!s.has_arm ? "no arm connected"
+    : (moving ? "arm is moving"
+       : !s.has_arm ? "no arm connected"
        : !L.detected ? "board not detected"
        : !L.still ? L.still_detail : L.novel_detail);
+
+  const g = s.guidance, t = s.next_target, m = s.motion || {status:"idle"};
+  let targetHtml = "";
+  if (!g) {
+    targetHtml = row(false, true, "rough extrinsic needed",
+      `record at least ${s.guidance_min_poses} manual poses spanning ` +
+      `${s.guidance_min_rotation_span_deg}°; final solve still uses ${s.min_rotation_span_deg}°`);
+  } else {
+    targetHtml += row(true, !!g.rough, g.rough ? "rough guidance ready" : "calibrated guidance ready",
+      `${g.source}` + (g.residual_mm != null ? ` · ${g.residual_mm} mm rms` : ""));
+    if (t && t.available) {
+      targetHtml += `<div class="kv"><span>grasp site xyz</span><b>${t.ee_position_m.join(", ")} m</b></div>` +
+        `<div class="kv"><span>joint target</span><b>${t.q_deg.join(", ")}°</b></div>` +
+        `<div class="kv"><span>predicted board</span><b>${t.center_px.join(", ")} px · ${t.range_mm} mm</b></div>` +
+        `<div class="kv"><span>coverage gain</span><b>${t.normal_novelty_deg}° face · ${t.nearest_rotation_deg}° wrist</b></div>`;
+    } else {
+      targetHtml += row(false, true, "no safe visible proposal",
+        t && t.why ? t.why : "show the board once so its gripper transform can be estimated");
+    }
+  }
+  if (moving) {
+    targetHtml += `<div class="bar"><i style="width:${100 * (m.progress || 0)}%"></i></div>` +
+      `<p class="hint">moving ${(100 * (m.progress || 0)).toFixed(0)}%` +
+      (m.tracking_error_deg != null ? ` · tracking ${m.tracking_error_deg}°` : "") + `</p>`;
+  } else if (m.status === "reached") {
+    targetHtml += `<p class="hint" style="color:var(--ok)">${m.why}</p>`;
+  } else if (m.status === "failed") {
+    targetHtml += `<p class="why">motion stopped: ${m.why}</p>`;
+  }
+  $("target").innerHTML = targetHtml;
+  const canMove = !!(s.has_arm && t && t.available && t.status === "ready" && !moving);
+  $("move").disabled = !canMove;
+  $("movewhy").textContent = canMove ? ""
+    : (moving ? "motion in progress" : (t && t.why) || (!g ? "rough extrinsic not ready" : "no ready target"));
 
   const worst = sol && sol.ok ? sol.worst_pose : -1;
   $("list").innerHTML = (s.poses || []).map(p =>
@@ -265,6 +313,11 @@ $("rec").onclick = async () => {
 };
 $("solve").onclick = async () => { await post("/solve"); tick(); };
 $("save").onclick = async () => { await post("/save"); tick(); };
+$("move").onclick = async () => {
+  const r = await post("/move-next");
+  if (!r.ok) $("movewhy").textContent = r.why;
+  tick();
+};
 addEventListener("keydown", e => {
   if (e.code === "Space" && !$("rec").disabled) { e.preventDefault(); $("rec").click(); }
 });

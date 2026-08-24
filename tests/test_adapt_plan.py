@@ -156,3 +156,20 @@ def test_the_queue_passes_its_memory_floor_to_the_shard():
     src = (ROOT / "scripts" / "wm1_queue.py").read_text()
     assert '"MIN_FREE_MIB": str(a.min_free_mib)' in src
     assert "env={**os.environ" in src
+
+
+def test_evaluations_get_a_smaller_memory_floor_than_trainings():
+    """A 512-env training needs ~35 GiB; the evaluation after it needs ~11.
+
+    Holding both to the training floor starved Phase WM1-A: two WM1-B
+    trainings filled every card, and WM1-A's finished checkpoints sat waiting
+    for a training-sized hole in order to run an evaluation that fits in a
+    third of it.  No process failed and no line of output said anything.
+    """
+    src = RUNNER.read_text()
+    assert 'wait_for_gpu "$MIN_FREE_MIB_EVAL"' in src
+    assert src.count('wait_for_gpu "$MIN_FREE_MIB_EVAL"') == 2, (
+      "both the target and the retention evaluation take the smaller floor")
+    # the training still takes the full one
+    body = src.split("finetune.py", 1)[0]
+    assert body.rstrip().endswith("wait_for_gpu") or "\n    wait_for_gpu\n" in body

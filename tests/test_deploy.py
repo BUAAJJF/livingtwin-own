@@ -342,6 +342,93 @@ def test_hand_eye_refuses_poses_that_do_not_rotate():
   )
 
 
+def test_navigation_can_use_a_weaker_rotation_gate_without_weakening_the_solve():
+  """The GUI's first solve steers the next small move; it is not saveable.
+
+  A 15--30 degree seed set should therefore produce navigation guidance when
+  explicitly requested, while the exact same records remain refused by the
+  normal 30 degree calibration gate.
+  """
+  import cv2
+
+  from hardware.deploy import calibrate, config, proprio
+
+  rng = np.random.default_rng(44)
+  kin = proprio.Kinematics()
+  default = np.asarray(
+    __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+    ["default_joint_pos"], dtype=np.float64)
+  T_base_cam = config.sim_camera_extrinsic()
+  T_cam_base = np.linalg.inv(T_base_cam)
+  T_grip_board = np.eye(4)
+  T_grip_board[:3, 3] = [0.01, -0.02, 0.05]
+
+  records = []
+  for _ in range(8):
+    q = default.copy()
+    q[:6] += rng.uniform(-0.10, 0.10, 6)
+    kin.update(q)
+    T_bg = np.eye(4)
+    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
+    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
+    T_cb = T_cam_base @ T_bg @ T_grip_board
+    records.append({
+      "joint_pos": q.tolist(),
+      "rvec": cv2.Rodrigues(T_cb[:3, :3])[0].ravel().tolist(),
+      "tvec": T_cb[:3, 3].tolist(),
+    })
+
+  span = calibrate.solve(records, min_rotation_span_deg=0.0)["rot_span_deg"]
+  assert 15.0 < span < calibrate.MIN_ROT_SPAN_DEG, span
+  assert calibrate.solve(records)["T_base_cam"] is None
+  rough = calibrate.solve(records, min_rotation_span_deg=15.0)
+  assert rough["T_base_cam"] is not None
+  assert np.linalg.norm(rough["T_base_cam"][:3, 3]
+                        - T_base_cam[:3, 3]) < 1e-3
+
+
+def test_calibration_motion_is_rest_to_rest_and_speed_limited():
+  from hardware.deploy.calibgui import (AUTO_RATE_HZ, AUTO_SPEED_RAD_S,
+                                         _joint_trajectory)
+
+  q0 = np.zeros(6)
+  q1 = np.array([0.31, -0.12, 0.07, 0.22, -0.18, 0.03])
+  path = _joint_trajectory(q0, q1)
+  assert np.allclose(path[0], q0)
+  assert np.allclose(path[-1], q1)
+  speed = np.abs(np.diff(path, axis=0)) * AUTO_RATE_HZ
+  assert speed.max() <= AUTO_SPEED_RAD_S * 1.01
+  assert np.abs(path[1] - path[0]).max() < np.abs(path[len(path) // 2]
+                                                   - path[len(path) // 2 - 1]).max()
+
+
+def test_next_pose_planner_keeps_the_board_in_the_d405_gray_image():
+  from hardware.deploy import calibrate, config, proprio, rectify
+  from hardware.deploy.calibgui import NextPosePlanner
+
+  board = calibrate.Board()
+  K = rectify._default_d405_K()
+  planner = NextPosePlanner(board, K,
+                            (config.D405_WIDTH, config.D405_HEIGHT))
+  default = np.asarray(
+    __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+    ["default_joint_pos"], dtype=np.float64)
+  q7 = np.array([*default[:6], default[6]])
+
+  # Put the currently seen board fronto-parallel and centred.  Its arbitrary
+  # implied gripper attachment is recovered by the planner, just as it is on
+  # the real arm after the operator clamps the board on.
+  w, h = board.squares[0] * board.square_m, board.squares[1] * board.square_m
+  T_cb = np.eye(4)
+  T_cb[:3, 3] = [-w / 2.0, -h / 2.0, 0.70]
+  target = planner.plan(config.sim_camera_extrinsic(), T_cb, q7, records=[])
+  assert target["available"], target
+  uv = np.asarray(target["polygon_px"])
+  assert (uv[:, 0] > 0).all() and (uv[:, 0] < config.D405_WIDTH).all()
+  assert (uv[:, 1] > 0).all() and (uv[:, 1] < config.D405_HEIGHT).all()
+  assert target["motion_deg"] <= math.degrees(0.42) + 0.1
+
+
 def test_a_bought_board_is_described_and_detected():
   """Any board, not the one this repository happens to print.
 

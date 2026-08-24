@@ -311,6 +311,31 @@ the ones already recorded — and draws the fourth, the rotation spread, as a
 disc of where each recorded pose faces. Spreading those dots *is* the task, and
 a picture of where they are not beats a number that says 24°.
 
+The GUI detector deliberately reads **`frame.gray`, the D405 grayscale image**,
+not the optional left-IR stream.  That keeps calibration on the same image path
+as deployment.  The workflow is now assisted after the manual bootstrap:
+
+1. Move and record five visibly different poses by hand, including at least
+   15° of rotation spread.
+2. The page computes a rough, navigation-only extrinsic.  This does not relax
+   the final solver: it still refuses below eight poses and 30°.
+3. Using the current board detection, the rough extrinsic and the robot's own
+   MuJoCo kinematics, it searches nearby joint poses.  Candidates outside the
+   D405 image, inside a joint-limit margin, too similar to existing samples, or
+   introducing a new model self-collision are rejected.
+4. The chosen pose appears as a cyan predicted board outline over the live
+   grayscale image, with joint angles and grasp-site position in the page.
+   Clicking **move arm to the previewed target** is the confirmation: the arm
+   enables, follows a 0.22 rad/s rest-to-rest joint trajectory, and stops on a
+   feedback tracking error.  Once the normal stillness ring turns green,
+   record the pose and the next target is generated.
+
+An existing `rig.json` can seed guidance immediately; as soon as the current
+session has enough bootstrap poses, its rough solve supersedes that old result.
+Automatic motion checks the model and the camera view, not the physical room:
+the operator must still keep the real swept volume clear and confirm every
+move from the page.
+
 Its preflight also answers the question that is expensive to get wrong: **is the
 board on the gripper at all.** It runs forward kinematics on the live joint
 angles, puts the detected board into the base frame through the *nominal*

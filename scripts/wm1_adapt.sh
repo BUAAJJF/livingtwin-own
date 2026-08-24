@@ -44,17 +44,28 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:Tr
 # card, so "start and hope" means a CUDA OOM twenty seconds in and a shard
 # that exits with its remaining jobs unrun.  Wait for the memory instead.
 MIN_FREE_MIB=${MIN_FREE_MIB:-70000}
+
+# A 512-environment training needs ~35 GiB; the evaluation that follows it needs
+# ~11.  Holding evaluations to the training floor is what starved Phase WM1-A:
+# two WM1-B trainings filled every card, WM1-A's finished checkpoints then sat
+# waiting for a training-sized hole to run an evaluation that would have fitted
+# in a third of it, and the phase stopped making progress without one process
+# failing or one line of output saying so.
+MIN_FREE_MIB_EVAL=${MIN_FREE_MIB_EVAL:-15000}
+
+# wait_for_gpu [floor]
 wait_for_gpu() {
+  local need=${1:-$MIN_FREE_MIB}
   local waited=0
   while true; do
     local free
     free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits \
            -i "$GPU" 2>/dev/null | tr -d ' ')
     case "$free" in ''|*[!0-9]*) free=0 ;; esac
-    [ "$free" -ge "$MIN_FREE_MIB" ] && { [ "$waited" -gt 0 ] && \
+    [ "$free" -ge "$need" ] && { [ "$waited" -gt 0 ] && \
       echo "=== cuda:$GPU free after ${waited}s (${free} MiB)"; return 0; }
     if [ "$waited" -eq 0 ]; then
-      echo "=== cuda:$GPU has ${free} MiB free, need ${MIN_FREE_MIB}; waiting"
+      echo "=== cuda:$GPU has ${free} MiB free, need ${need}; waiting"
     fi
     sleep 60
     waited=$((waited + 60))
@@ -160,7 +171,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     # flag here would evaluate every WM1-B run in the *nominal* domain and
     # report the result as a recovery.
     if [ ! -e "$OUT/${TAG}_target__r$r.json" ]; then
-      wait_for_gpu
+      wait_for_gpu "$MIN_FREE_MIB_EVAL"
       "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         "$EFLAG" "$EVAL" \
@@ -169,7 +180,7 @@ print(j['tag'], j['probs_arg'], j['seed'], j['iterations'], flag,
     fi
     # retention: back in the domain the policy was deployed from
     if [ ! -e "$OUT/${TAG}_retention__r$r.json" ]; then
-      wait_for_gpu
+      wait_for_gpu "$MIN_FREE_MIB_EVAL"
       "$MAMBA" run -n mjlab python scripts/accept_s1.py "$TASK" "$ADAPTED" \
         --num-envs 512 --steps 2400 --seed "$SEED_E" --device "cuda:$GPU" \
         --label "${TAG}_retention__r$r" --json "$OUT/${TAG}_retention__r$r.json" \

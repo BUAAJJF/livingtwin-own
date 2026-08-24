@@ -416,7 +416,8 @@ def _unflip(records: list[dict], board: Board, gripper_site: str):
 
 
 def solve(records: list[dict], gripper_site: str = "grasp_site",
-          board: Board | None = None):
+          board: Board | None = None,
+          min_rotation_span_deg: float = MIN_ROT_SPAN_DEG):
   """Camera pose in the base frame, plus a residual per pose.
 
   The residual is the thing to read.  ``calibrateHandEye`` will return a
@@ -451,7 +452,7 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   spans = [_angle_between(R_bg[i], R_bg[j])
            for i in range(len(R_bg)) for j in range(i + 1, len(R_bg))]
   rot_span = max(spans) if spans else 0.0
-  if rot_span < MIN_ROT_SPAN_DEG:
+  if rot_span < min_rotation_span_deg:
     # Return rather than raise, so the caller can print the number and say what
     # to do about it.  There is nothing to solve: with no rotation the equation
     # is satisfied by any X, and a solver handed this returns one.
