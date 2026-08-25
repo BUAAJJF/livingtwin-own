@@ -13,8 +13,17 @@ Scored on **one-step NRMS of the arm's position**, on the ``val`` split and on
 nothing else.  The hidden target's formula is not in the search space; that is
 the point of the stage.
 
-One process handles one damping value so the four can run on four GPUs at
-once.  ``scripts/ra_sim0_gate.py`` merges their JSON.
+**Superseded, and kept for the record.**  This script sweeps many
+configurations inside one environment, which the replay harness cannot
+support: only an environment's *first* reset draws the recording's own
+objects, so every configuration after the first was scored against different
+objects at the recorded poses.  Under that, a thirty-configuration coordinate
+descent found nothing better than changing nothing.  The guard below now
+refuses to score at all when the objects do not match, so the script fails
+loudly instead of returning a plausible search.
+
+Stage 3's parameter search is run through ``scripts/ra_sim0_eval.py`` instead,
+one fresh environment per configuration, which is slower and correct.
 """
 
 from __future__ import annotations
@@ -128,7 +137,7 @@ def main() -> int:
 
   rec, meta = rp.Recording.load(a.rec, steps=a.steps)
   env = build_env(meta, a.damping, a.device, a.oracle, rec.num_envs)
-  harness = rp.ReplayHarness(env, seed=meta["seed"])
+  harness = rp.ReplayHarness(env)
   t0 = time.time()
   trace = []
 

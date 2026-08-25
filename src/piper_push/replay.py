@@ -67,13 +67,19 @@ class Recording:
 class ReplayHarness:
   """Binds an already-built environment to the indices a replay needs.
 
-  ``seed`` is the recording's generation seed and is not decoration.  The
-  scene's object draw comes from a global RNG that every reset advances, so a
-  second replay inside one process -- the ``P = 25`` pass, or the next
-  configuration in a search -- resets into a *different* set of objects at the
-  recorded poses.  Re-seeding immediately before each reset puts the recorded
-  objects back, and ``shape_match_at_t0`` in every result file says whether it
-  worked rather than assuming it did.
+  **One environment, one replay.**  The scene's object draw comes from a
+  global RNG that every reset advances, so a second replay inside one process
+  -- the ``P = 25`` pass, or the next configuration in a search -- resets into
+  a *different* set of objects at the recorded poses.  Re-seeding before the
+  reset does not fix it: the construction consumes RNG before its own first
+  reset, so seeding to the same value and resetting again lands somewhere
+  else, measured at 0.44 of the recording's objects against 1.00 for a fresh
+  build.  So callers build a fresh environment per replay, and
+  ``shape_match_at_t0`` in every result file says whether that worked rather
+  than assuming it did.
+
+  ``seed`` is accepted and ignored for that reason; it is kept so the
+  signature records the thing that does not work.
   """
 
   def __init__(self, env, object_name: str = "object",
@@ -121,8 +127,6 @@ class ReplayHarness:
     dev = env.device
     T = rec.steps
     pq, pqd, cdone = [], [], []
-    if self.seed is not None:
-      type(env).seed(int(self.seed))
     env.reset()
     self.shape_match_at_t0 = self._shape_match(rec)
     for t in range(T):

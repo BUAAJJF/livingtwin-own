@@ -90,20 +90,27 @@ def main() -> int:
   from piper_push import replay as rp
 
   rec, meta = rp.Recording.load(a.rec, steps=a.steps)
-  env = build(meta, damping=a.damping, hidden=a.hidden_target,
-              residual=a.residual or None, num_envs=rec.num_envs,
-              device=a.device)
-  arm = env.action_manager.get_term("arm")
-  arm.set_plant(latency_steps=a.latency, response_scale=a.response,
-                deadband=a.deadband,
-                lowpass_hz=None if a.lowpass < 0 else a.lowpass)
-  harness = rp.ReplayHarness(env, seed=meta["seed"])
   t0 = time.time()
 
-  res_hook = None
-  for h in arm._hooks:
-    if hasattr(h, "last_spread"):
-      res_hook = h
+  def fresh():
+    """A brand-new environment, because a replay may only be run once in one.
+
+    Its first reset draws the recording's own objects; the second draws
+    something else.  Paying a build per pass is the price of comparing
+    simulators on the same objects, and `shape_match_at_t0` records whether
+    the price bought anything."""
+    env = build(meta, damping=a.damping, hidden=a.hidden_target,
+                residual=a.residual or None, num_envs=rec.num_envs,
+                device=a.device)
+    arm = env.action_manager.get_term("arm")
+    arm.set_plant(latency_steps=a.latency, response_scale=a.response,
+                  deadband=a.deadband,
+                  lowpass_hz=None if a.lowpass < 0 else a.lowpass)
+    hook = None
+    for h in arm._hooks:
+      if hasattr(h, "last_spread"):
+        hook = h
+    return env, arm, hook, rp.ReplayHarness(env)
 
   results: dict = {
     "candidate": a.candidate, "tag": a.tag or a.candidate,
@@ -118,6 +125,7 @@ def main() -> int:
   }
 
   for period, horizons in ((1, (1,)), (25, (1, 5, 10, 25))):
+    env, arm, res_hook, harness = fresh()
     spread_log, delta_log = [], []
     tp = time.time()
     if res_hook is None:
@@ -126,7 +134,6 @@ def main() -> int:
       # the same loop, with the ensemble's disagreement recorded alongside
       dev = env.device
       pq, pqd, cdone = [], [], []
-      type(env).seed(int(meta["seed"]))
       env.reset()
       harness.shape_match_at_t0 = harness._shape_match(rec)
       with torch.no_grad():
@@ -246,12 +253,13 @@ def main() -> int:
           "coverage_at_2_sigma": float((ef <= 2.0 * sf).float().mean()),
         }
     results[f"period{period}"] = block
-    print(f"  P={period} done in {wall:.0f}s", flush=True)
+    print(f"  P={period} done in {wall:.0f}s  "
+          f"shape_match={harness.shape_match_at_t0:.3f}", flush=True)
+    env.close()
 
   if torch.cuda.is_available():
     results["gpu_mib"] = torch.cuda.max_memory_allocated() / 2**20
   results["wall_clock_s"] = time.time() - t0
-  env.close()
   out_dir = Path(a.out)
   out_dir.mkdir(parents=True, exist_ok=True)
   name = f"{results['tag']}_{meta['split']}.json"
