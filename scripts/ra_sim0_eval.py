@@ -54,6 +54,17 @@ def build(meta, *, damping=1.0, hidden=False, residual=None, num_envs=64,
     apply_hidden_plant(cfg, HiddenPlantCfg())
   if residual:
     apply_residual(cfg, ResidualHookCfg(checkpoint=str(residual)))
+  # A replay must not be allowed to terminate.  A candidate whose command
+  # path is badly wrong trips the safety shell within a few steps, resets, and
+  # draws a fresh object -- so the arms that are worst at the task would be
+  # scored on the handful of environments that happened to survive, and the
+  # oracle on all of them.  Measured before this line existed: the nominal
+  # simulator kept 0.9% of its steps and the oracle 88.6%, which is not a
+  # comparison of accuracy at all.  With no termination terms nothing resets,
+  # every candidate is scored on exactly the window the RECORDING allows, and
+  # what a candidate would have tripped is reported through the velocity
+  # statistics instead.
+  cfg.terminations = {}
   return ManagerBasedRlEnv(cfg=cfg, device=device, render_mode=None)
 
 

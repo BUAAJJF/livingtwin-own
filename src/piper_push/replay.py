@@ -128,6 +128,7 @@ class ReplayHarness:
 def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int,
                  pristine: torch.Tensor | None = None
                  ) -> tuple[torch.Tensor, torch.Tensor]:
+  """Passing ``pristine`` switches on the same-object window; see below."""
   """Which (step, env) predictions are usable, and at what horizon.
 
   Returns a boolean ``[T-1, E]`` and an integer horizon of the same shape.
@@ -138,6 +139,11 @@ def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int,
   T = T - 1  # the last step has no recorded successor
   ok = torch.ones(T, E, dtype=torch.bool)
   hor = torch.zeros(T, E, dtype=torch.long)
+  # The recording's own first reset draws it a new object too, so the window in
+  # which the candidate and the recording are holding the SAME object is
+  # bounded at both ends: no reset on either side since the start.
+  rd = rec.done.cpu().long()
+  rec_pristine = (torch.cumsum(rd, dim=0) - rd) == 0
   running = torch.zeros(E, dtype=torch.bool)
   for t in range(T):
     if t % period == 0:
@@ -145,7 +151,7 @@ def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int,
     running = running & ~rec.done[t].cpu() & ~cand_done[t].cpu()
     running = running & (rec.shape[t + 1].cpu() == rec.shape[t].cpu())
     if pristine is not None:
-      running = running & pristine[t].cpu()
+      running = running & pristine[t].cpu() & rec_pristine[t]
     ok[t] = running
     hor[t] = (t % period) + 1
   return ok, hor
