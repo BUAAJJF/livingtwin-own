@@ -33,7 +33,7 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
-from piper_push import damping, latency, perturb
+from piper_push import damping, hidden_plant, latency, perturb, residual
 from piper_push.checkpoints import as_actor_checkpoint
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
@@ -81,6 +81,8 @@ def main() -> int:
   perturb.add_mismatch_args(p)
   latency.add_latency_args(p)
   damping.add_damping_args(p)
+  hidden_plant.add_hidden_target_args(p)
+  residual.add_residual_args(p)
   a = p.parse_args()
 
   if not a.resume and not a.student:
@@ -144,6 +146,20 @@ def main() -> int:
   agent_cfg.algorithm.learning_rate = a.learning_rate
   agent_cfg.algorithm.desired_kl = a.desired_kl
   agent_cfg.algorithm.entropy_coef = a.entropy_coef
+
+  # Phase RA-Sim-0: the structural target and the learned residual, both off
+  # unless explicitly asked for.  They are command-path hooks, so they compose
+  # with the parametric axes above rather than replacing them -- an arm that
+  # trains in "the residual-augmented simulator" is nominal physics plus the
+  # residual, and the oracle arm is nominal physics plus the hidden target.
+  applied_hidden = hidden_plant.apply_hidden_plant(
+    env_cfg, hidden_plant.hidden_from_args(a))
+  if applied_hidden:
+    print(f"[INFO] training under the hidden structural target: {applied_hidden}")
+  applied_residual = residual.apply_residual(
+    env_cfg, residual.residual_from_args(a))
+  if applied_residual:
+    print(f"[INFO] training under the residual: {applied_residual}")
 
   stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
   if a.run_name:

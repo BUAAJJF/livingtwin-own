@@ -42,7 +42,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
-from piper_push import perturb
+from piper_push import hidden_plant, perturb, residual
 from piper_push.robot import JOINT_TRIP_RAD_S
 
 # The three aspect classes the shape curriculum spans.  Cut at the ratio of the
@@ -280,6 +280,8 @@ def main() -> int:
                         "comma-separated subset of shape,mass,friction. "
                         "Unset leaves the task's own setting alone.")
     perturb.add_mismatch_args(p)
+    hidden_plant.add_hidden_target_args(p)
+    residual.add_residual_args(p)
     c.add_argument("--reset-hidden-on-respawn", action="store_true",
                    help="zero the recurrent state every time an object is "
                         "replaced, not just at the episode boundary.  The "
@@ -317,6 +319,11 @@ def main() -> int:
     # asked for.
     mismatch = perturb.mismatch_from_args(a)
     applied_mismatch = perturb.apply_session_mismatch(env_cfg, mismatch)
+    # Phase RA-Sim-0's two hooks, both inert unless named on the command line.
+    applied_hidden = hidden_plant.apply_hidden_plant(
+      env_cfg, hidden_plant.hidden_from_args(a))
+    applied_residual = residual.apply_residual(
+      env_cfg, residual.residual_from_args(a))
     if applied_mismatch:
         print(f"[INFO] session mismatch: {applied_mismatch}")
 
@@ -888,6 +895,11 @@ def main() -> int:
                 "trips": phase_trips.cpu().tolist(),
             },
             "mismatch": mismatch.to_json(),
+            # Phase RA-Sim-0's hooks, written whether or not they fired: a
+            # result file that is silent about them cannot be told apart from
+            # one produced before they existed.
+            "hidden_target": applied_hidden,
+            "residual": applied_residual,
             "provenance": _provenance(a.checkpoint),
         }
         Path(a.json).parent.mkdir(parents=True, exist_ok=True)

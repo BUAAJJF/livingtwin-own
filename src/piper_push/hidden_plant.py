@@ -184,3 +184,16 @@ def apply_hidden_plant(env_cfg, cfg: HiddenPlantCfg | None) -> dict:
   arm = env_cfg.actions["arm"]
   arm.command_hooks = tuple(arm.command_hooks) + (cfg,)
   return cfg.to_json()
+
+
+def add_hidden_target_args(parser) -> None:
+  parser.add_argument(
+    "--hidden-target", action="store_true",
+    help="install Phase RA-Sim-0's structural actuator mismatch (backlash "
+         "plus a current-limited lag).  Off by default; nothing in the "
+         "training or evaluation path sets it except an explicit oracle or "
+         "target-domain run.")
+
+
+def hidden_from_args(args) -> HiddenPlantCfg | None:
+  return HiddenPlantCfg() if getattr(args, "hidden_target", False) else None

@@ -205,3 +205,22 @@ def apply_residual(env_cfg, cfg: ResidualHookCfg | None) -> dict:
   arm = env_cfg.actions["arm"]
   arm.command_hooks = tuple(arm.command_hooks) + (cfg,)
   return cfg.to_json()
+
+
+def add_residual_args(parser) -> None:
+  parser.add_argument(
+    "--residual", default="",
+    help="path to a residual checkpoint from scripts/ra_sim0_train.py.  Empty "
+         "leaves the simulator exactly as it is.")
+  parser.add_argument(
+    "--residual-scale", type=float, default=1.0,
+    help="multiplies the correction; 0.0 is the off control and must "
+         "reproduce the nominal simulator.")
+
+
+def residual_from_args(args) -> ResidualHookCfg | None:
+  path = getattr(args, "residual", "")
+  if not path:
+    return None
+  return ResidualHookCfg(checkpoint=path,
+                         scale=float(getattr(args, "residual_scale", 1.0)))
