@@ -6,7 +6,7 @@
   the mismatch. Nineteen configurations get the one-step error from 2.214 to
   1.267 NRMS; the oracle reaches 0.116, so **89% of what the best fit leaves
   behind is still the hidden mechanism** — with a lag-1 error autocorrelation
-  of 0.983 and a 1.87× swing across command-magnitude bins.
+  of 0.983 and a 1.86× swing across command-magnitude bins.
 * **Gate R — RED, on all three held-out splits.** The residual is **1.50×,
   1.30× and 1.28×** the best parameter fit at 1, 10 and 25 steps, where the
   plan required 0.70×, 0.75× and 0.80×. Every interval is on the wrong side
@@ -20,7 +20,8 @@ work here": **the correction's 99th percentile was its output bound, to four
 decimal places, in all nine runs.** The bound was frozen in the plan at
 0.05 rad. A validation-only sweep (§6) shows what happens when it is not.
 
-*Run 2026-08-25 16:21 UTC onward, from commit `623e2a9` (301 tests). GPUs 4–7
+*Run 2026-08-25 16:21 UTC onward, from commit `623e2a9` (301 tests) to this
+one (364 tests). GPUs 4–7
 of `shen-teacher`, and from 18:30 UTC only 6 and 7, because another of the
 user's jobs took 4 and 5; GPUs 0–3 were never touched. mjlab 1.6.0 /
 rsl_rl 5.4.2 / MuJoCo 3.11.0 / mujoco-warp 3.11.0 / warp 1.16.0 /
@@ -138,13 +139,13 @@ The error that survives the best fit is **structured, not noisy**:
 | statistic | best parameter fit | oracle |
 |---|---|---|
 | lag-1 autocorrelation of the one-step error | **0.983** | 0.837 |
-| max/min RMS across command-magnitude bins | **1.87×** | 1.36× |
+| max/min RMS across command-magnitude bins | **1.86×** | 1.36× |
 
-Binned by the size of the commanded step, the best fit's RMS error is 0.0368
-rad below 2 mrad of command, 0.0202 at 2–5 mrad and 0.0330 at 20–40 mrad —
+Binned by the size of the commanded step, the best fit's RMS error is 0.0305
+rad below 2 mrad of command, 0.0164 at 2–5 mrad and 0.0292 at 20–40 mrad —
 non-monotone, which no constant response scale can be. The **signed** mean
-error flips sign between the smallest bin (+0.0167 rad) and every other bin
-(−0.002 to −0.003): below the backlash band the target does not move at all
+error flips sign between the smallest bin (**+0.0137 rad**) and every other
+bin (−0.0019 to −0.0028): below the backlash band the target does not move at all
 and the fit overshoots; above it the target lags and the fit undershoots. One
 scalar cannot sit on both sides of zero.
 
@@ -195,7 +196,7 @@ Full table, one-step / 10-step / 25-step NRMS on `test`:
 | **oracle** | **0.137** | **0.034** | **0.022** |
 
 Against the **nominal** simulator the residual does help — 2.228 → 1.913 at
-one step (−14%), RMS 0.0435 → 0.0373 rad, and 0.0403 → 0.0344 rad in the
+one step (−14%), RMS 0.0435 → 0.0374 rad, and 0.0403 → 0.0346 rad in the
 reversal region where the backlash lives. It is learning the right kind of
 thing. It does not reach the parameter fit anywhere, including in that region,
 where the fit is at 0.0225.
@@ -203,8 +204,9 @@ where the fit is at 0.0225.
 **Physical sanity.** All finite. Peak joint velocity 17.1 rad/s against the
 nominal simulator's 17.6 and the oracle's 19.0 — the residual is the
 *quietest* candidate, not one that injects energy. No state jumps. Throughput
-2,347 env-steps/s against 2,454 nominal at 64 environments (4.4%; 15.8% at 256
-from the audit). GPU 146 MiB against 118.
+2,460 env-steps/s against 2,565 nominal at 64 environments (**4.1%**; 15.8% at
+256 environments, from the audit). Peak GPU allocation 147 MiB against 146 —
+the ensemble is 75k parameters and does not register.
 
 **The ensemble's uncertainty is anti-calibrated.** Correlation between the
 four members' disagreement and the actual error: **−0.28**, the same on all
@@ -501,17 +503,18 @@ retro-fitted pass.
 4. **How much the parameters explain.** 45% of the gap. Nineteen
    configurations take the one-step NRMS from 2.214 to 1.267; the oracle
    reaches 0.116, so the best fit still leaves 89% of the explainable error,
-   with a lag-1 error autocorrelation of 0.983 and a 1.87× swing across
+   with a lag-1 error autocorrelation of 0.983 and a 1.86× swing across
    command-magnitude bins.
 5. **Did the residual reduce held-out multi-step error?** **No.** 1.50×,
    1.30× and 1.28× the best parameter fit at 1, 10 and 25 steps, on three
    held-out splits that agree to two decimals. It beats the *nominal*
    simulator by 14% and never reaches the parameter fit.
 6. **Does it hold in real MJWarp?** Yes — every number here is a real MJWarp
-   rollout, with the recording's own objects (`shape_match_at_t0 = 1.000` in
-   all 51 runs). The surrogate exists only to carry a gradient.
+   rollout, with the recording's own objects: `shape_match_at_t0` is exactly
+   1.000 in **all 70** replay runs the report quotes. The surrogate exists
+   only to carry a gradient and reports nothing.
 7. **Cost.** 75,288 parameters, 960k target transitions, 194–215 s of offline
-   training per seed, 4.4% throughput at 64 environments and 15.8% at 256.
+   training per seed, 4.1% throughput at 64 environments and 15.8% at 256.
 8. **Policy training: not run.** Gate R failed; the phase says stop. No
    threshold was moved.
 9. **Target policy, safety, retention: not measured.** Stage 6 did not run.
