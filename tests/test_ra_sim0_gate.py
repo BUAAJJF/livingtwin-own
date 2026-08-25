@@ -150,3 +150,39 @@ def test_the_interval_widens_with_the_spread_and_names_its_n():
   assert G.T95_DF2 == pytest.approx(4.3027, abs=1e-3)
   assert math.isnan(G.mean_ci([1.0])["lo"])
   assert G.mean_ci([])["n"] == 0
+
+
+def test_the_grid_reader_finds_the_best_joint_fit_and_the_best_single_axis(tmp_path):
+  """Stage 3's search now arrives as one file per configuration."""
+  grid = tmp_path / "grid"
+  grid.mkdir()
+
+  def cfg(tag, nrms, **plant):
+    p = {"damping": 1.0, "latency_steps": 0, "response_scale": 1.0,
+         "deadband": 0.0, "lowpass_hz": None, "hidden_target": False,
+         "residual": None}
+    p.update(plant)
+    (grid / f"{tag}.json").write_text(json.dumps({
+      "tag": tag, "plant": p,
+      "period1": {"h1": {"q": {"nrms": nrms}}, "shape_match_at_t0": 1.0},
+      "period25": {"h10": {"q": {"nrms": nrms / 2}},
+                   "h25": {"q": {"nrms": nrms / 4}}}}))
+
+  cfg("g_nominal", 2.21)
+  cfg("g_lat3", 1.71, latency_steps=3)
+  cfg("g_resp", 1.90, response_scale=0.5)
+  cfg("g_joint", 1.27, latency_steps=3, response_scale=0.377, deadband=0.0175,
+      damping=1.25)
+  cfg("g_broken", float("nan"), latency_steps=1)
+  cfg("g_oracle", 0.11, hidden_target=True)
+
+  out = G.load_grid(tmp_path, "grid")
+  assert out["nominal"]["tag"] == "g_nominal"
+  # a configuration that went non-finite is dropped, not counted as the best
+  assert out["n_evaluations"] == 5
+  assert out["param_joint"]["tag"] == "g_joint"
+  # the single-axis best is the best config that moves exactly one knob
+  assert out["param_1d"]["tag"] == "g_lat3"
+  # and the oracle is never mistaken for a parameter fit
+  assert out["oracle"]["tag"] == "g_oracle"
+  assert out["param_joint"]["tag"] != "g_oracle"
