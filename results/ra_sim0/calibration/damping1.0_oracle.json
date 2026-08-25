@@ -1,0 +1,37 @@
+{
+  "damping": 1.0,
+  "oracle": true,
+  "rec": "results/ra_sim0/data/val_target_7201.pt",
+  "rec_meta": {
+    "split": "val",
+    "seed": 7201,
+    "shapes": "train",
+    "domain": "target",
+    "num_envs": 64
+  },
+  "steps_scored": 400,
+  "wall_clock_s": 54.10925507545471,
+  "trace": [
+    {
+      "tag": "oracle",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 0,
+      "response_scale": 1.0,
+      "deadband": 0.0,
+      "lowpass_hz": null,
+      "nrms_q": 0.08577963325004197,
+      "nrms_qd": 0.4514709586002198,
+      "rms_q": 0.0016896938905119896,
+      "n": 23692,
+      "per_joint_rms": [
+        0.0008505872101522982,
+        0.0019711183849722147,
+        0.0015560417668893933,
+        0.00230240635573864,
+        0.001956172287464142,
+        0.0009862234583124518
+      ]
+    }
+  ]
+}

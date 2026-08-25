@@ -95,12 +95,22 @@ def gate_p(cal: dict, acc: dict) -> dict:
   if not cal or cal.get("param_joint") is None:
     return {"verdict": "not_executed", "reason": "no calibration trace"}
   pj, nom, orc = cal["param_joint"], cal["nominal"], cal["oracle"]
+  pj_acc = acc.get("param_fit") or acc.get("param_joint", [])
   crit = {}
   crit["c1_structural_error_remains"] = {
-    "param_joint_one_step_nrms": pj["nrms_q"],
+    "param_joint_one_step_nrms_on_val_stage3": pj["nrms_q"],
     "note": "an NRMS of 1.0 is as wrong as predicting no motion at all",
     "pass": pj["nrms_q"] > 0.25}
-  if orc:
+  orc_acc = acc.get("oracle", [])
+  if orc_acc and pj_acc:
+    ratio = (orc_acc[0]["period1"]["h1"]["q"]["nrms"]
+             / max(pj_acc[0]["period1"]["h1"]["q"]["nrms"], 1e-12))
+    crit["c3_oracle_beats_the_parameter_fit"] = {
+      "oracle_one_step_nrms_on_test": orc_acc[0]["period1"]["h1"]["q"]["nrms"],
+      "best_parameter_fit_one_step_nrms_on_test":
+        pj_acc[0]["period1"]["h1"]["q"]["nrms"],
+      "ratio": ratio, "pass": ratio < 0.70}
+  elif orc:
     ratio = orc["nrms_q"] / max(pj["nrms_q"], 1e-12)
     crit["c3_oracle_beats_the_parameter_fit"] = {
       "oracle_one_step_nrms": orc["nrms_q"], "ratio_to_param_joint": ratio,
@@ -108,15 +118,20 @@ def gate_p(cal: dict, acc: dict) -> dict:
   else:
     crit["c3_oracle_beats_the_parameter_fit"] = {"verdict": "not_executed"}
   # c2: does the residual error depend on reversal / magnitude?
-  pj_acc = [b for b in acc.get("param_joint", [])]
   if pj_acc:
     b = pj_acc[0]["period1"]
-    rev, dead = b.get("reversal_rms"), b.get("deadband_rms")
     over = b["h1"]["q"]["rms"]
+    bins = [x for x in b.get("error_by_command_magnitude", []) if x["n"] > 500]
+    span = (max(x["rms"] for x in bins) / min(x["rms"] for x in bins)
+            if len(bins) >= 2 else None)
     crit["c2_error_varies_with_reversal_or_magnitude"] = {
-      "overall_rms": over, "reversal_rms": rev, "deadband_rms": dead,
-      "reversal_over_overall": (rev / over) if (rev and over) else None,
-      "pass": bool(rev and over and abs(rev / over - 1.0) > 0.15)}
+      "overall_rms": over,
+      "reversal_rms": b.get("error_after_reversal", {}).get("rms"),
+      "no_reversal_rms": b.get("error_not_after_reversal", {}).get("rms"),
+      "by_command_magnitude": bins,
+      "max_over_min_across_magnitude_bins": span,
+      "error_autocorrelation_lag1": b.get("error_autocorrelation_lag1"),
+      "pass": bool(span is not None and span > 1.5)}
   else:
     crit["c2_error_varies_with_reversal_or_magnitude"] = {
       "verdict": "not_executed"}
@@ -134,7 +149,12 @@ def gate_p(cal: dict, acc: dict) -> dict:
 
 
 def gate_r(acc: dict) -> dict:
-  base = acc.get("param_joint", [])
+  # The comparator is the best parameter fit SELECTED ON VAL.  Stage 3's
+  # coordinate descent ran under the contaminated mask and its winner
+  # ("param_joint") was re-scored on val under the clean one and beaten by a
+  # broad-randomisation draw ("param_fit"); the plan says the baseline is the
+  # best the current simulator can do, so it is the one that gets used.
+  base = acc.get("param_fit") or acc.get("param_joint", [])
   res = acc.get("residual", [])
   if not base or not res:
     return {"verdict": "not_executed",

@@ -1,0 +1,146 @@
+{
+  "task": "Mjlab-Pick-Place-PiperX",
+  "num_envs": 256,
+  "steps": 60,
+  "device": "cuda:0",
+  "seed": 20260826,
+  "tests": {
+    "L2_inert_hook_matches_baseline": {
+      "at_8_steps": {
+        "dq_mean": 4.8652150752559464e-08,
+        "dq_max": 6.651878356933594e-05,
+        "dqd_mean": 3.127916897938121e-06,
+        "dqd_max": 0.012948274612426758
+      },
+      "at_full_length": {
+        "dq_mean": 0.0076069277711212635,
+        "dq_max": 1.366046667098999,
+        "dqd_mean": 0.023598643019795418,
+        "dqd_max": 4.957973480224609
+      },
+      "floor_at_8_steps": {
+        "dq_mean": 3.5588521996032796e-07,
+        "dq_max": 0.0016650557518005371,
+        "dqd_mean": 2.6619496566127054e-05,
+        "dqd_max": 0.14996889233589172
+      },
+      "floor_at_full_length": {
+        "dq_mean": 0.007614122238010168,
+        "dq_max": 1.366046667098999,
+        "dqd_mean": 0.02368495799601078,
+        "dqd_max": 4.957973480224609
+      },
+      "steps_compared": 60,
+      "ratio_to_floor_mean_at_8": 0.1367074214489237,
+      "ratio_to_floor_mean_at_full": 0.9990551153942618,
+      "pass": true
+    },
+    "L2_hidden_plant_bites": {
+      "max_abs_dq_rad": 1.1748833656311035,
+      "mean_abs_dq_rad": 0.0770854577422142,
+      "mean_abs_dq_rad_at_8_steps": 0.0436214953660965,
+      "times_the_floor_mean_at_8_steps": 122571.80944732453,
+      "finite": true,
+      "pass": true
+    },
+    "L2_throughput": {
+      "pass": true,
+      "baseline_env_steps_per_s": 6971.693986175846,
+      "baseline_second_build_env_steps_per_s": 6971.693986175846,
+      "hidden_target_env_steps_per_s": 13235.67588809442,
+      "note": "the hidden target's figure is NOT a hook overhead: it moves the arm differently, and a lagged, backlashed arm makes fewer and simpler contacts for the solver.  The overhead of running a hook is the residual ensemble's number below, which shares the baseline's trajectory to within the reproducibility floor."
+    },
+    "L5_residual_identity_init": {
+      "at_8_steps": {
+        "dq_mean": 3.680333691136184e-07,
+        "dq_max": 0.0016677789390087128,
+        "dqd_mean": 2.8778555133612826e-05,
+        "dqd_max": 0.15004584193229675
+      },
+      "at_full_length": {
+        "dq_mean": 8.229472769016866e-06,
+        "dq_max": 0.010254383087158203,
+        "dqd_mean": 0.00023375425371341407,
+        "dqd_max": 0.5793242454528809
+      },
+      "floor_at_8_steps": {
+        "dq_mean": 3.5588521996032796e-07,
+        "dq_max": 0.0016650557518005371,
+        "dqd_mean": 2.6619496566127054e-05,
+        "dqd_max": 0.14996889233589172
+      },
+      "params": 75288,
+      "env_steps_per_s": 5873.405574994237,
+      "overhead_pct": 15.753537280313823,
+      "ratio_to_floor_mean_at_8": 1.0341350201467896,
+      "pass": true
+    },
+    "L5_per_env_state_isolation": {
+      "untouched_max_drift": 0.0,
+      "reset_matches_posture": 0.0,
+      "pass": true
+    },
+    "L4_pre_step_external_wrench": {
+      "reachable": true,
+      "note": "batched [num_envs, num_bodies, 3] write accepted",
+      "pass": true
+    },
+    "L1_observation_post_processing": {
+      "mechanism": "ObservationTermCfg class terms + mjlab DelayBuffer (piper_push.perturb.PerturbedCameraScene)",
+      "already_in_repo": true,
+      "pass": true,
+      "why_not_used": "an observation filter cannot change what the arm does; the mismatch under test is in the command path"
+    },
+    "L3_actuator_command": {
+      "mechanism": "Entity.write_ctrl_to_sim",
+      "already_in_repo": true,
+      "pass": true,
+      "why_not_used": "for a position actuator ctrl IS the target this task's action term already writes, so L2 subsumes it and keeps the ramp and the encoder bias in one place"
+    }
+  },
+  "reproducibility_floor": {
+    "at_8_steps": {
+      "dq_mean": 3.5588521996032796e-07,
+      "dq_max": 0.0016650557518005371,
+      "dqd_mean": 2.6619496566127054e-05,
+      "dqd_max": 0.14996889233589172
+    },
+    "at_full_length": {
+      "dq_mean": 0.007614122238010168,
+      "dq_max": 1.366046667098999,
+      "dqd_mean": 0.02368495799601078,
+      "dqd_max": 4.957973480224609
+    },
+    "note": "two identical builds, same seed, same command stream"
+  },
+  "hidden_plant_cfg": {
+    "name": "backlash+rate_lag",
+    "backlash_up": [
+      0.012,
+      0.018,
+      0.015,
+      0.008,
+      0.006,
+      0.01
+    ],
+    "backlash_down": [
+      0.02,
+      0.009,
+      0.022,
+      0.005,
+      0.011,
+      0.006
+    ],
+    "beta0": 0.85,
+    "kappa": [
+      1.6,
+      1.6,
+      1.6,
+      0.9,
+      0.9,
+      0.9
+    ],
+    "s_ref": 0.04
+  },
+  "verdict": "L2 action/command wrapper"
+}

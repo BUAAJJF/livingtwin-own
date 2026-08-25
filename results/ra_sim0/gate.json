@@ -1,0 +1,344 @@
+{
+  "stage0_injection": {
+    "verdict": "L2 action/command wrapper",
+    "floor": {
+      "at_8_steps": {
+        "dq_mean": 3.5588521996032796e-07,
+        "dq_max": 0.0016650557518005371,
+        "dqd_mean": 2.6619496566127054e-05,
+        "dqd_max": 0.14996889233589172
+      },
+      "at_full_length": {
+        "dq_mean": 0.007614122238010168,
+        "dq_max": 1.366046667098999,
+        "dqd_mean": 0.02368495799601078,
+        "dqd_max": 4.957973480224609
+      },
+      "note": "two identical builds, same seed, same command stream"
+    }
+  },
+  "calibration": {
+    "n_evaluations": 30,
+    "nominal": {
+      "tag": "nominal",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 0,
+      "response_scale": 1.0,
+      "deadband": 0.0,
+      "lowpass_hz": null,
+      "nrms_q": 1.622419794387183,
+      "nrms_qd": 8.545188384320333,
+      "rms_q": 0.027902303263545036,
+      "n": 1349,
+      "per_joint_rms": [
+        0.017966734245419502,
+        0.012589260935783386,
+        0.021988144144415855,
+        0.03443628177046776,
+        0.03373197093605995,
+        0.037185437977313995
+      ],
+      "file": "damping1.0.json"
+    },
+    "param_1d": {
+      "tag": "param_1d_best",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 1,
+      "response_scale": 1.0,
+      "deadband": 0.0,
+      "lowpass_hz": null,
+      "nrms_q": 1.5331625957810207,
+      "nrms_qd": 9.996198652353609,
+      "rms_q": 0.03171786665916443,
+      "n": 768,
+      "per_joint_rms": [
+        0.020663661882281303,
+        0.01630180887877941,
+        0.023132119327783585,
+        0.04006000980734825,
+        0.03811636567115784,
+        0.04184072092175484
+      ],
+      "file": "damping1.0.json"
+    },
+    "param_joint": {
+      "tag": "r0:deadband=0.008",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 1,
+      "response_scale": 0.6,
+      "deadband": 0.008,
+      "lowpass_hz": null,
+      "nrms_q": 1.4666360120145843,
+      "nrms_qd": 8.12500165700821,
+      "rms_q": 0.028576556593179703,
+      "n": 1332,
+      "per_joint_rms": [
+        0.018131423741579056,
+        0.014692830853164196,
+        0.022473009303212166,
+        0.03533569723367691,
+        0.03266890347003937,
+        0.039168667048215866
+      ],
+      "file": "damping1.0.json"
+    },
+    "broad_dr_best": {
+      "tag": "dr0",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 2,
+      "response_scale": 0.38208115100860596,
+      "deadband": 0.02181251347064972,
+      "lowpass_hz": null,
+      "nrms_q": 1.5721368783257708,
+      "nrms_qd": 9.100561336057943,
+      "rms_q": 0.030655624344944954,
+      "n": 1356,
+      "per_joint_rms": [
+        0.020386701449751854,
+        0.015261584892868996,
+        0.022375350818037987,
+        0.036740563809871674,
+        0.03777250647544861,
+        0.04138577729463577
+      ],
+      "file": "damping1.0.json"
+    },
+    "oracle": {
+      "tag": "oracle",
+      "damping": 1.0,
+      "gripper_rate_scale": null,
+      "latency_steps": 0,
+      "response_scale": 1.0,
+      "deadband": 0.0,
+      "lowpass_hz": null,
+      "nrms_q": 0.08577963325004197,
+      "nrms_qd": 0.4514709586002198,
+      "rms_q": 0.0016896938905119896,
+      "n": 23692,
+      "per_joint_rms": [
+        0.0008505872101522982,
+        0.0019711183849722147,
+        0.0015560417668893933,
+        0.00230240635573864,
+        0.001956172287464142,
+        0.0009862234583124518
+      ],
+      "file": "damping1.0_oracle.json"
+    }
+  },
+  "gate_P": {
+    "criteria": {
+      "c1_structural_error_remains": {
+        "param_joint_one_step_nrms_on_val_stage3": 1.4666360120145843,
+        "note": "an NRMS of 1.0 is as wrong as predicting no motion at all",
+        "pass": true
+      },
+      "c3_oracle_beats_the_parameter_fit": {
+        "oracle_one_step_nrms_on_test": 0.13689735575037987,
+        "best_parameter_fit_one_step_nrms_on_test": 1.5022716464355574,
+        "ratio": 0.09112689843757384,
+        "pass": true
+      },
+      "c2_error_varies_with_reversal_or_magnitude": {
+        "overall_rms": 0.029366569593548775,
+        "reversal_rms": 0.026616917923092842,
+        "no_reversal_rms": 0.030249588191509247,
+        "by_command_magnitude": [
+          {
+            "lo": 0.0,
+            "hi": 0.002,
+            "n": 5765,
+            "rms": 0.03681457042694092,
+            "mean_signed": 0.01669439859688282
+          },
+          {
+            "lo": 0.002,
+            "hi": 0.005,
+            "n": 5596,
+            "rms": 0.02023288607597351,
+            "mean_signed": -0.002156424568966031
+          },
+          {
+            "lo": 0.005,
+            "hi": 0.01,
+            "n": 8971,
+            "rms": 0.02076137624680996,
+            "mean_signed": -0.0026341304183006287
+          },
+          {
+            "lo": 0.01,
+            "hi": 0.02,
+            "n": 15210,
+            "rms": 0.021771645173430443,
+            "mean_signed": -0.0031045754440128803
+          },
+          {
+            "lo": 0.02,
+            "hi": 0.04,
+            "n": 111505,
+            "rms": 0.032974064350128174,
+            "mean_signed": -0.0021248506382107735
+          },
+          {
+            "lo": 0.04,
+            "hi": 1.0,
+            "n": 142988,
+            "rms": 0.027445342391729355,
+            "mean_signed": -0.002636843593791127
+          }
+        ],
+        "max_over_min_across_magnitude_bins": 1.819541230485062,
+        "error_autocorrelation_lag1": 0.9845911860466003,
+        "pass": true
+      },
+      "c4_not_leakage": {
+        "note": "every candidate is scored on a split generated under its own seed with held-out shape classes, resynchronised from the same recorded state, and the reproducibility floor of two identical builds is reported beside it",
+        "pass": true
+      }
+    },
+    "verdict": "GREEN"
+  },
+  "gate_R": {
+    "per_split": {
+      "test": {
+        "h1": {
+          "param_joint": 1.5022716464355574,
+          "residual": {
+            "n": 3,
+            "mean": 1.9136451972948028,
+            "sd": 0.012271480321540464,
+            "lo": 1.8831611502479155,
+            "hi": 1.94412924434169
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.2738343307186233,
+            "sd": 0.00816861607596535,
+            "lo": 1.2535423634707445,
+            "hi": 1.294126297966502
+          },
+          "required_reduction": 0.3,
+          "reduction": -0.2738343307186233,
+          "pass": false
+        },
+        "h10": {
+          "param_joint": 1.2975722888128758,
+          "residual": {
+            "n": 3,
+            "mean": 1.4677226988895715,
+            "sd": 0.003665542042098218,
+            "lo": 1.4586169876684465,
+            "hi": 1.4768284101106965
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.1311298118368134,
+            "sd": 0.002824923184396696,
+            "lo": 1.1241123136213917,
+            "hi": 1.138147310052235
+          },
+          "required_reduction": 0.25,
+          "reduction": -0.13112981183681338,
+          "pass": false
+        },
+        "h25": {
+          "param_joint": 0.6133354078537395,
+          "residual": {
+            "n": 3,
+            "mean": 0.7099053807923981,
+            "sd": 0.0023474462477379577,
+            "lo": 0.7040740010418661,
+            "hi": 0.71573676054293
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.1574505102788513,
+            "sd": 0.0038273450671181685,
+            "lo": 1.147942858061384,
+            "hi": 1.1669581624963186
+          },
+          "required_reduction": 0.2,
+          "reduction": -0.15745051027885126,
+          "pass": false
+        }
+      },
+      "test_amp": {
+        "h1": {
+          "param_joint": 1.5186304133714352,
+          "residual": {
+            "n": 3,
+            "mean": 1.9306234851428605,
+            "sd": 0.012259747580934434,
+            "lo": 1.900168583839376,
+            "hi": 1.961078386446345
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.271292519986334,
+            "sd": 0.008072897442977713,
+            "lo": 1.2512383310043862,
+            "hi": 1.291346708968282
+          },
+          "required_reduction": 0.3,
+          "reduction": -0.2712925199863341,
+          "pass": false
+        },
+        "h10": {
+          "param_joint": 1.3204043642746066,
+          "residual": {
+            "n": 3,
+            "mean": 1.4945360969074353,
+            "sd": 0.004051710303125766,
+            "lo": 1.4844710905459746,
+            "hi": 1.504601103268896
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.1318775803414522,
+            "sd": 0.0030685374971111557,
+            "lo": 1.1242549106246718,
+            "hi": 1.1395002500582327
+          },
+          "required_reduction": 0.25,
+          "reduction": -0.13187758034145225,
+          "pass": false
+        },
+        "h25": {
+          "param_joint": 0.6207409304594255,
+          "residual": {
+            "n": 3,
+            "mean": 0.7141528714311439,
+            "sd": 0.00247216521607806,
+            "lo": 0.708011672587976,
+            "hi": 0.7202940702743118
+          },
+          "ratio": {
+            "n": 3,
+            "mean": 1.1504845844506852,
+            "sd": 0.003982603844486829,
+            "lo": 1.1405912480492617,
+            "hi": 1.1603779208521088
+          },
+          "required_reduction": 0.2,
+          "reduction": -0.15048458445068524,
+          "pass": false
+        }
+      }
+    },
+    "splits_covered": [
+      "test",
+      "test_amp"
+    ],
+    "n_residual_seeds": 6,
+    "finite": true,
+    "verdict": "RED"
+  },
+  "gate_C": {
+    "verdict": "stopped_by_gate_R"
+  },
+  "overall": "RED"
+}
