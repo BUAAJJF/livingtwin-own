@@ -102,6 +102,11 @@ def main() -> int:
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--members", type=int, default=4)
   ap.add_argument("--hidden", type=int, default=64)
+  ap.add_argument("--delta-max", type=float, default=0.0,
+                  help="override the residual's output bound in rad; "
+                       "0 keeps residual.DELTA_MAX, the value the plan "
+                       "committed to.")
+  ap.add_argument("--suffix", default="")
   ap.add_argument("--window", type=int, default=80)
   ap.add_argument("--burn-in", type=int, default=16)
   ap.add_argument("--rollout-k", type=int, default=5)
@@ -174,7 +179,9 @@ def main() -> int:
   feat = R.build_features(b["q"], b["qd"], b["u"], b["u_prev"]).reshape(-1, R.FEATURE_DIM)
   fmean, fstd = feat.mean(0), feat.std(0)
 
-  ens = R.ResidualEnsemble(a.members, hidden=a.hidden).to(dev)
+  dmax = a.delta_max or R.DELTA_MAX
+  ens = R.ResidualEnsemble(a.members, hidden=a.hidden,
+                           delta_max=dmax).to(dev)
   for m in ens.members:
     m.set_norm(fmean, fstd)
   opt = torch.optim.Adam(ens.parameters(), lr=a.lr)
@@ -278,14 +285,14 @@ def main() -> int:
               {k: v.detach().cpu().clone() for k, v in ens.state_dict().items()})
 
   ens.load_state_dict(best[2])
-  ck = out / f"residual_seed{a.seed}.pt"
+  ck = out / f"residual_seed{a.seed}{a.suffix}.pt"
   torch.save({"n_members": a.members, "hidden": a.hidden,
-              "delta_max": R.DELTA_MAX, "state_dict": ens.state_dict(),
+              "delta_max": dmax, "state_dict": ens.state_dict(),
               "meta": {**meta, "best_epoch": best[1],
                        "best_val_total": best[0], "history": hist,
                        "wall_clock_s": time.time() - t0,
                        "params": sum(p.numel() for p in ens.parameters())}}, ck)
-  (out / f"residual_seed{a.seed}.json").write_text(json.dumps(
+  (out / f"residual_seed{a.seed}{a.suffix}.json").write_text(json.dumps(
     {**meta, "best_epoch": best[1], "best_val_total": best[0],
      "history": hist, "wall_clock_s": time.time() - t0,
      "params": sum(p.numel() for p in ens.parameters())}, indent=2))
