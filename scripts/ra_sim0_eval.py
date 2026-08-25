@@ -127,11 +127,14 @@ def main() -> int:
           pqd.append(harness.robot.data.joint_vel[:, harness.arm_ids].clone().cpu())
           spread_log.append(res_hook.last_spread.clone().cpu())
           delta_log.append(res_hook.last_delta.clone().cpu())
-      out = {"q": torch.stack(pq), "qd": torch.stack(pqd),
-             "done": torch.stack(cdone)}
+      dn = torch.stack(cdone)
+      out = {"q": torch.stack(pq), "qd": torch.stack(pqd), "done": dn,
+             "pristine": torch.cumsum(dn.long(), 0) - dn.long() == 0}
     wall = time.time() - tp
-    ok, hor = rp.segment_mask(rec, out["done"], period)
+    ok, hor = rp.segment_mask(rec, out["done"], period,
+                              out.get("pristine"))
     block = {"period": period,
+             "usable_fraction": float(ok.float().mean()),
              "env_steps_per_s": rec.steps * rec.num_envs / max(wall, 1e-9),
              "wall_clock_s": wall}
     for h in horizons:

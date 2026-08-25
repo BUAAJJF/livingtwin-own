@@ -143,3 +143,22 @@ def test_the_deadband_mask_is_the_small_commanded_steps():
   m = rp.deadband_mask(rec, width=0.004)
   assert bool(m[0, 0, 0])
   assert not bool(m[1, 0, 0])
+
+
+def test_a_candidate_that_has_already_reset_is_no_longer_holding_the_same_object():
+  """The correction found mid-phase, pinned.
+
+  Resynchronising the object's pose does not resynchronise its identity: the
+  candidate's first auto-reset draws a fresh shape from its own RNG.  Before
+  that reset the object is exactly the recorded one; after it, the arm is
+  pushing something else at the right place.
+  """
+  rec = make(T=8, E=2)
+  cd = torch.zeros(8, 2, dtype=torch.bool)
+  cd[3, 0] = True
+  pristine = torch.cumsum(cd.long(), dim=0) - cd.long() == 0
+  ok, _ = rp.segment_mask(rec, cd, 1, pristine)
+  assert bool(ok[2, 0])          # before the reset
+  assert not bool(ok[3, 0])      # the resetting step itself
+  assert not bool(ok[5, 0])      # and everything after it
+  assert bool(ok[:7, 1].all())   # the other environment never reset

@@ -87,7 +87,7 @@ def score(harness, rec, plant: dict, gripper_rate: float | None = None
       grip._ra_base = grip._max_step.clone()
     grip._max_step = grip._ra_base * float(gripper_rate)
   out = harness.run(rec, period=1)
-  ok, hor = rp.segment_mask(rec, out["done"], period=1)
+  ok, hor = rp.segment_mask(rec, out["done"], 1, out.get("pristine"))
   q = rp.nrms(out["q"], rec, ok, hor, 1, 1, "q")
   qd = rp.nrms(out["qd"], rec, ok, hor, 1, 1, "qd")
   return {"q": q, "qd": qd, "objective": q["nrms"]}

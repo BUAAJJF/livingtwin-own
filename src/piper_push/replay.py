@@ -112,11 +112,21 @@ class ReplayHarness:
       pqd.append(self.robot.data.joint_vel[:, self.arm_ids].clone().cpu())
       if log_every and (t + 1) % log_every == 0:
         print(f"      replay P={period} step {t + 1}/{T}", flush=True)
+    done = torch.stack(cdone)
+    # Which (step, env) pairs still hold the object the recording held.
+    # Resynchronising the object's *pose* every P steps does not
+    # resynchronise its *identity*: the candidate's first auto-reset draws a
+    # fresh shape and mass from its own RNG, and from then on the arm is
+    # pushing something else at the right place.  Before that first reset the
+    # object is exactly the recorded one -- verified at construction, where
+    # the shape classes match 64 of 64 -- so "pristine" is the honest window.
+    pristine = torch.cumsum(done.long(), dim=0) - done.long() == 0
     return {"q": torch.stack(pq), "qd": torch.stack(pqd),
-            "done": torch.stack(cdone)}
+            "done": done, "pristine": pristine}
 
 
-def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int
+def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int,
+                 pristine: torch.Tensor | None = None
                  ) -> tuple[torch.Tensor, torch.Tensor]:
   """Which (step, env) predictions are usable, and at what horizon.
 
@@ -134,6 +144,8 @@ def segment_mask(rec: Recording, cand_done: torch.Tensor, period: int
       running = torch.ones(E, dtype=torch.bool)
     running = running & ~rec.done[t].cpu() & ~cand_done[t].cpu()
     running = running & (rec.shape[t + 1].cpu() == rec.shape[t].cpu())
+    if pristine is not None:
+      running = running & pristine[t].cpu()
     ok[t] = running
     hor[t] = (t % period) + 1
   return ok, hor
