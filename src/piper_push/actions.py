@@ -124,6 +124,22 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     """Radians of commanded displacement below which the servo does not move
     at all.  Stiction and encoder quantisation both present this way."""
 
+    # -- structural command-path stage (Phase RA-Sim-0) --------------------
+    # Everything above is a *parameter*: a scalar the calibration axes in
+    # piper_push.perturb can search over.  This is the slot for a mismatch
+    # that is not a scalar -- a per-joint hysteresis, a rate-dependent lag --
+    # and for the learned residual that tries to cancel one.  Empty by
+    # default, and an empty tuple leaves process_actions byte-for-byte the
+    # function it was.
+    command_hooks: tuple = ()
+    """Config objects with ``.build(action_term) -> hook``.  A hook is called
+    as ``hook(target, action_term) -> target`` once per control step, after
+    the delay/deadband/response plant, and must own a ``reset(env_ids)``.
+
+    Batched Torch only.  A hook that loops over environments in Python is a
+    hook that cannot run at 512 environments; see
+    docs/residual_injection_audit.md for the throughput this was held to."""
+
     def build(self, env) -> "RateLimitedJointPositionAction":
         return RateLimitedJointPositionAction(self, env)
 
@@ -203,6 +219,78 @@ class RateLimitedJointPositionAction(JointPositionAction):
         )
         self.stats["held_deadband"] = torch.zeros((), device=self.device)
 
+        # -- the structural stage, downstream of the parametric one ----------
+        self._hooks = tuple(h.build(self) for h in (cfg.command_hooks or ()))
+        # The ramp is drawn from whatever was handed to the servo last step,
+        # so once a hook can change that, the ramp origin has to track the
+        # hook's output rather than the plant's.
+        self._prev_hooked = self._default.clone()
+
+    def set_plant(self, *, latency_steps: int | None = None,
+                  response_scale: float | None = None,
+                  deadband: float | None = None,
+                  lowpass_hz: float | None = -1.0) -> None:
+        """Retune the parametric plant on an already-built term.
+
+        A calibration search over four scalars would otherwise rebuild the
+        whole environment once per candidate, which at 512 environments is
+        thirty seconds of MJWarp compilation to answer a question about four
+        numbers.  These four fields have no effect on the model, the scene or
+        the compiled kernels, so they can move in place.
+
+        ``lowpass_hz`` takes ``None`` to mean "no filter" and so cannot use
+        ``None`` as "leave alone"; ``-1.0`` is the sentinel.
+
+        Damping is deliberately absent: it lives on the actuator config and
+        genuinely does need a rebuild.
+        """
+        if latency_steps is not None:
+            n = max(int(latency_steps), 0)
+            if n != self._latency:
+                self._latency = n
+                self._delay_buf = [self._prev_effective.clone()
+                                   for _ in range(n)]
+        if response_scale is not None:
+            self._response_scale = float(response_scale)
+        if deadband is not None:
+            self._deadband = float(deadband)
+        if lowpass_hz != -1.0:
+            if lowpass_hz is None:
+                self._lp_alpha = None
+            else:
+                tau = 1.0 / (2.0 * torch.pi * float(lowpass_hz))
+                self._lp_alpha = self._dt / (self._dt + tau)
+        self._plant_active = bool(
+            self._latency or self._response_scale != 1.0 or self._deadband > 0.0
+        )
+
+    @property
+    def plant(self) -> dict:
+        """What the parametric plant is currently set to."""
+        return {"latency_steps": self._latency,
+                "response_scale": self._response_scale,
+                "deadband": self._deadband,
+                "lowpass_alpha": self._lp_alpha}
+
+    @property
+    def joint_pos(self) -> torch.Tensor:
+        """Measured position of the joints this term commands."""
+        return self._entity.data.joint_pos[:, self._target_ids]
+
+    @property
+    def joint_vel(self) -> torch.Tensor:
+        """Measured velocity of the joints this term commands."""
+        return self._entity.data.joint_vel[:, self._target_ids]
+
+    @property
+    def servo_error(self) -> torch.Tensor:
+        """Measured position minus the target the servo is currently holding.
+
+        The quantity a real controller reports, and the only window a
+        deployable model gets onto the plant's own state."""
+        return (self._entity.data.joint_pos[:, self._target_ids]
+                - self._entity.data.joint_pos_target[:, self._target_ids])
+
     @property
     def max_step(self) -> torch.Tensor:
         """Largest change in target permitted per control step, per joint."""
@@ -273,6 +361,18 @@ class RateLimitedJointPositionAction(JointPositionAction):
             self._ramp_from.copy_(self._prev_effective)
             self._prev_effective.copy_(effective)
             self._processed_actions = effective
+
+        # -- structural stage: hysteresis, rate-dependent lag, residual ------
+        # After the plant, because the parametric axes model transport and the
+        # servo's linear behaviour and this models what is left: the gearbox
+        # and the current limit, which the command meets last.
+        if self._hooks:
+            hooked = self._processed_actions
+            for hook in self._hooks:
+                hooked = hook(hooked, self)
+            self._ramp_from.copy_(self._prev_hooked)
+            self._prev_hooked.copy_(hooked)
+            self._processed_actions = hooked
         self._substep = 0
 
     def apply_actions(self) -> None:
@@ -326,3 +426,10 @@ class RateLimitedJointPositionAction(JointPositionAction):
             slot[env_ids] = self._previous_target[env_ids]
         self._prev_cmd_vel[env_ids] = 0.0
         self._prev_cmd_acc[env_ids] = 0.0
+        # A hook carries per-environment state -- a backlash position, a
+        # recurrent hidden vector -- and one environment's must never survive
+        # into another's episode.  Reset before the hooks so they can read the
+        # fresh posture off `_previous_target`.
+        self._prev_hooked[env_ids] = self._previous_target[env_ids]
+        for hook in self._hooks:
+            hook.reset(env_ids)
