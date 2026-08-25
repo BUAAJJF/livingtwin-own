@@ -170,12 +170,19 @@ class ResidualHook:
     self._h = [ens.members[i].zero_hidden(n, dev) for i in range(len(ens))]
     self._u_prev = action_term._default.clone()
     self.stats = {"steps": 0, "abs_mean": 0.0, "clipped": 0.0}
+    # The last step's per-joint disagreement between members.  An evaluation
+    # that wants to ask whether the ensemble knows where it is wrong reads
+    # this; nothing in the simulator does.
+    self.last_spread = torch.zeros_like(action_term._default)
+    self.last_delta = torch.zeros_like(action_term._default)
 
   @torch.no_grad()
   def __call__(self, target: torch.Tensor, action_term) -> torch.Tensor:
     feat = build_features(action_term.joint_pos, action_term.joint_vel,
                           target, self._u_prev)
-    delta, _spread, self._h = self._ens(feat, self._h)
+    delta, spread, self._h = self._ens(feat, self._h)
+    self.last_spread.copy_(spread)
+    self.last_delta.copy_(delta)
     self._u_prev.copy_(target)
     if self._scale != 1.0:
       delta = delta * self._scale
