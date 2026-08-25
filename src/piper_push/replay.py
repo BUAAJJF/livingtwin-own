@@ -65,10 +65,21 @@ class Recording:
 
 
 class ReplayHarness:
-  """Binds an already-built environment to the indices a replay needs."""
+  """Binds an already-built environment to the indices a replay needs.
 
-  def __init__(self, env, object_name: str = "object") -> None:
+  ``seed`` is the recording's generation seed and is not decoration.  The
+  scene's object draw comes from a global RNG that every reset advances, so a
+  second replay inside one process -- the ``P = 25`` pass, or the next
+  configuration in a search -- resets into a *different* set of objects at the
+  recorded poses.  Re-seeding immediately before each reset puts the recorded
+  objects back, and ``shape_match_at_t0`` in every result file says whether it
+  worked rather than assuming it did.
+  """
+
+  def __init__(self, env, object_name: str = "object",
+               seed: int | None = None) -> None:
     self.env = env
+    self.seed = seed
     robot = env.scene["robot"]
     self.robot = robot
     self.arm_ids, _ = robot.find_joints([f"joint{i}" for i in range(1, 7)],
@@ -77,6 +88,18 @@ class ReplayHarness:
     self.obj = env.scene[object_name]
     self.arm_ids_t = torch.tensor(self.arm_ids, device=env.device)
     self.grip_ids_t = torch.tensor(self.grip_ids, device=env.device)
+
+  def _shape_match(self, rec: Recording) -> float:
+    """Fraction of environments whose object is the class the recording had.
+
+    1.0 means the replay is pushing the same objects.  Anything less is a
+    number every metric in the file has to be read against."""
+    from piper_push import shapes as shp
+    try:
+      cls = shp.object_shape_class(self.env, "object").cpu()
+    except Exception:
+      return float("nan")
+    return float((cls == rec.shape[0].cpu()).float().mean())
 
   def write_state(self, q, qd, gq, obj) -> None:
     """Put the candidate back on the recorded state, arm and object both.
@@ -98,7 +121,10 @@ class ReplayHarness:
     dev = env.device
     T = rec.steps
     pq, pqd, cdone = [], [], []
+    if self.seed is not None:
+      type(env).seed(int(self.seed))
     env.reset()
+    self.shape_match_at_t0 = self._shape_match(rec)
     for t in range(T):
       if t % period == 0:
         self.write_state(rec.q[t].to(dev), rec.qd[t].to(dev),

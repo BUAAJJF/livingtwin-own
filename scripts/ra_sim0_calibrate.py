@@ -98,6 +98,11 @@ def score(harness, rec, plant: dict, gripper_rate: float | None = None
       grip._ra_base = grip._max_step.clone()
     grip._max_step = grip._ra_base * float(gripper_rate)
   out = harness.run(rec, period=1)
+  if harness.shape_match_at_t0 < 0.999:
+    raise RuntimeError(
+      "the replay drew different objects from the recording "
+      f"({harness.shape_match_at_t0:.3f} match); a search whose candidates "
+      "push different objects is not a search")
   ok, hor = rp.segment_mask(rec, out["done"], 1, out.get("pristine"))
   q = rp.nrms(out["q"], rec, ok, hor, 1, 1, "q")
   qd = rp.nrms(out["qd"], rec, ok, hor, 1, 1, "qd")
@@ -123,7 +128,7 @@ def main() -> int:
 
   rec, meta = rp.Recording.load(a.rec, steps=a.steps)
   env = build_env(meta, a.damping, a.device, a.oracle, rec.num_envs)
-  harness = rp.ReplayHarness(env)
+  harness = rp.ReplayHarness(env, seed=meta["seed"])
   t0 = time.time()
   trace = []
 

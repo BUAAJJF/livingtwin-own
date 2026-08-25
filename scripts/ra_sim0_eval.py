@@ -97,7 +97,7 @@ def main() -> int:
   arm.set_plant(latency_steps=a.latency, response_scale=a.response,
                 deadband=a.deadband,
                 lowpass_hz=None if a.lowpass < 0 else a.lowpass)
-  harness = rp.ReplayHarness(env)
+  harness = rp.ReplayHarness(env, seed=meta["seed"])
   t0 = time.time()
 
   res_hook = None
@@ -126,7 +126,9 @@ def main() -> int:
       # the same loop, with the ensemble's disagreement recorded alongside
       dev = env.device
       pq, pqd, cdone = [], [], []
+      type(env).seed(int(meta["seed"]))
       env.reset()
+      harness.shape_match_at_t0 = harness._shape_match(rec)
       with torch.no_grad():
         for t in range(rec.steps):
           if t % period == 0:
@@ -146,6 +148,7 @@ def main() -> int:
                               out.get("pristine"))
     block = {"period": period,
              "usable_fraction": float(ok.float().mean()),
+             "shape_match_at_t0": harness.shape_match_at_t0,
              "env_steps_per_s": rec.steps * rec.num_envs / max(wall, 1e-9),
              "wall_clock_s": wall}
     for h in horizons:
