@@ -104,8 +104,10 @@ class ReplayHarness:
         self.write_state(rec.q[t].to(dev), rec.qd[t].to(dev),
                          rec.gq[t].to(dev), rec.obj[t].to(dev))
       out = env.step(rec.a[t].to(dev))
-      cdone.append(out[2].bool().cpu() if len(out) > 2 else
-                   torch.zeros(rec.num_envs, dtype=torch.bool))
+      # The raw environment returns termination and time-out separately; a
+      # segment is spoilt by either.  The wrapper the collector used ORs them
+      # for you, which is why this is the one place the distinction bites.
+      cdone.append((out[2] | out[3]).bool().cpu())
       pq.append(self.robot.data.joint_pos[:, self.arm_ids].clone().cpu())
       pqd.append(self.robot.data.joint_vel[:, self.arm_ids].clone().cpu())
       if log_every and (t + 1) % log_every == 0:

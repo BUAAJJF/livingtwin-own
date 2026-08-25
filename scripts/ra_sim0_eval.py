@@ -108,12 +108,6 @@ def main() -> int:
 
   for period, horizons in ((1, (1,)), (25, (1, 5, 10, 25))):
     spread_log, delta_log = [], []
-    if res_hook is not None:
-      orig = harness.run
-
-      def run_logging(r, p, log_every=0, _orig=orig):
-        return _orig(r, p, log_every)
-
     tp = time.time()
     if res_hook is None:
       out = harness.run(rec, period=period, log_every=1000)
@@ -128,7 +122,7 @@ def main() -> int:
             harness.write_state(rec.q[t].to(dev), rec.qd[t].to(dev),
                                 rec.gq[t].to(dev), rec.obj[t].to(dev))
           o = env.step(rec.a[t].to(dev))
-          cdone.append(o[2].bool().cpu())
+          cdone.append((o[2] | o[3]).bool().cpu())
           pq.append(harness.robot.data.joint_pos[:, harness.arm_ids].clone().cpu())
           pqd.append(harness.robot.data.joint_vel[:, harness.arm_ids].clone().cpu())
           spread_log.append(res_hook.last_spread.clone().cpu())
