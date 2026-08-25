@@ -1,0 +1,262 @@
+[
+  {
+    "file": "residual_seed0.pt",
+    "sha256": "8307985e6ffcfa53484776d4b976a44c061abe5b4c883d05a62b23c9f2b55112",
+    "kib": 314,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 14.988723516464233,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed0_b005.pt",
+    "sha256": "48f9086384261ad7585b6098501df4fa85a4941dc224c258de2dbd9334e80461",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 14.988723516464233,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_b010.pt",
+    "sha256": "fc0fd5963d6be89d3e76f87105dac566a9862941c13185ba8a43dc4e88f6520e",
+    "kib": 315,
+    "delta_max": 0.1,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 10.608853876590729,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_b015.pt",
+    "sha256": "0233dbc84d1f0fe4f1e87a3397614ef438773fd4b35e4012482c558cdd495e12",
+    "kib": 315,
+    "delta_max": 0.15,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 7.541962027549744,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed0_b020.pt",
+    "sha256": "eebf066802417e79ee8a898131f49def36bba43afe98849f261080a405b6d321",
+    "kib": 315,
+    "delta_max": 0.2,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 5.443662047386169,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_b025.pt",
+    "sha256": "7206296f5cb24bf2e9d2a668278c7df26dcfad9ebeb57c5974d4f7dff38ecb56",
+    "kib": 315,
+    "delta_max": 0.25,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 4.022479712963104,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_b030.pt",
+    "sha256": "556bfe87c8c5e57c4dd3d0f448349d0ac7c8cc3d6be5f08d0593ea301092d54f",
+    "kib": 315,
+    "delta_max": 0.3,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 3.0440752655267715,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_b040.pt",
+    "sha256": "2705d06e8ccce6247dd80e0689c8dd4328477055894474dc6c66547cf1740b87",
+    "kib": 315,
+    "delta_max": 0.4,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 1.8287632390856743,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed0_budget1500.pt",
+    "sha256": "8fb2b28a1fbe419c34d62f0b4a4669bba943e1254a294b1a9d852faa47e97422",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 19.585556507110596,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_budget15000.pt",
+    "sha256": "20df76cc723d76dd470a31efdd4c41dc637be9931cdae67c01a92345447cda46",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 14.988723516464233,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_budget3000.pt",
+    "sha256": "e2812e693cc64b68581901116641c3780f0ecb939b351e9c30c86c5f2d921a2f",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 17.422791838645935,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_budget500.pt",
+    "sha256": "811b7d6de1fbeba8c5f8d4fb942d812e819ff7c5181dd0e3e4eb9aeab353e824",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 25.233145475387573,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_budget9000.pt",
+    "sha256": "5623150b5dcab0254d8d224bcb56eb943fe38ed505368a4c325b093cfaea3af3",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 17.386749625205994,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed0_wide.pt",
+    "sha256": "ac868e244daaf9db2bdaf10015d4f8ea8afae4f71270cdbf9a2db80b146d2da1",
+    "kib": 315,
+    "delta_max": 0.15,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 7.541962027549744,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1.pt",
+    "sha256": "f99f0b262c07e9be0501b56b2db2de8ede002face5f8a90d41e33d6885d53002",
+    "kib": 314,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 15.021743655204773,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed1_b005.pt",
+    "sha256": "fcc7f3c9c867a41b150a01b87b87b0242ae9f9861518cd2438717d3c410494fa",
+    "kib": 315,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 15.021743655204773,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1_b010.pt",
+    "sha256": "d2de65374fe2476e2165934f159b5568b817fd0551cfd8f53c15766759673c8d",
+    "kib": 315,
+    "delta_max": 0.1,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 10.689562201499939,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1_b015.pt",
+    "sha256": "ee1792e70ed648ee0d6e6450441c3c081785a6aff930a46ee9615cd2558b0987",
+    "kib": 315,
+    "delta_max": 0.15,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 7.654134631156921,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed1_b020.pt",
+    "sha256": "93081c03156845b008a8ded38b1023ad1c29387aae00be37df3fb641a844aa2c",
+    "kib": 315,
+    "delta_max": 0.2,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 5.563616007566452,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1_b025.pt",
+    "sha256": "7fd41227fcdabed75979aa5ac5ff5e7dc19b52d3b5d4c7563d549355aefa0fe7",
+    "kib": 315,
+    "delta_max": 0.25,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 4.147043913602829,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1_b030.pt",
+    "sha256": "f6cff2d95b30a660bb943191fcc9c7e6efcbb0404dd5c62d997f7ece3a851d44",
+    "kib": 315,
+    "delta_max": 0.3,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 3.172745019197464,
+    "in_repository": false
+  },
+  {
+    "file": "residual_seed1_b040.pt",
+    "sha256": "828a07990da956e0a0c7aedee1c9741c065c1682d4883dff35d63c44475a9fef",
+    "kib": 315,
+    "delta_max": 0.4,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 1.9603793025016785,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed2.pt",
+    "sha256": "7019e51488ed334b711ec0fd340eb2ba7ab14dc30c87fa9fe0b5206413a6920f",
+    "kib": 314,
+    "delta_max": 0.05,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 15.123143434524536,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed2_b015.pt",
+    "sha256": "d64ed8d30d49a138b63e68c61fc6edfacfc560e7a1a94261f90023d3125a2398",
+    "kib": 315,
+    "delta_max": 0.15,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 7.721605837345123,
+    "in_repository": true
+  },
+  {
+    "file": "residual_seed2_b040.pt",
+    "sha256": "172421060fb5f7ed119484798316696de20d47e21d0c1929fff96b684c7b0007",
+    "kib": 315,
+    "delta_max": 0.4,
+    "n_members": 4,
+    "params": 75528,
+    "best_val_total": 1.9246992319822311,
+    "in_repository": true
+  },
+  {
+    "file": "surrogate.pt",
+    "sha256": "0d5a717781f51dd2a0d49941d4501b44ca5d61286b88e871640faf6a0359f42c",
+    "kib": 300,
+    "delta_max": null,
+    "n_members": null,
+    "params": 75348,
+    "best_val_total": null,
+    "in_repository": true
+  }
+]

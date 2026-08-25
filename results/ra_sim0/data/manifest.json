@@ -90,6 +90,65 @@
     }
   },
   {
+    "split": "test2",
+    "seed": 7403,
+    "domain": "target",
+    "shapes": "holdout",
+    "num_envs": 64,
+    "steps": 6000,
+    "budget_s": 120.0,
+    "composition": {
+      "natural": 4200,
+      "perturbed": 1200,
+      "probe": 600
+    },
+    "perturb_sigma": 0.05,
+    "file": "results/ra_sim0/data/test2_target_7403.pt",
+    "file_mib": 59.7,
+    "file_sha256": "a8185370c78547475929942bff368f3b1148f2b08b2227e8155b8ab0042fc239",
+    "checkpoint": "logs/rsl_rl/piperx_pick_place_vision/2026-08-22_17-15-09_f3/model_1500.pt",
+    "checkpoint_sha256": "fe9ecd12f5895192538fec1a3df163d7147dab881a35f6db00790da365f00636",
+    "hidden_target": {
+      "name": "backlash+rate_lag",
+      "backlash_up": [
+        0.012,
+        0.018,
+        0.015,
+        0.008,
+        0.006,
+        0.01
+      ],
+      "backlash_down": [
+        0.02,
+        0.009,
+        0.022,
+        0.005,
+        0.011,
+        0.006
+      ],
+      "beta0": 0.85,
+      "kappa": [
+        1.6,
+        1.6,
+        1.6,
+        0.9,
+        0.9,
+        0.9
+      ],
+      "s_ref": 0.04
+    },
+    "wall_clock_s": 172,
+    "commit": "b33ba5655",
+    "versions": {
+      "mjlab": "1.6.0",
+      "rsl-rl-lib": "5.4.2",
+      "mujoco": "3.11.0",
+      "mujoco-warp": "3.11.0",
+      "warp-lang": "1.16.0",
+      "torch": "2.13.0"
+    }
+  },
+  {
     "split": "test_amp",
     "seed": 7402,
     "domain": "target",

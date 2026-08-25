@@ -241,6 +241,7 @@ and SHA-256.
 | `test` | 7401 | target | 3–4 | 64 × 6000 | 120 s | `290993e30b26` |
 | `test_amp` | 7402 | target | 3–4 | 64 × 6000 | 120 s | `25192397d3f6` |
 | `nominal` | 7501 | **nominal** | 0–2 | 64 × 15000 | 300 s | `9c8b5f2f0614` |
+| `test2` | 7403 | target | 3–4 | 64 × 6000 | 120 s | `a8185370c785` |
 
 Each is 70% frozen-policy rollout, 20% the same policy under a pre-registered
 action perturbation, 10% a scripted multi-frequency sweep with the gripper
@@ -265,9 +266,10 @@ controller *issued* rather than the one the plant delivered, that no stage of
 the pipeline mentions the hidden plant's state, and that the replay harness
 never writes state after a physics step.
 
-**Compute.** 6 data collections, 19 grid evaluations, 20 accuracy runs, 20
-residual trainings, 26 sweep evaluations, plus the superseded first pass.
-About 9 GPU-hours across four cards, then two.
+**Compute.** 7 data collections, 19 grid evaluations, 20 accuracy runs, 26
+residual trainings, 16 bound/budget evaluations, 12 fresh-split evaluations,
+plus the superseded first pass. About 11 GPU-hours across four cards, then
+two.
 
 ### Deviations from the pre-registration
 
@@ -286,6 +288,10 @@ About 9 GPU-hours across four cards, then two.
    were, and the winner sits at 1.25, interior to the range.
 5. **GPUs 4 and 5 became unavailable at 18:30 UTC** when another of the user's
    jobs took them. Everything after that ran on 6 and 7.
+6. **The data-budget ladder and the bound sweep, both listed in the plan and
+   both missing from the first pass, were run** — on validation, and reported
+   in §7 and §6 as exploratory. §8's fresh split was collected afterwards and
+   is the only place a selected bound meets data it had not seen.
 
 ---
 
@@ -300,32 +306,39 @@ Two training seeds at each bound, everything else identical — same
 architecture, same 30 epochs, same four loss terms, same data, same frozen
 surrogate.
 
-| bound (rad) | one-step | 10-step | 25-step | mean \|Δ\| | **p99 \|Δ\|** | spread↔error corr |
-|---|---|---|---|---|---|---|
-| **0.05** (the plan's) | 1.917 / 1.897 | 1.276 / 1.269 | 0.647 / 0.643 | 0.038 | **0.0500** | −0.28 |
-| 0.10 | 1.616 / 1.624 | 1.125 / 1.129 | 0.576 / 0.578 | 0.074 | **0.1000** | −0.26 |
-| 0.15 | 1.398 / 1.402 | 0.999 / 1.002 | 0.519 / 0.519 | 0.104 | **0.1499** | −0.23 |
-| 0.25 | 1.049 / 1.052 | 0.787 / 0.794 | 0.425 / 0.427 | 0.142 | **0.2495** | −0.20 |
-| 0.40 | **0.623 / 0.636** | **0.531 / 0.537** | **0.303 / 0.308** | 0.164 | **0.3970** | −0.14 |
-| *best parameter fit* | *1.267* | *0.971* | *0.508* | — | — | — |
-| *oracle* | *0.116* | *0.044* | *0.028* | — | — | — |
+| bound (rad) | one-step | 10-step | 25-step | mean \|Δ\| | **p99 \|Δ\|** | mean \|Δ\| ÷ commanded step | ratio to the parameter fit |
+|---|---|---|---|---|---|---|---|
+| **0.05** (the plan's) | 1.9071 | 1.2725 | 0.6452 | 0.038 | **0.0499** | 0.79× | 1.506 |
+| 0.10 | 1.6198 | 1.1270 | 0.5769 | 0.074 | **0.0999** | 1.53× | 1.279 |
+| 0.15 | 1.4001 | 1.0006 | 0.5190 | 0.104 | **0.1499** | 2.13× | 1.105 |
+| 0.20 | 1.2150 | 0.8909 | 0.4705 | 0.127 | **0.1998** | 2.60× | **0.959** |
+| 0.25 | 1.0503 | 0.7905 | 0.4260 | 0.142 | **0.2495** | 2.92× | 0.829 |
+| 0.30 | *one seed non-finite* | 0.6987 | 0.3848 | 0.152 | **0.2990** | 3.13× | — |
+| 0.40 | **0.6294** | **0.5336** | **0.3055** | 0.164 | **0.3970** | 3.37× | **0.497** |
+| *best parameter fit* | *1.2666* | *0.9707* | *0.5084* | — | — | — | 1.000 |
+| *oracle* | *0.1155* | *0.0441* | *0.0279* | — | — | — | 0.091 |
 
-Three things to read off it.
+Two seeds per bound except where noted; the seeds agree to three decimal
+places at every level, so none of this is noise.
 
-**The bound was the binding constraint, at every level.** The 99th percentile
-of \|Δ\| is the bound to three or four decimal places at 0.05, 0.10, 0.15 and
-0.25, and only at 0.40 does it begin to come off it (0.397 of 0.400). Nothing
-in this sweep found the residual's natural size.
+Four things to read off it.
 
-**The improvement is monotone and large.** From 0.05 to 0.40 the one-step
-error falls by a factor of three, and the two seeds at each level agree to
-three decimal places, so this is not noise. At 0.25 the residual is already
-17% better than the best parameter fit; at 0.40 it is **51% better**, which
-clears the 30% Gate R threshold with room — *on validation*.
+**The bound was the binding constraint at every level.** The 99th percentile
+of \|Δ\| is the bound to three or four decimal places at every setting from
+0.05 to 0.30, and only at 0.40 does it begin to come off it (0.397 of 0.400).
+Nothing in this sweep found the residual's natural size.
 
-**But at 0.40 it is no longer a residual.** The command path's slew ceiling
-permits steps of about 0.06 rad. A correction whose mean magnitude is 0.164
-rad is **2.7× the largest command it is correcting**; at that size the network
+**The improvement is monotone, and the crossings can be located.** From 0.05
+to 0.40 the one-step error falls by a factor of three. The residual first
+*matches* the best parameter fit at a bound of **0.20**, where its mean
+correction is **2.6× the commanded step**; it first clears Gate R's 30%
+margin between 0.25 and 0.40, at roughly **3.2×**. Those two numbers are the
+useful output of this sweep.
+
+**But by then it is no longer a residual.** The commanded step in this task
+sits on its slew ceiling almost always: median 0.0390 rad, 99.9th percentile
+0.0487 rad. A correction whose mean magnitude is 0.164 rad is **3.4× the step
+it is correcting**; at that size the network
 is not adjusting the servo target, it *is* the servo target. That is a
 different object from the one the phase set out to test, with different safety
 properties, and the plan bounded the correction precisely to prevent it.
@@ -337,9 +350,15 @@ lag completes as little as 17% of a large step, so a simulator that reproduces
 it has to keep the target far behind — and a correction constrained to be
 small cannot express that, however it is parameterised.
 
-The ensemble's anti-calibration also softens as the bound grows (−0.28 →
-−0.14) but never becomes informative. Four members differing only in
-initialisation and batch order are not a posterior.
+**And a large correction starts to destabilise the simulator.** One of the
+fourteen validation runs — bound 0.30, seed 0 — produced non-finite states in
+the one-step pass and is recorded as NaN rather than dropped. That is the
+first appearance of exactly what the bound was there to prevent, and it
+appears inside the range where the method starts to win.
+
+The ensemble's anti-calibration softens as the bound grows (−0.28 → −0.13) but
+never becomes informative. Four members differing only in initialisation and
+batch order are not a posterior.
 
 **None of this is a Gate R result and none of it may be quoted as one.** The
 bound was chosen after the fact, the numbers are on validation, and the
@@ -410,3 +429,134 @@ before its numbers exist.
 
 Whatever it returns, **Phase RA-Sim-0's verdict stays RED** and Stage 6 stays
 unrun. A gate is what you registered before you looked.
+
+### 8.1 What it returned
+
+`test2`, seed 7403, held-out shapes, 64 × 6000 steps, collected after §6 and
+opened once. Three training seeds per bound; anchors measured on the same
+split, `shape_match_at_t0 = 1.000` for all twelve runs.
+
+| | one-step | 10-step | 25-step |
+|---|---|---|---|
+| nominal | 2.2105 | 1.4051 | 0.6974 |
+| best parameter fit | **1.2683** | **0.9674** | **0.4969** |
+| residual, bound 0.05 (the plan's) | 1.8971 | 1.2746 | 0.6386 |
+| residual, bound 0.15 | 1.3949 | 1.0023 | 0.5136 |
+| residual, bound 0.40 | **0.6365** | **0.5338** | **0.2976** |
+| oracle | 0.1321 | 0.0314 | 0.0230 |
+
+Against the parameter fit, with the gate's own thresholds and a 95% interval
+over three seeds:
+
+| bound | mean \|Δ\| ÷ commanded step | 1 step | 10 steps | 25 steps | verdict |
+|---|---|---|---|---|---|
+| **0.05** | 0.79× | 1.496 [1.472, 1.520] | 1.318 [1.306, 1.329] | 1.285 [1.273, 1.298] | fails all three |
+| **0.15** | 2.11× | 1.100 [1.095, 1.105] | 1.036 [1.031, 1.041] | 1.034 [1.032, 1.035] | fails all three |
+| **0.40** | 3.32× | **0.502** [0.487, 0.517] | **0.552** [0.542, 0.562] | **0.599** [0.582, 0.616] | **clears all three** |
+
+Reductions at bound 0.40: **−49.8%, −44.8%, −40.1%** against required 30%,
+25% and 20%, with every interval clear of the threshold.
+
+**This is the first branch of the three registered in §8, and its reading was
+fixed before the numbers existed:** the effect is real, and it needs a
+correction larger than the command it is correcting.
+
+How much larger is now measured rather than argued. The commanded step in this
+task sits on its slew ceiling almost always — median 0.0390 rad, 99.9th
+percentile 0.0487 rad. The winning residual's mean correction is 0.162 rad,
+**3.3× the step it is correcting**. The moderate bound, at 2.1×, is already
+past "adjusting the command" and still loses to the parameter fit; only at
+3.3× does it win.
+
+So the sentence that survives contact with fresh data is not *"a bigger bound
+fixes it"*. It is:
+
+> On this axis, a correction that only nudges the command cannot reproduce the
+> target at all, and one that can is no longer a residual on the command path
+> — it has replaced it.
+
+That is a real and reportable property of structural actuator mismatch of this
+severity, and it is a different claim from the one Phase RA-Sim-0 set out to
+test. **The phase's verdict stands at RED**, Gate R stands as run in §4, and
+Stage 6 stays unrun. What §8 buys is a well-posed next question rather than a
+retro-fitted pass.
+
+---
+
+## 9. Summary
+
+1. **Injection point: L2, the action/command wrapper.** `piper_push.actions`
+   already owned a stateful, batched, per-environment stage between the policy
+   and the servo; it gained a `command_hooks` tuple, empty by default. Pre-step
+   generalized force (L4) was tested and works; no post-step state overwrite is
+   used anywhere, which is the phase's STOP condition.
+2. **Why the simulator was not rewritten.** It did not need to be. MuJoCo
+   keeps integrating, resolving contact and enforcing limits; only the number
+   the servo is asked to hold changes.
+3. **The hidden target.** Per-joint asymmetric gear backlash (0.006–0.022 rad
+   flanks, a different flank wider on different joints) composed with a
+   current-limited lag whose completed fraction falls with the size of the
+   commanded step. Frozen and committed before any result run; a test pins the
+   constants.
+4. **How much the parameters explain.** 45% of the gap. Nineteen
+   configurations take the one-step NRMS from 2.214 to 1.267; the oracle
+   reaches 0.116, so the best fit still leaves 89% of the explainable error,
+   with a lag-1 error autocorrelation of 0.983 and a 1.87× swing across
+   command-magnitude bins.
+5. **Did the residual reduce held-out multi-step error?** **No.** 1.50×,
+   1.30× and 1.28× the best parameter fit at 1, 10 and 25 steps, on three
+   held-out splits that agree to two decimals. It beats the *nominal*
+   simulator by 14% and never reaches the parameter fit.
+6. **Does it hold in real MJWarp?** Yes — every number here is a real MJWarp
+   rollout, with the recording's own objects (`shape_match_at_t0 = 1.000` in
+   all 51 runs). The surrogate exists only to carry a gradient.
+7. **Cost.** 75,288 parameters, 960k target transitions, 194–215 s of offline
+   training per seed, 4.4% throughput at 64 environments and 15.8% at 256.
+8. **Policy training: not run.** Gate R failed; the phase says stop. No
+   threshold was moved.
+9. **Target policy, safety, retention: not measured.** Stage 6 did not run.
+10. **Run time.** Under the 8-hour budget, GPUs 4–7 and then 6–7 only.
+11. **Verdict: RED**, with Gate P GREEN and Gate R RED.
+12. **Worth a real robot? Not yet** — and the reason is now a measured
+    quantity rather than a mystery. The correction has to be **3.3× the
+    commanded step** before it beats a parameter fit; at 2.1× it still loses.
+    A correction that large is not a residual on the command path, it is a
+    replacement for it. Before any camera, policy or hardware work, the next
+    phase has to decide whether that object is the one it wants — and if it
+    is, it is a different design with different safety arguments, not a
+    bigger `DELTA_MAX`.
+
+---
+
+## 10. What would have to be different
+
+**Decide what the correction is allowed to be, first.** The phase treated
+`DELTA_MAX` as a safety bound and picked it from the target's backlash width.
+The measurement says the target's *lag* — not its backlash — is what needs
+expressing, and that needs a correction several times the commanded step. Any
+follow-up has to choose deliberately between (a) a genuinely small correction,
+which on this axis cannot work, and (b) a learned command-path replacement,
+which can, and which needs its own safety story: what bounds it, what happens
+when it is wrong, and what the arm does if it saturates.
+
+**Fix the ensemble or drop it.** A spread that correlates **−0.28** with error
+is not uncertainty. Four members differing only in initialisation and batch
+order are not a posterior. Bootstrap the windows per member, or replace the
+ensemble with one model and a learned variance head, and re-check the
+correlation before anything downstream consumes it.
+
+**Do not collect more data.** The budget ladder saturates at 60 seconds of arm
+time and the 300 s row is fractionally worse than the 60 s one. Five times the
+data changes nothing. This is not a data problem.
+
+**Keep the three protocol fixes.** They are worth more than this phase's
+result: measure the simulator's own reproducibility floor before claiming
+anything is unchanged; never let a replay's candidates terminate, or the worst
+simulators get scored on their luckiest environments; and build one
+environment per replay, because only its first reset draws the recording's own
+objects.
+
+**Then, and only then, Stage 6.** A simulator that is not yet more accurate
+than a parameter fit has nothing to offer a policy, and running the policy
+comparison now would measure PPO seed noise — which Phase WM1-A's eight-seed
+extension has already shown this project can mistake for a result.

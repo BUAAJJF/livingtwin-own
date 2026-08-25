@@ -1,0 +1,15 @@
+# Sweep artefacts: 26 residual checkpoints, of which ten are results the report
+# quotes and sixteen are points on a validation curve.  manifest.json carries
+# every one of them with its SHA-256, its bound and its validation loss, so a
+# reader can tell whether the ten in the repository are the ten that were run.
+*.pt
+!surrogate.pt
+!residual_seed0.pt
+!residual_seed1.pt
+!residual_seed2.pt
+!residual_seed0_b015.pt
+!residual_seed1_b015.pt
+!residual_seed2_b015.pt
+!residual_seed0_b040.pt
+!residual_seed1_b040.pt
+!residual_seed2_b040.pt
