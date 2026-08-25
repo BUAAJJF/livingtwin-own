@@ -170,7 +170,11 @@ def collect(split: str, seed: int, n_envs: int, steps: int, shapes: str,
     q = robot.data.joint_pos[:, jids].clone()
     qd = robot.data.joint_vel[:, jids].clone()
     gq = robot.data.joint_pos[:, gid].unsqueeze(-1).clone()
-    o = obj.data.root_state_w.clone()
+    # mjlab keeps the pose and the velocity apart; write_root_state_to_sim
+    # wants them concatenated in this order, which is what makes this
+    # the resynchronisable form.
+    o = torch.cat([obj.data.root_link_pose_w, obj.data.root_com_vel_w],
+                  dim=-1).clone()
     sc = shp.object_shape_class(u, "object").to(torch.uint8).clone()
 
     with torch.inference_mode():
