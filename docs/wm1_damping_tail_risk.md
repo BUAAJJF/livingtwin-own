@@ -1,8 +1,17 @@
 # Phase WM1-B — a reward-free calibration loop for a tail-only mismatch
 
-**Status: in progress.** Identification, the risk head and the posteriors are
-complete and reported below. The adaptation stage is running; §6 onward is
-marked `PENDING` where it has no numbers yet, rather than left out.
+**Verdict: RED — two of seven criteria fail.** Risk-awareness reduces safety
+events against broad domain randomisation (ratio 0.56) and the mechanism works
+in isolation (ratio 0.68 at equal data, α and budget), but it is significantly
+*worse* than simply identifying the parameter (ratio 1.26), and source
+retention is lost by every arm including the controls.
+
+**The finding that matters is §6.3.** All six arms' target-domain trip rates
+are perfectly rank-ordered by one variable — the fraction of PPO budget spent
+at the true damping, Spearman ρ = −1.000. Nothing measured here distinguishes
+*risk-aware* from *spent more budget in the dangerous domain*, because on this
+axis the most dangerous candidate is also the true one. That confound was
+pre-registered in §6.1 before the runs finished.
 
 ---
 
@@ -24,8 +33,8 @@ nearly harmless.
 | 4 | target 0.75, nominal 1.0, counter 1.5 | verified against WM0's config path to bitwise-identical `kd` (§2.2) |
 | 5 | a deployable risk head `C_obs` | **built, trained, and it does not work.** It loses to its own shuffled-label control. Reported as a measured negative (§4) |
 | 6 | compare seven approaches | five of them return the *same distribution*; the comparison that survives is three-way (§5.4) |
-| 7 | does a risk-aware posterior cut safety events at equal data and PPO budget? | PENDING — §6 |
-| 8 | 512 envs × 2400 steps, ≥8 seeds, ≥3 repeats, count model, ≤5% throughput and retention loss | running |
+| 7 | does a risk-aware posterior cut safety events at equal data and PPO budget? | **partly.** Yes against broad DR (0.56) and yes in isolation (0.68); **no** against trajectory matching (1.26, worse). §7.1 |
+| 8 | 512 envs × 2400 steps, ≥8 seeds, ≥3 repeats, count model, ≤5% throughput and retention loss | done — 43 runs, 258 evaluations, 8 seeds per arm. Throughput held (+0.4%); **retention not** (−10.7%, and every arm fails it) |
 | 9 | do not extend to camera, residual or real robot | not extended |
 
 ---
@@ -455,9 +464,138 @@ is not the target, which this phase was told not to open.
 
 ---
 
-## 7. Gate — PENDING
+### 6.2 What the runs measured
 
----
+43 runs, 258 evaluations, eight training seeds per arm except the source-prior
+control at three. Counts clustered on the training seed.
+
+**Target domain** (`servo_damping_scale = 0.75`), against a zero-shot anchor of
+**209.08** trips per arm-hour and **53.39** obj/min:
+
+| arm | training distribution | trips/arm-h | NB 95% CI | obj/min |
+|---|---|---|---|---|
+| trajectory matching = known-parameter | `[1.000, 0, 0]` | **34.30** | [30.45, 38.64] | 50.18 |
+| mixture, risk-tilted (α = 0.5) | `[0.898, 0.102, 0]` | **37.79** | [33.34, 42.82] | 50.14 |
+| risk-aware (broad, tilted) | `[0.816, 0.093, 0.091]` | **43.15** | [38.48, 48.38] | 49.98 |
+| mixture, untilted (α = 0.5) | `[0.500, 0.500, 0]` | **55.33** | [46.76, 65.48] | 50.97 |
+| broad domain randomisation | `[0.333, 0.333, 0.333]` | **77.58** | [69.41, 86.71] | 49.87 |
+| source-prior refit | `[0, 1.000, 0]` | **324.06** | [277.15, 378.90] | 47.61 |
+
+**Source domain** (retention), against a nominal anchor of **55.78** obj/min:
+
+| arm | obj/min | retention loss | trips/arm-h |
+|---|---|---|---|
+| mixture, untilted | 51.16 | 8.3% | 3.85 |
+| broad DR | 50.63 | 9.2% | 5.96 |
+| source-prior refit | 50.66 | 9.2% | 5.01 |
+| risk-aware | 49.81 | 10.7% | 4.66 |
+| trajectory matching | 49.74 | 10.8% | 3.19 |
+| mixture, risk-tilted | 49.53 | 11.2% | 3.32 |
+
+Two things to read off these before any criterion is applied.
+
+**The source-prior refit is worse than not adapting at all** — 324 trips per
+arm-hour against the zero-shot 209. Six hundred PPO iterations spent
+confidently at the wrong damping does not merely fail to help; it produces a
+policy that trips 55% more often than the one it started from. "PPO for 600
+iterations helps a bit whatever you condition on" is measured here and is
+false.
+
+**The retention loss is universal and is not attributable to risk-awareness.**
+Every arm loses between 8.3% and 11.2%, including the source-prior control,
+which trains at the *source* damping and still loses 9.2%. The cost is the
+fine-tuning, not the distribution fine-tuned under. C6 below is therefore a
+statement about the adaptation budget on this axis and not about any method in
+the comparison.
+
+### 6.3 One variable explains the whole ordering
+
+The six arms differ in many ways. Their target-domain trip rates are perfectly
+rank-ordered by exactly one of them: **the fraction of the PPO budget spent at
+the true damping.**
+
+| arm | budget at θ = 0.75 | trips/arm-h |
+|---|---|---|
+| trajectory matching | 100.0% | 34.30 |
+| mixture, risk-tilted | 89.8% | 37.79 |
+| risk-aware | 81.7% | 43.15 |
+| mixture, untilted | 50.0% | 55.33 |
+| broad DR | 33.3% | 77.58 |
+| source-prior refit | 0.0% | 324.06 |
+
+**Spearman ρ = −1.000, six arms of six.**
+
+This is the phase's central result and it cuts against the phase's hypothesis.
+Nothing measured here distinguishes *"risk-aware"* from *"spent more of the
+budget in the dangerous domain"*. The tilt does work — C4 confirms it at equal
+data, equal α and equal budget — but it works by moving mass towards 0.75, and
+on this axis 0.75 is simultaneously the most dangerous candidate **and** the
+true one. §6.1 pre-registered this confound before the runs finished and it is
+exactly what the data show: a tilt towards danger is also a tilt towards truth,
+and this experiment cannot separate them.
+
+## 7. Gate
+
+| criterion | verdict | detail |
+|---|---|---|
+| C1 identification clears its controls | **GREEN** | 1.000 (`abl_latent_only`) against 0.490 (`ctrl_wm_shuffled`, the strongest control) |
+| C2 risk-aware trips < trajectory matching | **RED** | ratio **1.26** [1.07, 1.48], Holm p 0.014 — significantly **worse** |
+| C3 risk-aware trips < broad DR | **GREEN** | ratio **0.56** [0.47, 0.65], Holm p < 0.001 |
+| C4 tilted mixture < untilted, same α | **GREEN** | ratio **0.68** [0.55, 0.84], Holm p 0.004 |
+| C5 target throughput not paid away | **GREEN** | +0.4% against trajectory matching, budget 5% |
+| C6 source retention not paid away | **RED** | −10.7% against the nominal anchor, budget 5% |
+| C7 default-off with provenance | **GREEN** | point mass at nominal installs nothing; writes from the default field; risk head asserts deployability; tilt records its provenance |
+
+**OVERALL: RED.**
+
+### 7.1 Answering the question the phase actually asked
+
+> *Can a risk-aware posterior, at the same reward-free data and PPO budget,
+> significantly reduce safety events versus ordinary trajectory matching and a
+> broad DR posterior, while keeping throughput and source retention?*
+
+Four parts, four answers:
+
+* **Versus broad DR — yes, decisively.** 43.15 against 77.58 trips per
+  arm-hour, ratio 0.56, Holm p < 0.001.
+* **Versus trajectory matching — no, significantly worse.** 43.15 against
+  34.30, ratio 1.26, Holm p 0.014. Pre-registered as the expected outcome in
+  §6.1, and for the reason given there: every estimator on this axis returns a
+  point mass, a point mass cannot be tilted, and so the arm with *less*
+  exposure to the target loses.
+* **Throughput — kept.** +0.4% against its comparator; no arm pays more than a
+  point of throughput for its safety.
+* **Source retention — no, but nor does anything else.** Every arm loses 8–11%
+  including the source-prior control. This is the adaptation budget's cost on
+  this axis, and no method in this comparison avoids it.
+
+### 7.2 Does the mechanism work, separately from whether it helps here?
+
+Yes, and C4 is the evidence. Holding the posterior, the mixing coefficient, the
+data and the PPO budget fixed, and changing only whether the surviving
+uncertainty is resolved towards danger, cuts trips by **32%** — 55.33 to 37.79,
+ratio 0.68 [0.55, 0.84]. That is a real effect and it is the comparison §6.1
+named as the only one that could fail.
+
+But §6.3 is the reason it does not license the conclusion the phase was hoping
+for. The tilt bought its safety by increasing exposure to the true parameter
+from 50% to 89.8%, and *any* intervention that did that would have bought the
+same safety. Correctly identifying the parameter does it better — 100% exposure
+and 34.30 trips — for free, from the same reward-free data, with no cost vector
+and no tilt.
+
+**So the honest summary is: risk-awareness works, and is not needed here.** Its
+value is confined to the case where genuine uncertainty survives inference, and
+on this axis none does — identification is at ceiling from one second of arm
+time (§5.3).
+
+### 7.3 What would have to be different for this to matter
+
+An axis where the dangerous candidate is *not* the true one, or where
+identification genuinely fails at the available data budget. WM1-B has neither.
+Testing the mechanism properly needs a case where a method must choose between
+being accurate and being safe; here those point the same way, so the experiment
+cannot tell a risk-averse planner from a well-calibrated one.
 
 ## 8. Statistics
 

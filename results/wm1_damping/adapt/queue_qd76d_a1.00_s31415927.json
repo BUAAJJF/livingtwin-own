@@ -1,0 +1,65 @@
+{
+ "stage": "formal",
+ "axis": "servo_damping_scale",
+ "probs_flag": "--damping-probs",
+ "eval_flag": "--servo-damping-scale",
+ "eval_target_value": 0.75,
+ "seeds": [
+  42,
+  20260824,
+  31415927,
+  7,
+  13,
+  101,
+  2718,
+  31415
+ ],
+ "alphas": [
+  1.0
+ ],
+ "n_distinct": 6,
+ "n_runs": 1,
+ "jobs": [
+  {
+   "probs": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "alpha": 1.0,
+   "methods": [
+    "B3_state",
+    "KNOWN_PARAM"
+   ],
+   "prior": {
+    "values": [
+     0.75,
+     1.0,
+     1.5
+    ],
+    "unit": "x nominal kd",
+    "probs": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "argmax": 0.75,
+    "mean": 0.75,
+    "entropy_bits": -0.0
+   },
+   "tag": "qd76d_a1.00_s31415927",
+   "seed": 31415927,
+   "probs_arg": "1.000000,0.000000,0.000000",
+   "iterations": 2100,
+   "axis": "servo_damping_scale",
+   "probs_flag": "--damping-probs",
+   "eval_flag": "--servo-damping-scale",
+   "eval_value": 0.75
+  }
+ ],
+ "merged_from": [
+  "formal.json",
+  "mixture.json",
+  "secondary.json"
+ ]
+}
