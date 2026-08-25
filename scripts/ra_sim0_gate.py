@@ -47,6 +47,41 @@ def mean_ci(xs: list[float]) -> dict:
   return {"n": n, "mean": m, "sd": sd, "lo": m - h, "hi": m + h}
 
 
+def load_grid(root: Path, sub: str = "grid") -> dict:
+  """Stage 3's search, run one fresh environment per configuration.
+
+  Returns the same shape as the retired in-process calibration so the gate
+  does not care which produced it.
+  """
+  rows = []
+  for f in sorted((root / sub).glob("*.json")):
+    d = json.loads(f.read_text())
+    n = d["period1"]["h1"]["q"]["nrms"]
+    if n != n:            # a configuration that went non-finite
+      continue
+    rows.append({"tag": d["tag"], "nrms_q": n,
+                 "h10": d["period25"]["h10"]["q"]["nrms"],
+                 "h25": d["period25"]["h25"]["q"]["nrms"],
+                 "shape_match": d["period1"].get("shape_match_at_t0"),
+                 **{k: d["plant"][k] for k in
+                    ("damping", "latency_steps", "response_scale", "deadband",
+                     "lowpass_hz", "hidden_target")}})
+  if not rows:
+    return {}
+  oracle = min((r for r in rows if r["hidden_target"]),
+               key=lambda r: r["nrms_q"], default=None)
+  params = [r for r in rows if not r["hidden_target"]]
+  nominal = next((r for r in params if r["tag"].endswith("nominal")), None)
+  single = [r for r in params
+            if sum(1 for k, nom in (("latency_steps", 0), ("response_scale", 1.0),
+                                    ("deadband", 0.0), ("damping", 1.0))
+                   if r[k] != nom) == 1 and r["lowpass_hz"] is None]
+  return {"n_evaluations": len(rows), "nominal": nominal,
+          "param_1d": min(single, key=lambda r: r["nrms_q"]) if single else None,
+          "param_joint": min(params, key=lambda r: r["nrms_q"]),
+          "broad_dr_best": None, "oracle": oracle, "all": rows}
+
+
 def load_calibration(root: Path) -> dict:
   rows, oracle = [], None
   for f in sorted((root / "calibration").glob("*.json")):
@@ -76,9 +111,9 @@ def load_calibration(root: Path) -> dict:
   }
 
 
-def load_accuracy(root: Path) -> dict:
+def load_accuracy(root: Path, sub: str = "accuracy") -> dict:
   out: dict[str, list[dict]] = {}
-  for f in sorted((root / "accuracy").glob("*.json")):
+  for f in sorted((root / sub).glob("*.json")):
     blob = json.loads(f.read_text())
     out.setdefault(blob["candidate"], []).append(blob)
   return out
@@ -197,11 +232,13 @@ def gate_c(policy: dict) -> dict:
 def main() -> int:
   ap = argparse.ArgumentParser()
   ap.add_argument("--root", default="results/ra_sim0")
+  ap.add_argument("--accuracy", default="accuracy3")
+  ap.add_argument("--grid", default="grid")
   ap.add_argument("--markdown", action="store_true")
   a = ap.parse_args()
   root = Path(a.root)
-  cal = load_calibration(root)
-  acc = load_accuracy(root)
+  cal = load_grid(root, a.grid) or load_calibration(root)
+  acc = load_accuracy(root, a.accuracy)
   pol = {}
   pdir = root / "policy"
   if pdir.exists():

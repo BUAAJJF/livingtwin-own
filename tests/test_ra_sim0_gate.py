@@ -130,7 +130,7 @@ def test_gate_c_is_stopped_by_not_silently_green_when_r_fails(tmp_path):
     (root / "accuracy" / f"{name}.json").write_text(json.dumps(blob))
   import sys
   argv = sys.argv
-  sys.argv = ["gate", "--root", str(root)]
+  sys.argv = ["gate", "--root", str(root), "--accuracy", "accuracy"]
   try:
     G.main()
   finally:
