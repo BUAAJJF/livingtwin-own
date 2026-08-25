@@ -177,7 +177,10 @@ def collect(split: str, seed: int, n_envs: int, steps: int, shapes: str,
                   dim=-1).clone()
     sc = shp.object_shape_class(u, "object").to(torch.uint8).clone()
 
-    with torch.inference_mode():
+    # no_grad, not inference_mode: rsl_rl's recurrent policy keeps its hidden
+    # state as a plain attribute, and a state created inside an inference
+    # block cannot be zeroed by the reset that follows it outside one.
+    with torch.no_grad():
       act = policy(obs)
     if mode == MODE_PERTURBED:
       noise = torch.randn(act.shape, generator=gen, device=device) * perturb_sigma
