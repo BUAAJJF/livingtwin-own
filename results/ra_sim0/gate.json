@@ -346,5 +346,155 @@
   "gate_C": {
     "verdict": "stopped_by_gate_R"
   },
-  "overall": "RED"
+  "overall": "RED",
+  "ra_sim0b_exploratory": {
+    "design": "pre-registered in docs/ra_sim0_results.md section 8 before the runs finished",
+    "split": "test2 (seed 7403, holdout shapes 3-4, 64x6000), collected after the bound sweep and opened once",
+    "comparator": "param_fit, the same as Gate R",
+    "thresholds": {
+      "h1": 0.3,
+      "h10": 0.25,
+      "h25": 0.2
+    },
+    "anchors": {
+      "nominal": {
+        "h1": 2.2105,
+        "h10": 1.4051,
+        "h25": 0.6974
+      },
+      "param_fit": {
+        "h1": 1.2683,
+        "h10": 0.9674,
+        "h25": 0.4969
+      },
+      "oracle": {
+        "h1": 0.1321,
+        "h10": 0.0314,
+        "h25": 0.023
+      }
+    },
+    "arms": {
+      "b005": {
+        "delta_max": 0.05,
+        "n_seeds": 3,
+        "mean_abs_delta_rad": 0.0387,
+        "times_commanded_step": 0.79,
+        "h1": {
+          "residual": 1.8971,
+          "ratio": 1.4957,
+          "ci95": [
+            1.4717,
+            1.5198
+          ],
+          "reduction": -0.4957,
+          "required": 0.3,
+          "pass": false
+        },
+        "h10": {
+          "residual": 1.2746,
+          "ratio": 1.3175,
+          "ci95": [
+            1.3059,
+            1.3291
+          ],
+          "reduction": -0.3175,
+          "required": 0.25,
+          "pass": false
+        },
+        "h25": {
+          "residual": 0.6386,
+          "ratio": 1.2853,
+          "ci95": [
+            1.2728,
+            1.2979
+          ],
+          "reduction": -0.2853,
+          "required": 0.2,
+          "pass": false
+        },
+        "verdict": "fails"
+      },
+      "b015": {
+        "delta_max": 0.15,
+        "n_seeds": 3,
+        "mean_abs_delta_rad": 0.1027,
+        "times_commanded_step": 2.11,
+        "h1": {
+          "residual": 1.3949,
+          "ratio": 1.0998,
+          "ci95": [
+            1.0947,
+            1.1049
+          ],
+          "reduction": -0.0998,
+          "required": 0.3,
+          "pass": false
+        },
+        "h10": {
+          "residual": 1.0023,
+          "ratio": 1.0361,
+          "ci95": [
+            1.0308,
+            1.0414
+          ],
+          "reduction": -0.0361,
+          "required": 0.25,
+          "pass": false
+        },
+        "h25": {
+          "residual": 0.5136,
+          "ratio": 1.0336,
+          "ci95": [
+            1.0322,
+            1.035
+          ],
+          "reduction": -0.0336,
+          "required": 0.2,
+          "pass": false
+        },
+        "verdict": "fails"
+      },
+      "b040": {
+        "delta_max": 0.4,
+        "n_seeds": 3,
+        "mean_abs_delta_rad": 0.1618,
+        "times_commanded_step": 3.32,
+        "h1": {
+          "residual": 0.6365,
+          "ratio": 0.5019,
+          "ci95": [
+            0.4872,
+            0.5165
+          ],
+          "reduction": 0.4981,
+          "required": 0.3,
+          "pass": true
+        },
+        "h10": {
+          "residual": 0.5338,
+          "ratio": 0.5518,
+          "ci95": [
+            0.5416,
+            0.562
+          ],
+          "reduction": 0.4482,
+          "required": 0.25,
+          "pass": true
+        },
+        "h25": {
+          "residual": 0.2976,
+          "ratio": 0.599,
+          "ci95": [
+            0.5824,
+            0.6156
+          ],
+          "reduction": 0.401,
+          "required": 0.2,
+          "pass": true
+        },
+        "verdict": "clears all three"
+      }
+    }
+  },
+  "note": "Phase RA-Sim-0's verdict is `overall`.  ra_sim0b_exploratory is a follow-up whose bound was selected on validation AFTER Gate R was settled; it is reported, it is not a Gate R result, and it does not change `overall`."
 }
