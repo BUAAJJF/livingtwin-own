@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import statistics
 from pathlib import Path
 
@@ -115,7 +116,10 @@ def load_accuracy(root: Path, sub: str = "accuracy") -> dict:
   out: dict[str, list[dict]] = {}
   for f in sorted((root / sub).glob("*.json")):
     blob = json.loads(f.read_text())
-    out.setdefault(blob["candidate"], []).append(blob)
+    # One residual per training seed is one arm, not three arms: the seeds
+    # are what the gate's interval is taken over.
+    name = re.sub(r"_s\d+$", "", blob["candidate"])
+    out.setdefault(name, []).append(blob)
   return out
 
 
