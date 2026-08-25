@@ -187,6 +187,42 @@ def main() -> int:
       else:
         block[f"{name}_rms"] = float("nan")
         block[f"{name}_n"] = 0
+    # Gate P asks whether the remaining error VARIES with state, action
+    # magnitude or direction reversal.  A single number cannot answer that, so
+    # the one-step error is binned by the size of the commanded step and by
+    # whether the command has just reversed.  A parametric fit is a constant
+    # correction; if its error is flat across these bins, the phase has no
+    # case for a state-dependent one.
+    if period == 1:
+      T = rec.steps - 1
+      du = (rec.u[1:T + 1] - rec.u[:T]).abs()
+      err = (out["q"][:T] - rec.q[1:T + 1])
+      sel = ok[:T].unsqueeze(-1).expand_as(du)
+      edges = [0.0, 0.002, 0.005, 0.010, 0.020, 0.040, 1.0]
+      bins = []
+      for lo, hi in zip(edges[:-1], edges[1:]):
+        m = sel & (du >= lo) & (du < hi)
+        n = int(m.sum())
+        bins.append({"lo": lo, "hi": hi, "n": n,
+                     "rms": float(err[m].pow(2).mean().sqrt()) if n else float("nan"),
+                     "mean_signed": float(err[m].mean()) if n else float("nan")})
+      block["error_by_command_magnitude"] = bins
+      flip_m = rp.reversal_mask(rec)[:T]
+      for name, m in (("after_reversal", sel & flip_m),
+                      ("not_after_reversal", sel & ~flip_m)):
+        n = int(m.sum())
+        block[f"error_{name}"] = {
+          "n": n, "rms": float(err[m].pow(2).mean().sqrt()) if n else float("nan")}
+      # Autocorrelation of the one-step error: white residuals mean the model
+      # is only noisy, structured ones mean it is wrong in a way a state
+      # variable could predict.
+      e = err.clone()
+      e[~sel] = 0.0
+      w = sel.float()
+      num = (e[1:] * e[:-1]).sum()
+      den = (e * e * w).sum()
+      block["error_autocorrelation_lag1"] = float(num / den) if float(den) else float("nan")
+
     if spread_log:
       sp = torch.stack(spread_log)[:rec.steps - 1]
       dl = torch.stack(delta_log)[:rec.steps - 1]
