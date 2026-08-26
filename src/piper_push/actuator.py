@@ -102,14 +102,29 @@ class StableActuator(nn.Module):
   matters, not that a large network can memorise a trajectory distribution.
   """
 
-  # Head-bias offsets that make the model the identity at initialisation.
-  # sigmoid(14) differs from 1 by 8.3e-7, so alpha starts at 1 - 8.3e-7 and
-  # the deviation from a pure pass-through is ~4e-8 rad on a 0.05 rad error --
-  # two orders of magnitude under the 3.6e-7 rad the simulator disagrees with
-  # itself by across two builds.  Exactly 1.0 is not reachable through a
-  # sigmoid and pretending otherwise would be worse than measuring it.
-  ALPHA_INIT_LOGIT = 14.0
-  RATE_INIT_LOGIT = 14.0
+  # Identity at initialisation, and still trainable.
+  #
+  # The obvious way to start at alpha = 1 is a large positive head bias, and
+  # it does not work: sigmoid(14) is 1 - 8.3e-7, but its *derivative* is also
+  # 8.3e-7, so every gradient reaching the head is scaled by it and the model
+  # cannot leave the identity.  Measured, before any result: forty epochs
+  # moved the one-step loss from 7.71 to 7.65, which is the nominal
+  # simulator's own number.
+  #
+  # So each coefficient is written as "the identity, minus a gated deviation",
+  # with the gate a learnable scalar per coefficient and joint initialised to
+  # zero:
+  #
+  #     alpha = 1        - (1 - alpha_min) * g_a * sigmoid(z_a)
+  #     rate  = rate_max - (rate_max - rate_min) * g_r * sigmoid(z_r)
+  #     bias  =            bias_max * g_b * tanh(z_b)
+  #
+  # At g = 0 the coefficients are *exactly* 1, rate_max and 0 -- the identity
+  # to the last bit, not to 8.3e-7 -- while dL/dg is proportional to
+  # sigmoid(0) = 0.5 and is therefore alive from the first step.  The head's
+  # own weights stay frozen until a gate leaves zero, which is the usual
+  # behaviour of a zero-initialised gate and is what makes training start from
+  # the nominal simulator rather than from a random one.
 
   def __init__(self, hidden: int = 64, dt: float = 0.02,
                command_lo: tuple[float, ...] | None = None,
@@ -125,14 +140,10 @@ class StableActuator(nn.Module):
     self.bias_range = bias_range
     self.gru = nn.GRUCell(FEATURE_DIM, hidden)
     self.head = nn.Linear(hidden, 4 * N_JOINTS)
-    nn.init.zeros_(self.head.weight)
-    with torch.no_grad():
-      b = torch.zeros(4 * N_JOINTS)
-      b[0 * N_JOINTS:1 * N_JOINTS] = self.ALPHA_INIT_LOGIT   # alpha -> 1
-      b[1 * N_JOINTS:2 * N_JOINTS] = self.RATE_INIT_LOGIT    # rate+ -> max
-      b[2 * N_JOINTS:3 * N_JOINTS] = self.RATE_INIT_LOGIT    # rate- -> max
-      b[3 * N_JOINTS:4 * N_JOINTS] = 0.0                     # bias  -> 0
-      self.head.bias.copy_(b)
+    nn.init.normal_(self.head.weight, std=0.05)
+    nn.init.zeros_(self.head.bias)
+    # One gate per coefficient block and joint, all zero: the identity.
+    self.gate = nn.Parameter(torch.zeros(4, N_JOINTS))
     self.register_buffer("x_mean", torch.zeros(FEATURE_DIM))
     self.register_buffer("x_std", torch.ones(FEATURE_DIM))
     lo = torch.tensor(command_lo if command_lo is not None
@@ -151,10 +162,22 @@ class StableActuator(nn.Module):
                               torch.Tensor, torch.Tensor]:
     h = self.gru((feat - self.x_mean) / self.x_std, h)
     z = self.head(h)
-    a = _map(z[..., 0 * N_JOINTS:1 * N_JOINTS], *self.alpha_range)
-    rp = _map(z[..., 1 * N_JOINTS:2 * N_JOINTS], *self.rate_range)
-    rn = _map(z[..., 2 * N_JOINTS:3 * N_JOINTS], *self.rate_range)
-    b = _map(z[..., 3 * N_JOINTS:4 * N_JOINTS], *self.bias_range)
+    def blk(i):
+      return z[..., i * N_JOINTS:(i + 1) * N_JOINTS]
+    a_lo, a_hi = self.alpha_range
+    r_lo, r_hi = self.rate_range
+    b_hi = self.bias_range[1]
+    a = a_hi - (a_hi - a_lo) * self.gate[0] * torch.sigmoid(blk(0))
+    rp = r_hi - (r_hi - r_lo) * self.gate[1] * torch.sigmoid(blk(1))
+    rn = r_hi - (r_hi - r_lo) * self.gate[2] * torch.sigmoid(blk(2))
+    b = b_hi * self.gate[3] * torch.tanh(blk(3))
+    # The gates are unconstrained parameters, so the ranges are re-imposed
+    # here: a gate that overshoots must not take a coefficient outside the
+    # window the plan registered.
+    a = a.clamp(a_lo, a_hi)
+    rp = rp.clamp(r_lo, r_hi)
+    rn = rn.clamp(r_lo, r_hi)
+    b = b.clamp(-b_hi, b_hi)
     return a, rp, rn, b, h
 
   def step(self, q, qd, u, u_prev, w, h):

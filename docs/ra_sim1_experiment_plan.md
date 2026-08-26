@@ -56,8 +56,8 @@ in the audit rather than asserted.
 |---|---|
 | features | `[q, qdot, u, u_prev, q − u, u − w]`, 36 numbers |
 | recurrent core | one `GRUCell`, hidden **64** |
-| head | `Linear(64 → 24)`, zero weights, biases `(14, 14, 14, 0)` per block |
-| parameters | **21,144**, one model (no ensemble) |
+| head | `Linear(64 → 24)`, weights `N(0, 0.05)`, zero bias, plus a `4 × 6` **gate** initialised to zero |
+| parameters | **21,168**, one model (no ensemble) |
 | control period `dt` | 0.02 s |
 
 No ensemble, deliberately: RA-Sim-0 measured its four-member ensemble's spread
@@ -75,13 +75,23 @@ range chosen from the hardware, not from a fit:
 | `bias` | [−0.05, +0.05] rad | a directional offset in the error being chased. Backlash presents this way; nothing tells the model that |
 | `u_eff` | `piper.SAFE_TARGET_CLIP` | the joint command range the action term already enforces |
 
-**Identity at initialisation.** `sigmoid(14)` differs from 1 by 8.3 × 10⁻⁷, so
-`alpha` starts at 1 − 8.3e-7, `rate` at its maximum (0.08 rad per step, above
-the largest commanded step of 0.0487 rad, so the clip is inert) and `bias` at
-exactly 0. Measured deviation from a pure pass-through at the largest real
-step: **4.1 × 10⁻⁸ rad**, against the 3.6 × 10⁻⁷ rad two identical MJWarp
-builds disagree by. Exactly 1.0 is not reachable through a sigmoid, and
-pretending otherwise would be worse than measuring it.
+**Identity at initialisation.** Each coefficient is written as *the identity
+minus a gated deviation*:
+
+    alpha = 1        − (1 − alpha_min) · g_a · sigmoid(z_a)
+    rate  = rate_max − (rate_max − rate_min) · g_r · sigmoid(z_r)
+    bias  =            bias_max · g_b · tanh(z_b)
+
+with `g` a learnable scalar per coefficient and joint, initialised to zero. At
+`g = 0` the coefficients are **exactly** 1, `rate_max` and 0, so the deviation
+from a pure pass-through is **exactly 0.0 rad** — not 8.3 × 10⁻⁷ — while
+`dL/dg` is proportional to `sigmoid(0) = 0.5` and is alive from the first
+step. The coefficients are re-clamped into their registered ranges after the
+gate, so a gate that overshoots cannot take one outside its window.
+
+*This replaces the first version of this section, which set a head bias of 14
+and is recorded in §11 as a deviation: it was exactly the trap it was trying to
+avoid.*
 
 **What it may see.** `q`, `qdot`, the commands the controller issued, their
 difference, and the model's own state `w` — which is not a hidden quantity
@@ -231,3 +241,21 @@ development splits.
 
 No gate is relaxed, the hidden target is not changed, and RA-Sim-0 is not
 reinterpreted as a success.
+
+---
+
+## 11. Deviations
+
+**D1 — the initialisation, found during training and before any result.**
+The plan originally reached identity with a head bias of 14, so that
+`sigmoid(14) = 1 − 8.3e-7`. That is identity to within the simulator's own
+noise and it is also **untrainable**: `sigmoid'(14)` is 8.3 × 10⁻⁷ too, so
+every gradient reaching the head is scaled by it. Measured on the first
+launch: forty epochs moved the one-step training loss from 7.71 to 7.65, and
+7.6 is the nominal simulator's own number — the model never left the identity.
+
+The gated form in §2 replaces it: exactly identity at `g = 0`, with a live
+gradient on `g`. Nothing else changed — the architecture, the four ranges, the
+loss, the seeds, the budget and every gate threshold stand as written. The
+five training seeds were restarted from scratch under the new
+parameterisation, and no result from the first launch is used anywhere.

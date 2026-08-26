@@ -41,14 +41,14 @@ def mk(**kw):
 
 
 def test_an_untrained_model_passes_the_command_through():
-  """Within the floor two identical MJWarp builds disagree by, 3.6e-7 rad."""
+  """Exactly, not approximately: the gates start at zero."""
   m = mk()
   w = torch.zeros(4, 6)
   u = torch.full((4, 6), 0.0487)      # the largest step this task commands
   with torch.no_grad():
     ue, _, _, _ = m.step(torch.zeros(4, 6), torch.zeros(4, 6), u, u, w,
                          m.zero_hidden(4, "cpu"))
-  assert float((ue - u).abs().max()) < 3.6e-7
+  assert float((ue - u).abs().max()) == 0.0
 
 
 def test_the_coefficients_start_at_their_identity_values():
@@ -56,9 +56,9 @@ def test_the_coefficients_start_at_their_identity_values():
   with torch.no_grad():
     a, rp, rn, b, _ = m.coefficients(torch.zeros(2, A.FEATURE_DIM),
                                      m.zero_hidden(2, "cpu"))
-  assert float(a.min()) > 1.0 - 1e-5
-  assert float(rp.min()) > A.RATE_RANGE_RAD_S[1] - 1e-4
-  assert float(rn.min()) > A.RATE_RANGE_RAD_S[1] - 1e-4
+  assert float(a.min()) == 1.0
+  assert float(rp.min()) == A.RATE_RANGE_RAD_S[1]
+  assert float(rn.min()) == A.RATE_RANGE_RAD_S[1]
   assert float(b.abs().max()) == 0.0
 
 
@@ -68,6 +68,7 @@ def test_the_effective_command_cannot_leave_the_joint_range():
   with torch.no_grad():
     m.head.weight.normal_(0.0, 50.0)
     m.head.bias.normal_(0.0, 50.0)
+    m.gate.normal_(0.0, 5.0)          # the gate must not be a way out either
     w = torch.full((64, 6), 0.99)
     h = m.zero_hidden(64, "cpu")
     for _ in range(200):
@@ -84,6 +85,7 @@ def test_a_single_step_cannot_move_further_than_the_rate_limit():
   with torch.no_grad():
     m.head.weight.normal_(0.0, 50.0)
     m.head.bias.normal_(0.0, 50.0)
+    m.gate.normal_(0.0, 5.0)
     w = torch.zeros(64, 6)
     h = m.zero_hidden(64, "cpu")
     ceiling = A.RATE_RANGE_RAD_S[1] * m.dt
@@ -103,9 +105,14 @@ def test_a_large_accumulated_lag_is_still_reachable():
   """
   m = mk()
   with torch.no_grad():
-    # a slow drive: alpha small, rate small
-    m.head.bias[0:6] = -2.0
-    m.head.bias[6:18] = -3.0
+    # a slow drive: gate the alpha and rate deviations fully open, and put
+    # the head where sigmoid is near 1 so both land near their lower bounds
+    m.head.weight.zero_()
+    m.head.bias.zero_()
+    m.gate[0].fill_(1.0)     # alpha -> alpha_min side
+    m.gate[1].fill_(1.0)     # rate+ -> rate_min side
+    m.gate[2].fill_(1.0)
+    m.head.bias[0:18] = 3.0
     w = torch.zeros(1, 6)
     u = torch.full((1, 6), 0.9)
     h = m.zero_hidden(1, "cpu")
@@ -121,6 +128,7 @@ def test_the_recursion_contracts_towards_a_held_command():
   m = mk()
   with torch.no_grad():
     m.head.weight.normal_(0.0, 5.0)
+    m.gate.normal_(0.0, 2.0)
     w = torch.zeros(8, 6)
     u = torch.full((8, 6), 0.3)
     h = m.zero_hidden(8, "cpu")
@@ -231,12 +239,37 @@ def test_the_model_refuses_an_action_term_of_the_wrong_width(tmp_path):
     A.ActuatorHookCfg(checkpoint=str(p)).build(FakeTerm(n_joint=1))
 
 
+def test_the_gate_is_the_only_thing_that_leaves_the_identity():
+  """A live gradient at zero, which the saturated sigmoid did not have."""
+  m = mk()
+  u = torch.full((4, 6), 0.0487)
+  z = torch.zeros(4, 6)
+  ue, _, _, _ = m.step(z, z, u, u, torch.zeros(4, 6), m.zero_hidden(4, "cpu"))
+  ue.sum().backward()
+  assert float(m.gate.grad.abs().max()) > 1e-3
+  # and the head is frozen until a gate moves, which is what a zero gate means
+  assert float(m.head.weight.grad.abs().max()) == 0.0
+
+
+def test_a_runaway_gate_cannot_take_a_coefficient_out_of_its_range():
+  m = mk()
+  with torch.no_grad():
+    m.gate.fill_(1e6)
+    a, rp, rn, b, _ = m.coefficients(torch.randn(16, A.FEATURE_DIM),
+                                     m.zero_hidden(16, "cpu"))
+  assert float(a.min()) >= A.ALPHA_RANGE[0] - 1e-9
+  assert float(a.max()) <= A.ALPHA_RANGE[1] + 1e-9
+  assert float(rp.min()) >= A.RATE_RANGE_RAD_S[0] - 1e-9
+  assert float(rn.max()) <= A.RATE_RANGE_RAD_S[1] + 1e-9
+  assert float(b.abs().max()) <= A.BIAS_RANGE_RAD[1] + 1e-9
+
+
 def test_the_frozen_ranges_are_the_ones_the_plan_names():
   assert A.ALPHA_RANGE == (0.02, 1.0)
   assert A.RATE_RANGE_RAD_S == (0.05, 4.0)
   assert A.BIAS_RANGE_RAD == (-0.05, 0.05)
   assert A.FEATURE_DIM == 36
-  assert sum(p.numel() for p in mk().parameters()) == 21144
+  assert sum(p.numel() for p in mk().parameters()) == 21168
 
 
 def test_installing_appends_rather_than_replaces():
