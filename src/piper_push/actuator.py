@@ -227,7 +227,7 @@ class ActuatorHook:
     self.stats = {k: 0.0 for k in
                   ("steps", "nonfinite", "clipped_lo", "clipped_hi",
                    "rate_clipped", "max_abs_delta", "max_hidden_norm",
-                   "max_abs_lag", "sum_abs_delta")}
+                   "max_abs_command_lag", "sum_abs_delta")}
 
   @torch.no_grad()
   def __call__(self, target: torch.Tensor, action_term) -> torch.Tensor:
@@ -250,7 +250,7 @@ class ActuatorHook:
     s["max_abs_delta"] = max(s["max_abs_delta"], float(d["delta"].abs().max()))
     s["sum_abs_delta"] += float(d["delta"].abs().mean())
     s["max_hidden_norm"] = max(s["max_hidden_norm"], float(h.norm(dim=-1).max()))
-    s["max_abs_lag"] = max(s["max_abs_lag"], float((target - u_eff).abs().max()))
+    s["max_abs_command_lag"] = max(s["max_abs_command_lag"], float((target - u_eff).abs().max()))
     self.last = d
     return u_eff
 

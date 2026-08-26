@@ -28,8 +28,8 @@ SHAPE_PRESETS = {"all": None, "train": (0.34, 0.22, 0.16, 0.0, 0.0),
                  "holdout": (0.0, 0.0, 0.0, 0.16, 0.12)}
 
 
-def build(meta, *, damping=1.0, hidden=False, residual=None, num_envs=64,
-          device="cuda:0"):
+def build(meta, *, damping=1.0, hidden=False, residual=None, actuator=None,
+          num_envs=64, device="cuda:0"):
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.tasks.registry import load_env_cfg
   import sys
@@ -37,6 +37,7 @@ def build(meta, *, damping=1.0, hidden=False, residual=None, num_envs=64,
   from piper_push import perturb
   from piper_push.hidden_plant import HiddenPlantCfg, apply_hidden_plant
   from piper_push.residual import ResidualHookCfg, apply_residual
+  from piper_push.actuator import ActuatorHookCfg, apply_actuator
 
   cfg = load_env_cfg(TASK, play=True)
   cfg.scene.num_envs = num_envs
@@ -79,6 +80,8 @@ def main() -> int:
   ap.add_argument("--lowpass", type=float, default=-1.0)
   ap.add_argument("--hidden-target", action="store_true")
   ap.add_argument("--residual", default="")
+  ap.add_argument("--actuator", default="",
+                  help="a Phase RA-Sim-1 stable actuator checkpoint")
   ap.add_argument("--steps", type=int, default=3000)
   ap.add_argument("--device", default="cuda:0")
   ap.add_argument("--tag", default="")
@@ -100,8 +103,8 @@ def main() -> int:
     simulators on the same objects, and `shape_match_at_t0` records whether
     the price bought anything."""
     env = build(meta, damping=a.damping, hidden=a.hidden_target,
-                residual=a.residual or None, num_envs=rec.num_envs,
-                device=a.device)
+                residual=a.residual or None, actuator=a.actuator or None,
+                num_envs=rec.num_envs, device=a.device)
     arm = env.action_manager.get_term("arm")
     arm.set_plant(latency_steps=a.latency, response_scale=a.response,
                   deadband=a.deadband,
@@ -121,11 +124,17 @@ def main() -> int:
               "response_scale": a.response, "deadband": a.deadband,
               "lowpass_hz": None if a.lowpass < 0 else a.lowpass,
               "hidden_target": a.hidden_target,
-              "residual": a.residual or None},
+              "residual": a.residual or None,
+              "actuator": a.actuator or None},
   }
 
   for period, horizons in ((1, (1,)), (25, (1, 5, 10, 25))):
     env, arm, res_hook, harness = fresh()
+    # The RA-Sim-1 actuator hook keeps its own running diagnostics -- the
+    # counts the stability gate is decided on -- and is a different object
+    # from the residual's, which keeps an ensemble spread.
+    act_hook = next((h for h in arm._hooks
+                     if hasattr(h, "model") and hasattr(h, "stats")), None)
     spread_log, delta_log = [], []
     tp = time.time()
     if res_hook is None:
@@ -252,6 +261,16 @@ def main() -> int:
           "p99_abs_delta_rad": float(dl.abs().flatten().quantile(0.99)),
           "coverage_at_2_sigma": float((ef <= 2.0 * sf).float().mean()),
         }
+    if act_hook is not None:
+      st = dict(act_hook.stats)
+      st["mean_abs_delta"] = st.pop("sum_abs_delta") / max(st["steps"], 1)
+      c = getattr(act_hook, "last", None)
+      if c is not None:
+        for k in ("alpha", "rate_pos", "rate_neg", "bias"):
+          st[f"{k}_last_mean"] = float(c[k].mean())
+          st[f"{k}_last_min"] = float(c[k].min())
+          st[f"{k}_last_max"] = float(c[k].max())
+      block["actuator"] = st
     results[f"period{period}"] = block
     print(f"  P={period} done in {wall:.0f}s  "
           f"shape_match={harness.shape_match_at_t0:.3f}", flush=True)
