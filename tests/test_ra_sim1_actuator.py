@@ -136,15 +136,47 @@ def test_the_feature_builder_cannot_be_handed_a_hidden_quantity():
     "q", "qd", "u", "u_prev", "w"]
 
 
-def test_the_module_never_mentions_the_hidden_target():
+def test_the_module_never_reads_the_hidden_target():
+  """A check on the code, not on the prose.
+
+  The docstring names the forbidden quantities precisely because it is
+  documenting that they are forbidden, so a grep over the file would flag its
+  own warning.  This walks the syntax tree instead and looks at identifiers,
+  attributes and non-docstring literals -- the things that could actually
+  reach one.
+  """
+  import ast
   import pathlib
-  src = pathlib.Path(A.__file__).read_text()
-  # `_lag` is deliberately absent from this list: the module has its own
-  # `max_abs_command_lag` statistic, which is the model's distance from the
-  # command it is chasing and has nothing to do with the target's state.
-  for name in ("_flank", "hidden_plant", "HiddenPlant", "BACKLASH", "KAPPA",
-               "S_REF", "over_speed", "reward", "trip"):
-    assert name not in src, f"actuator.py mentions {name}"
+
+  tree = ast.parse(pathlib.Path(A.__file__).read_text())
+  docstrings = set()
+  for node in ast.walk(tree):
+    if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
+      d = ast.get_docstring(node, clean=False)
+      if d:
+        docstrings.add(d)
+    # a bare string statement is an attribute docstring in this codebase
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+       and isinstance(node.value.value, str):
+      docstrings.add(node.value.value)
+
+  seen = set()
+  for node in ast.walk(tree):
+    if isinstance(node, ast.Name):
+      seen.add(node.id)
+    elif isinstance(node, ast.Attribute):
+      seen.add(node.attr)
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+      if node.value not in docstrings:
+        seen.add(node.value)
+
+  for name in ("_flank", "hidden_plant", "HiddenPlant", "BACKLASH_UP",
+               "BACKLASH_DOWN", "KAPPA", "S_REF", "over_speed", "reward",
+               "trip", "success"):
+    assert name not in seen, f"actuator.py's code reaches {name}"
+  # and the one import list it is allowed to have
+  imports = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+  assert "piper_push.hidden_plant" not in imports
 
 
 def test_hidden_state_and_actuator_state_reset_per_environment(tmp_path):
