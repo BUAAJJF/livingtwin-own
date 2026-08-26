@@ -56,6 +56,10 @@ def main() -> int:
   ap.add_argument("--batch", type=int, default=256)
   ap.add_argument("--batches-per-epoch", type=int, default=12)
   ap.add_argument("--lr", type=float, default=3e-4)
+  ap.add_argument("--gate-lr", type=float, default=5e-2,
+                  help="Adam moves a parameter by about `lr` per step, so a "
+                       "gate that has to travel O(1) cannot get there in 480 "
+                       "steps at 3e-4.  Its own group, see deviation D2.")
   ap.add_argument("--w-rate", type=float, default=1e-3)
   ap.add_argument("--w-hidden", type=float, default=1e-4)
   ap.add_argument("--w-smooth", type=float, default=1e-3)
@@ -103,7 +107,10 @@ def main() -> int:
   feat = build_features(b["q"], b["qd"], b["u"], b["u_prev"], b["u"])
   model.set_norm(feat.reshape(-1, feat.shape[-1]).mean(0),
                  feat.reshape(-1, feat.shape[-1]).std(0))
-  opt = torch.optim.Adam(model.parameters(), lr=a.lr)
+  gate = [p for n, p in model.named_parameters() if n == "gate"]
+  rest = [p for n, p in model.named_parameters() if n != "gate"]
+  opt = torch.optim.Adam([{"params": rest, "lr": a.lr},
+                          {"params": gate, "lr": a.gate_lr}])
   rate_max = RATE_RANGE_RAD_S[1] * model.dt
 
   def run_batch(rec, starts, train: bool) -> dict:
@@ -174,6 +181,11 @@ def main() -> int:
                  ("rate", rate), ("hid", hid), ("smooth", smooth)):
       terms[k] = float(v)
     terms["total"] = float(total)
+    with torch.no_grad():
+      terms["gate_absmax"] = float(model.gate.abs().max())
+      terms["alpha_min"] = float(d["alpha"].min())
+      terms["rate_min"] = float(torch.minimum(d["rate_pos"], d["rate_neg"]).min())
+      terms["bias_absmax"] = float(d["bias"].abs().max())
     return terms
 
   g = torch.Generator().manual_seed(a.seed)
@@ -193,7 +205,9 @@ def main() -> int:
     hist.append({"epoch": ep, "train": tr, "val": va})
     print(f"  ep {ep + 1:3d}/{a.epochs}  train one={tr['one']:.4f} "
           f"r10={tr['r10']:.4f} r25={tr['r25']:.4f} | val one={va['one']:.4f} "
-          f"r10={va['r10']:.4f} r25={va['r25']:.4f}", flush=True)
+          f"r10={va['r10']:.4f} r25={va['r25']:.4f} | gate={tr['gate_absmax']:.3f} "
+          f"a_min={tr['alpha_min']:.3f} r_min={tr['rate_min']:.2f} "
+          f"|b|={tr['bias_absmax']:.4f}", flush=True)
     key = va["one"] + va["r10"] + va["r25"]
     if best is None or key < best[0]:
       best = (key, ep, {k: v.detach().cpu().clone()

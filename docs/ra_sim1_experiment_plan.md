@@ -259,3 +259,12 @@ gradient on `g`. Nothing else changed — the architecture, the four ranges, the
 loss, the seeds, the budget and every gate threshold stand as written. The
 five training seeds were restarted from scratch under the new
 parameterisation, and no result from the first launch is used anywhere.
+
+**D2 — the gate needs its own learning rate, found the same way.**  Adam moves
+a parameter by roughly its learning rate per step.  The gate has to travel
+O(1) to leave the identity, and the budget is 40 epochs x 12 batches = 480
+steps; at 3e-4 it can move 0.14 at most.  Measured on the second launch: ten
+epochs moved the one-step loss from 8.21 to 8.12, with the gate still under
+0.1.  The gate is therefore its own parameter group at **lr 5e-2**; every
+other parameter stays at 3e-4.  No threshold, range or gate criterion moves.
+The five seeds restart again and nothing from the second launch is used.
