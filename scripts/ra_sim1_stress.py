@@ -83,6 +83,12 @@ def scripted(kind, n_env, n_act, steps, device, seed):
     ramp = torch.clamp(t / max(steps * 0.25, 1.0), max=1.0)
     sgn = torch.where(torch.rand(1, n_env, n_act, generator=g) > 0.5, 1.0, -1.0)
     return (ramp * sgn).to(device)
+  if kind == "S5":
+    # The async-reset test is about the reset, not the command, so it reuses
+    # S2's full-amplitude stream: half the batch is torn down under it every
+    # 137 steps and the other half never is, and the question is whether one
+    # half's state leaks into the other's.
+    return scripted("S2", n_env, n_act, steps, device, seed)
   raise ValueError(kind)
 
 

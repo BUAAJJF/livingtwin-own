@@ -317,3 +317,29 @@ def test_the_evaluator_actually_installs_every_hook_it_advertises():
                          ("hidden", "apply_hidden_plant")):
     assert arg in args
     assert installer in called, f"build() takes {arg} but never calls {installer}"
+
+
+def test_every_pre_registered_stress_has_a_command_stream():
+  """S5 had none, and the queue found out four runs in.
+
+  The plan names five stresses; four of them are scripted command streams and
+  the fifth reuses one.  A missing case is a stress that silently did not run,
+  which is the same thing as a stress that passed.
+  """
+  import importlib.util
+  import pathlib
+  import torch
+
+  path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "ra_sim1_stress.py"
+  spec = importlib.util.spec_from_file_location("ra1_stress", path)
+  m = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(m)
+  for kind in ("S2", "S3", "S4", "S5"):
+    a = m.scripted(kind, 4, 7, 32, "cpu", 1)
+    assert a.shape == (32, 4, 7), kind
+    assert torch.isfinite(a).all(), kind
+    assert float(a.abs().max()) <= 1.0 + 1e-6, kind
+  # S3 really does reverse every two steps
+  a = m.scripted("S3", 2, 7, 12, "cpu", 1)
+  flips = sum(1 for t in range(1, 12) if float(a[t, 0, 0]) != float(a[t - 1, 0, 0]))
+  assert flips >= 5
