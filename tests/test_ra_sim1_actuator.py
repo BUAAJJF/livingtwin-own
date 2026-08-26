@@ -291,3 +291,29 @@ def test_the_cli_default_installs_nothing():
   a = Args()
   a.actuator = ""
   assert A.actuator_from_args(a) is None
+
+
+def test_the_evaluator_actually_installs_every_hook_it_advertises():
+  """A plumbing test, written after the plumbing silently did not happen.
+
+  `scripts/ra_sim0_eval.py` grew a `--actuator` flag whose value reached the
+  result file's provenance block but never reached `apply_actuator`, so the
+  first run reported the nominal simulator's numbers under the model's name.
+  The provenance said the model was installed and the simulator disagreed.
+  """
+  import ast
+  import pathlib
+
+  src = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "ra_sim0_eval.py"
+  tree = ast.parse(src.read_text())
+  build = next(n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "build")
+  called = {n.func.id for n in ast.walk(build)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+  args = {a.arg for a in build.args.kwonlyargs} | {a.arg for a in build.args.args}
+  # every hook the signature accepts must have its installer called
+  for arg, installer in (("actuator", "apply_actuator"),
+                         ("residual", "apply_residual"),
+                         ("hidden", "apply_hidden_plant")):
+    assert arg in args
+    assert installer in called, f"build() takes {arg} but never calls {installer}"

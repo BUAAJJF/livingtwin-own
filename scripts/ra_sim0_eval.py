@@ -55,6 +55,8 @@ def build(meta, *, damping=1.0, hidden=False, residual=None, actuator=None,
     apply_hidden_plant(cfg, HiddenPlantCfg())
   if residual:
     apply_residual(cfg, ResidualHookCfg(checkpoint=str(residual)))
+  if actuator:
+    apply_actuator(cfg, ActuatorHookCfg(checkpoint=str(actuator)))
   # A replay must not be allowed to terminate.  A candidate whose command
   # path is badly wrong trips the safety shell within a few steps, resets, and
   # draws a fresh object -- so the arms that are worst at the task would be
