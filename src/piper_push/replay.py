@@ -212,9 +212,23 @@ def nrms(pred: torch.Tensor, rec: Recording, ok: torch.Tensor,
   rms = float(err.pow(2).mean().sqrt())
   rmm = float(motion.pow(2).mean().sqrt())
   per_joint = err.pow(2).mean(0).sqrt()
+  # Per-environment sums, so a later interval can resample the units that are
+  # actually independent.  Sixty-four environments are; forty-eight thousand
+  # step-level samples from them are not, and an interval that treats them as
+  # such is a hundred times too narrow.
+  n_env = ref.shape[1]
+  se = torch.zeros(n_env, dtype=torch.float64)
+  sm = torch.zeros(n_env, dtype=torch.float64)
+  cnt = torch.zeros(n_env, dtype=torch.float64)
+  se.index_add_(0, e, err.pow(2).sum(-1).double())
+  sm.index_add_(0, e, motion.pow(2).sum(-1).double())
+  cnt.index_add_(0, e, torch.ones(e.shape[0], dtype=torch.float64))
   return {"n": int(sel.sum()), "rms": rms, "rms_motion": rmm,
           "nrms": rms / max(rmm, 1e-12),
           "per_joint_rms": [float(v) for v in per_joint],
+          "per_env": {"sq_err": [float(v) for v in se],
+                      "sq_motion": [float(v) for v in sm],
+                      "count": [float(v) for v in cnt]},
           "max_abs": float(err.abs().max())}
 
 
