@@ -1,0 +1,73 @@
+{
+  "tag": "param_fit_scripted",
+  "arm": {
+    "actuator": null,
+    "residual": null,
+    "hidden_target": false,
+    "damping": 1.25,
+    "latency_steps": 3,
+    "response_scale": 0.377,
+    "deadband": 0.0175,
+    "lowpass_hz": null
+  },
+  "S2": {
+    "steps": 1500,
+    "num_envs": 64,
+    "env_steps_per_s": 340.79850714421946,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.3660778999328613,
+    "max_abs_qd": 3.9240877628326416,
+    "p999_abs_qd": 3.538879156112671,
+    "max_abs_qacc": 361.0409240722656,
+    "p999_abs_qacc": 167.37721252441406,
+    "safety_shell_events": 613,
+    "safety_shell_per_arm_hour": 1149.375,
+    "gpu_mib": 120.63818359375
+  },
+  "S3": {
+    "steps": 1500,
+    "num_envs": 64,
+    "env_steps_per_s": 872.9639931704468,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.2305092811584473,
+    "max_abs_qd": 2.2479214668273926,
+    "p999_abs_qd": 0.5230402946472168,
+    "max_abs_qacc": 80.01338958740234,
+    "p999_abs_qacc": 17.269731521606445,
+    "safety_shell_events": 0,
+    "safety_shell_per_arm_hour": 0.0,
+    "gpu_mib": 149.078125
+  },
+  "S4": {
+    "steps": 1500,
+    "num_envs": 64,
+    "env_steps_per_s": 769.1744842865314,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.3088321685791016,
+    "max_abs_qd": 3.416860342025757,
+    "p999_abs_qd": 2.035792827606201,
+    "max_abs_qacc": 153.06161499023438,
+    "p999_abs_qacc": 16.565704345703125,
+    "safety_shell_events": 4,
+    "safety_shell_per_arm_hour": 7.5,
+    "gpu_mib": 177.00927734375
+  },
+  "S5": {
+    "steps": 1500,
+    "num_envs": 64,
+    "env_steps_per_s": 351.58316240100254,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.3730087280273438,
+    "max_abs_qd": 3.9263439178466797,
+    "p999_abs_qd": 3.4477016925811768,
+    "max_abs_qacc": 357.12677001953125,
+    "p999_abs_qacc": 154.93231201171875,
+    "safety_shell_events": 553,
+    "safety_shell_per_arm_hour": 1036.875,
+    "gpu_mib": 205.46142578125
+  }
+}

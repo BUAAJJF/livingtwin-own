@@ -21,6 +21,8 @@ from pathlib import Path
 
 G1_THRESHOLDS = {"h1": 0.30, "h10": 0.25, "h25": 0.20}
 G6_THROUGHPUT_BUDGET = 0.20
+RATE_RANGE_RAD_S_MAX = 4.0
+DT = 0.02
 BOOTSTRAP = 10_000
 
 
@@ -103,57 +105,96 @@ def g1(acc: dict, split: str, root: Path) -> dict:
 
 
 def g3(acc: dict, stress: dict) -> dict:
-  bad = []
-  finite = True
+  """Stability **of the model under test**, and a separate note on the others.
+
+  A comparator that goes non-finite is a finding about the comparator, not a
+  failure of this phase's model, so the two are counted apart and both are
+  reported.  Nothing is deleted either way.
+  """
+  own, others = [], []
   for name, runs in acc.items():
     for b in runs:
       for p in ("period1", "period25"):
         if not b[p]["sanity"]["finite"]:
-          finite = False
-          bad.append({"where": f"replay:{b['tag']}:{b['rec_meta']['split']}:{p}"})
-  s_nonfinite, s_limit = 0, 0
+          rec = {"where": f"replay:{b['tag']}:{b['rec_meta']['split']}:{p}"}
+          (own if name == "actuator" else others).append(rec)
+  own_stress, other_stress = 0, 0
   for tag, blob in stress.items():
     for k, v in blob.items():
       if not isinstance(v, dict) or "nonfinite_q" not in v:
         continue
-      s_nonfinite += v["nonfinite_q"] + v["nonfinite_qd"]
-      if v["nonfinite_q"] or v["nonfinite_qd"]:
-        bad.append({"where": f"stress:{tag}:{k}",
-                    "nonfinite": v["nonfinite_q"] + v["nonfinite_qd"]})
-  ok = finite and s_nonfinite == 0
-  return {"replays_finite": finite, "stress_nonfinite_states": s_nonfinite,
-          "offenders": bad, "verdict": "GREEN" if ok else "RED"}
+      n = v["nonfinite_q"] + v["nonfinite_qd"]
+      if not n:
+        continue
+      rec = {"where": f"stress:{tag}:{k}", "nonfinite": n}
+      if tag.startswith("actuator"):
+        own.append(rec)
+        own_stress += n
+      else:
+        others.append(rec)
+        other_stress += n
+  ok = not own
+  return {"model_under_test_nonfinite": own,
+          "comparator_nonfinite": others,
+          "note": "a comparator's instability is reported, not counted against "
+                  "this phase's model",
+          "verdict": "GREEN" if ok else "RED"}
+
+
+def _actuator_blocks(acc: dict, stress: dict):
+  """Every recorded actuator diagnostic, from replays and from stresses."""
+  for runs in acc.values():
+    for b in runs:
+      for k in ("period1", "period25"):
+        st = b.get(k, {}).get("actuator")
+        if st:
+          yield f"replay:{b['tag']}:{b['rec_meta']['split']}:{k}", st
+  for tag, blob in stress.items():
+    for k, v in blob.items():
+      if isinstance(v, dict) and isinstance(v.get("actuator"), dict):
+        yield f"stress:{tag}:{k}", v["actuator"]
 
 
 def g4(acc: dict, stress: dict) -> dict:
-  out = {"command_range_violations": 0, "max_abs_delta_rad": 0.0,
-         "rate_ceiling_rad_per_step": None, "max_hidden_norm": 0.0,
-         "max_abs_command_lag_rad": 0.0}
-  seen = False
-  for runs in list(acc.values()) + [list(stress.values())]:
-    for b in runs:
-      blocks = [b[k] for k in ("period1", "period25") if k in b] or [
-        v for v in b.values() if isinstance(v, dict) and "actuator" in v]
-      for blk in blocks:
-        st = blk.get("actuator")
-        if not st:
-          continue
-        seen = True
-        out["max_abs_delta_rad"] = max(out["max_abs_delta_rad"],
-                                       st.get("max_abs_delta", 0.0))
-        out["max_hidden_norm"] = max(out["max_hidden_norm"],
-                                     st.get("max_hidden_norm", 0.0))
-        out["max_abs_command_lag_rad"] = max(
-          out["max_abs_command_lag_rad"], st.get("max_abs_command_lag", 0.0))
-  if not seen:
+  """Physical plausibility, on the terms the plan sets rather than RA-Sim-0's.
+
+  Accumulated lag larger than one action increment is *allowed*; what is
+  forbidden is reaching it in one step, and the rate clip is what makes that
+  unreachable.  So the number that decides this gate is the largest single
+  step the effective command ever took.
+  """
+  ceiling = RATE_RANGE_RAD_S_MAX * DT
+  out = {"rate_ceiling_rad_per_step": ceiling,
+         "max_abs_delta_rad": 0.0, "max_hidden_norm": 0.0,
+         "max_abs_command_lag_rad": 0.0, "nonfinite": 0,
+         "rate_clipped_fraction": None, "n_blocks": 0}
+  clipped = steps = 0.0
+  for _where, st in _actuator_blocks(acc, stress):
+    out["n_blocks"] += 1
+    out["max_abs_delta_rad"] = max(out["max_abs_delta_rad"],
+                                   float(st.get("max_abs_delta", 0.0)))
+    out["max_hidden_norm"] = max(out["max_hidden_norm"],
+                                 float(st.get("max_hidden_norm", 0.0)))
+    out["max_abs_command_lag_rad"] = max(
+      out["max_abs_command_lag_rad"], float(st.get("max_abs_command_lag", 0.0)))
+    out["nonfinite"] += int(st.get("nonfinite", 0))
+    clipped += float(st.get("rate_clipped", 0.0))
+    steps += float(st.get("steps", 0.0))
+  if not out["n_blocks"]:
     return {"verdict": "not_executed"}
-  ceiling = 4.0 * 0.02
-  out["rate_ceiling_rad_per_step"] = ceiling
+  if steps:
+    out["rate_clipped_fraction"] = clipped / (steps * 64 * 6)
   out["pass_rate_limit"] = out["max_abs_delta_rad"] <= ceiling + 1e-6
-  out["note"] = ("accumulated lag larger than one action increment is "
-                 "permitted by design; an instantaneous jump is not, and the "
-                 "rate ceiling is what makes it unreachable")
-  return {**out, "verdict": "GREEN" if out["pass_rate_limit"] else "RED"}
+  out["pass_finite"] = out["nonfinite"] == 0
+  # The hidden state of a GRU is bounded by construction: every unit lies in
+  # [-1, 1], so |h| <= sqrt(hidden).  Reporting the bound is honest; claiming
+  # the measurement proves boundedness would not be.
+  out["hidden_norm_structural_bound"] = 8.0
+  out["note"] = ("accumulated lag beyond one action increment is permitted by "
+                 "design; an instantaneous jump is not, and the rate ceiling "
+                 "is what makes it unreachable")
+  ok = out["pass_rate_limit"] and out["pass_finite"]
+  return {**out, "verdict": "GREEN" if ok else "RED"}
 
 
 def g6(bench: dict) -> dict:

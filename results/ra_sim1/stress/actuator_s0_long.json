@@ -1,0 +1,57 @@
+{
+  "tag": "actuator_s0_long",
+  "arm": {
+    "actuator": "results/ra_sim1/model/actuator_seed0.pt",
+    "residual": null,
+    "hidden_target": false,
+    "damping": 1.0,
+    "latency_steps": 0,
+    "response_scale": 1.0,
+    "deadband": 0.0,
+    "lowpass_hz": null
+  },
+  "S1": {
+    "steps": 3000,
+    "num_envs": 64,
+    "env_steps_per_s": 349.7534864585507,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.3028512001037598,
+    "max_abs_qd": 3.8987538814544678,
+    "p999_abs_qd": 2.9501280784606934,
+    "max_abs_qacc": 285.1705017089844,
+    "p999_abs_qacc": 98.21617889404297,
+    "safety_shell_events": 465,
+    "safety_shell_per_arm_hour": 435.9375,
+    "actuator": {
+      "steps": 3000.0,
+      "nonfinite": 0.0,
+      "clipped_lo": 0.0,
+      "clipped_hi": 0.0,
+      "rate_clipped": 88757.0,
+      "max_abs_delta": 0.07999999821186066,
+      "max_hidden_norm": 8.0,
+      "max_abs_command_lag": 1.5311671495437622,
+      "mean_abs_delta": 0.017666246415736775
+    },
+    "command_range": {
+      "lo": [
+        -2.6179938316345215,
+        0.0,
+        -2.96705961227417,
+        -1.5533430576324463,
+        -1.3089969158172607,
+        -2.094395160675049
+      ],
+      "hi": [
+        2.6179938316345215,
+        3.141592502593994,
+        0.0,
+        1.5533430576324463,
+        1.3089969158172607,
+        2.094395160675049
+      ]
+    },
+    "gpu_mib": 1019.20751953125
+  }
+}

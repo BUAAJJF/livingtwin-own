@@ -1,0 +1,28 @@
+{
+  "tag": "param_fit_long",
+  "arm": {
+    "actuator": null,
+    "residual": null,
+    "hidden_target": false,
+    "damping": 1.25,
+    "latency_steps": 3,
+    "response_scale": 0.377,
+    "deadband": 0.0175,
+    "lowpass_hz": null
+  },
+  "S1": {
+    "steps": 3000,
+    "num_envs": 64,
+    "env_steps_per_s": 499.91275930207854,
+    "nonfinite_q": 0,
+    "nonfinite_qd": 0,
+    "max_abs_q": 2.29565167427063,
+    "max_abs_qd": 3.924501895904541,
+    "p999_abs_qd": 2.861614227294922,
+    "max_abs_qacc": 220.3768768310547,
+    "p999_abs_qacc": 115.89418029785156,
+    "safety_shell_events": 149,
+    "safety_shell_per_arm_hour": 139.6875,
+    "gpu_mib": 1019.10205078125
+  }
+}

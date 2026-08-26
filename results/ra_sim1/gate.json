@@ -1,0 +1,187 @@
+{
+  "G1_accuracy_sealed": {
+    "split": "test3",
+    "per_horizon": {
+      "h1": {
+        "param_fit": 1.2847428548699504,
+        "actuator_mean": 1.4024773735761118,
+        "actuator_seeds": [
+          1.450882263823966,
+          1.1991670270542187,
+          1.5557938424618298,
+          1.4407514090210887,
+          1.3657923255194553
+        ],
+        "ratio": 1.0916405320020863,
+        "reduction": -0.09164053200208633,
+        "bootstrap95": [
+          1.0735650240126922,
+          1.1179419080512476
+        ],
+        "required": 0.3,
+        "pass": false
+      },
+      "h10": {
+        "param_fit": 0.9978798754013933,
+        "actuator_mean": 0.7732076971682407,
+        "actuator_seeds": [
+          0.7659032245165357,
+          0.679317700552196,
+          0.8836655722099236,
+          0.7721385276077727,
+          0.7650134609547756
+        ],
+        "ratio": 0.7748504767241857,
+        "reduction": 0.22514952327581428,
+        "bootstrap95": [
+          0.7606834905896177,
+          0.7956098388812405
+        ],
+        "required": 0.25,
+        "pass": false
+      },
+      "h25": {
+        "param_fit": 0.5070552193186667,
+        "actuator_mean": 0.39632074963151576,
+        "actuator_seeds": [
+          0.3945556890895916,
+          0.34636062298037745,
+          0.4609413841590643,
+          0.38813931338191926,
+          0.3916067385466261
+        ],
+        "ratio": 0.7816126025959351,
+        "reduction": 0.21838739740406488,
+        "bootstrap95": [
+          0.7679991962794362,
+          0.8026419920704314
+        ],
+        "required": 0.2,
+        "pass": false
+      }
+    },
+    "n_seeds": 5,
+    "verdict": "RED"
+  },
+  "G1_accuracy_development": {
+    "split": "test2",
+    "per_horizon": {
+      "h1": {
+        "param_fit": 1.2683069183359756,
+        "actuator_mean": 1.4129138545014723,
+        "actuator_seeds": [
+          1.4519614882349257,
+          1.2159869121679252,
+          1.577178309665046,
+          1.4376935346302302,
+          1.3817490278092337
+        ],
+        "ratio": 1.1140157276404528,
+        "reduction": -0.11401572764045276,
+        "bootstrap95": [
+          1.0967965536571518,
+          1.1414075841677518
+        ],
+        "required": 0.3,
+        "pass": false
+      },
+      "h10": {
+        "param_fit": 0.9668820121261119,
+        "actuator_mean": 0.7696051115080342,
+        "actuator_seeds": [
+          0.7531735070985233,
+          0.6855420633433323,
+          0.8734841169920076,
+          0.7715192609901275,
+          0.7643066091161805
+        ],
+        "ratio": 0.7959659005504939,
+        "reduction": 0.20403409944950612,
+        "bootstrap95": [
+          0.7807230835739806,
+          0.8167941219611651
+        ],
+        "required": 0.25,
+        "pass": false
+      },
+      "h25": {
+        "param_fit": 0.49667266051983444,
+        "actuator_mean": 0.3978513667202775,
+        "actuator_seeds": [
+          0.38795496798237267,
+          0.3480452463779373,
+          0.46288491650834784,
+          0.39158851743272777,
+          0.3987831853000018
+        ],
+        "ratio": 0.801033353242904,
+        "reduction": 0.19896664675709597,
+        "bootstrap95": [
+          0.786710421897867,
+          0.8232327816505441
+        ],
+        "required": 0.2,
+        "pass": false
+      }
+    },
+    "n_seeds": 5,
+    "verdict": "RED"
+  },
+  "G2_real_mjwarp": {
+    "verdict": "GREEN",
+    "note": "every reported number is a forward rollout in MJWarp; the surrogate appears in the training loop and nowhere else"
+  },
+  "G3_stability": {
+    "model_under_test_nonfinite": [],
+    "comparator_nonfinite": [
+      {
+        "where": "replay:residual_b005:test3:period25"
+      }
+    ],
+    "note": "a comparator's instability is reported, not counted against this phase's model",
+    "verdict": "GREEN"
+  },
+  "G4_physical": {
+    "rate_ceiling_rad_per_step": 0.08,
+    "max_abs_delta_rad": 0.07999999821186066,
+    "max_hidden_norm": 8.0,
+    "max_abs_command_lag_rad": 2.064558506011963,
+    "nonfinite": 0,
+    "rate_clipped_fraction": 0.1259134375,
+    "n_blocks": 25,
+    "pass_rate_limit": true,
+    "pass_finite": true,
+    "hidden_norm_structural_bound": 8.0,
+    "note": "accumulated lag beyond one action increment is permitted by design; an instantaneous jump is not, and the rate ceiling is what makes it unreachable",
+    "verdict": "GREEN"
+  },
+  "G5_generalisation": {
+    "sealed": "RED",
+    "development": "RED",
+    "consistent": true,
+    "verdict": "RED"
+  },
+  "G6_compute": {
+    "per_size": {
+      "64": {
+        "nominal_env_steps_per_s": 2003.7108802795792,
+        "actuator_env_steps_per_s": 2021.37368142014,
+        "throughput_loss": -0.008815044782357173
+      },
+      "256": {
+        "nominal_env_steps_per_s": 4949.333387417264,
+        "actuator_env_steps_per_s": 4953.842461881219,
+        "throughput_loss": -0.0009110468240871583
+      },
+      "512": {
+        "nominal_env_steps_per_s": 7959.487099347618,
+        "actuator_env_steps_per_s": 7971.0514003569,
+        "throughput_loss": -0.0014528952512820048
+      }
+    },
+    "loss_at_256": -0.0009110468240871583,
+    "budget": 0.2,
+    "verdict": "GREEN"
+  },
+  "overall": "RED"
+}
