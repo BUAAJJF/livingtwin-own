@@ -1,0 +1,509 @@
+{
+  "phase": "RA-HW-0",
+  "units": {
+    "angle": "rad",
+    "speed": "rad/s",
+    "accel": "rad/s^2",
+    "temperature": "degC",
+    "current": "A",
+    "voltage": "V",
+    "time": "s"
+  },
+  "joint_order": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6"
+  ],
+  "coordinate_note": "joint angles are the SDK's, converted from its 0.001-degree feedback unit; positive senses are the vendor's and have NOT been verified against the physical arm",
+  "start_pose_rad": {
+    "joint1": 0.0,
+    "joint2": 1.05,
+    "joint3": -1.05,
+    "joint4": 0.0,
+    "joint5": 0.0,
+    "joint6": 0.0
+  },
+  "h1": {
+    "commanded_speed_rad_s": 0.05,
+    "max_segment_s": 5.0
+  },
+  "gripper": {
+    "vendor_range_m": [
+      0.0,
+      0.07
+    ],
+    "commanded_in_this_phase": false
+  },
+  "joints": [
+    {
+      "joint": "joint1",
+      "abs_min_rad": {
+        "value": -2.6179,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 2.6179,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": -0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": 0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    },
+    {
+      "joint": "joint2",
+      "abs_min_rad": {
+        "value": 0.0,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 3.14,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": 0.8500000000000001,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": 1.25,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    },
+    {
+      "joint": "joint3",
+      "abs_min_rad": {
+        "value": -2.967,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 0.0,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": -1.25,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": -0.8500000000000001,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    },
+    {
+      "joint": "joint4",
+      "abs_min_rad": {
+        "value": -1.553343,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "simulator and vendor agree",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 1.553343,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "simulator and vendor agree",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": -0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": 0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    },
+    {
+      "joint": "joint5",
+      "abs_min_rad": {
+        "value": -1.22,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 1.22,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": -0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": 0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    },
+    {
+      "joint": "joint6",
+      "abs_min_rad": {
+        "value": -2.09439,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "abs_max_rad": {
+        "value": 2.09439,
+        "unit": "rad",
+        "source": "vendor_sdk+repo_sim",
+        "note": "vendor tightens the lower bound; vendor tightens the upper bound",
+        "blocks_motion": false
+      },
+      "envelope_min_rad": {
+        "value": -0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "H1 envelope: within 0.20 rad of the start pose and 0.15 rad clear of every absolute bound",
+        "blocks_motion": false
+      },
+      "envelope_max_rad": {
+        "value": 0.2,
+        "unit": "rad",
+        "source": "derived",
+        "note": "",
+        "blocks_motion": false
+      },
+      "max_speed_rad_s": {
+        "value": 0.35,
+        "unit": "rad/s",
+        "source": "derived",
+        "note": "measured |qdot| stop threshold for H1",
+        "blocks_motion": false
+      },
+      "max_accel_rad_s2": {
+        "value": 8.0,
+        "unit": "rad/s^2",
+        "source": "derived",
+        "note": "provisional until the device's own maximum acceleration has been read",
+        "blocks_motion": false
+      },
+      "max_tracking_error_rad": {
+        "value": 0.05,
+        "unit": "rad",
+        "source": "derived",
+        "note": "commanded minus measured",
+        "blocks_motion": false
+      },
+      "device_max_speed_rad_s": {
+        "value": null,
+        "unit": "rad/s",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorAngleLimitMaxSpd; needs an attached arm",
+        "blocks_motion": true
+      },
+      "device_max_accel_rad_s2": {
+        "value": null,
+        "unit": "rad/s^2",
+        "source": "UNKNOWN",
+        "note": "GetAllMotorMaxAccLimit, unit 0.001 rad/s^2; needs an attached arm",
+        "blocks_motion": true
+      }
+    }
+  ],
+  "environment": {
+    "driver_temp_stop_c": {
+      "value": null,
+      "unit": "degC",
+      "source": "UNKNOWN",
+      "note": "no vendor maximum found in the SDK; must be taken from the manufacturer's specification or set from an H0 baseline plus a documented margin before any motion",
+      "blocks_motion": true
+    },
+    "motor_temp_stop_c": {
+      "value": null,
+      "unit": "degC",
+      "source": "UNKNOWN",
+      "note": "as above",
+      "blocks_motion": true
+    },
+    "bus_voltage_min_v": {
+      "value": null,
+      "unit": "V",
+      "source": "UNKNOWN",
+      "note": "GetArmLowSpdInfoMsgs reports 0.1 V units; the undervoltage threshold is a vendor number",
+      "blocks_motion": true
+    },
+    "joint_current_stop_a": {
+      "value": null,
+      "unit": "A",
+      "source": "UNKNOWN",
+      "note": "GetArmHighSpdInfoMsgs reports 0.001 A; the stop threshold is H0's measured still-arm baseline plus a margin, and H0 has not run",
+      "blocks_motion": true
+    },
+    "telemetry_gap_stop_s": {
+      "value": 0.1,
+      "unit": "s",
+      "source": "derived",
+      "note": "five missed 50 Hz control periods.  The SDK timestamps frames with python-can's kernel receive time, so this is measurable",
+      "blocks_motion": false
+    },
+    "command_watchdog_s": {
+      "value": 0.1,
+      "unit": "s",
+      "source": "derived",
+      "note": "host-side: if the control loop cannot issue a command within this, it stops issuing them and holds",
+      "blocks_motion": false
+    },
+    "gripper_disabled": {
+      "value": 1.0,
+      "unit": "bool",
+      "source": "derived",
+      "note": "no gripper command is issued in any RA-HW-0 stage; the field records that the decision is deliberate rather than accidental",
+      "blocks_motion": false
+    }
+  },
+  "unknowns_blocking_motion": [
+    "bus_voltage_min_v",
+    "driver_temp_stop_c",
+    "joint1.device_max_accel_rad_s2",
+    "joint1.device_max_speed_rad_s",
+    "joint2.device_max_accel_rad_s2",
+    "joint2.device_max_speed_rad_s",
+    "joint3.device_max_accel_rad_s2",
+    "joint3.device_max_speed_rad_s",
+    "joint4.device_max_accel_rad_s2",
+    "joint4.device_max_speed_rad_s",
+    "joint5.device_max_accel_rad_s2",
+    "joint5.device_max_speed_rad_s",
+    "joint6.device_max_accel_rad_s2",
+    "joint6.device_max_speed_rad_s",
+    "joint_current_stop_a",
+    "motor_temp_stop_c"
+  ],
+  "motion_authorised": false,
+  "authorisation_note": "set only by a human replying exactly 'APPROVE RA-HW-0 MOTION', never by code"
+}

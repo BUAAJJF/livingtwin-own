@@ -1,0 +1,120 @@
+{
+  "raw": "results/ra_hw0/sessions/H0_demo.raw.jsonl",
+  "meta": "results/ra_hw0/sessions/H0_demo.meta.json",
+  "summary": {
+    "n_samples": 1500,
+    "n_with_telemetry": 1495,
+    "dropped_frames": 5,
+    "dropped_fraction": 0.0033333333333333335,
+    "joint_order": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ],
+    "units": {
+      "angle": "rad",
+      "speed": "rad/s",
+      "accel": "rad/s^2",
+      "temperature": "degC",
+      "current": "A",
+      "voltage": "V",
+      "time": "s"
+    },
+    "control_rate_hz": 50.0,
+    "duration_s": 30.02721814600227,
+    "timing": {
+      "nominal_period_s": 0.02,
+      "median_s": 0.020081005000974983,
+      "p99_s": 0.020621959993150085,
+      "max_s": 0.020890187995973974,
+      "jitter_std_s": 0.0011557963493171511,
+      "periods_over_2x_nominal": 0
+    },
+    "per_joint": [
+      {
+        "index": 0,
+        "name": "joint1",
+        "q_min": 0.0,
+        "q_max": 0.0,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      },
+      {
+        "index": 1,
+        "name": "joint2",
+        "q_min": 1.0500075312923087,
+        "q_max": 1.0500075312923087,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      },
+      {
+        "index": 2,
+        "name": "joint3",
+        "q_min": -1.0500075312923087,
+        "q_max": -1.0500075312923087,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      },
+      {
+        "index": 3,
+        "name": "joint4",
+        "q_min": 0.0,
+        "q_max": 0.0,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      },
+      {
+        "index": 4,
+        "name": "joint5",
+        "q_min": 0.0,
+        "q_max": 0.0,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      },
+      {
+        "index": 5,
+        "name": "joint6",
+        "q_min": 0.0,
+        "q_max": 0.0,
+        "q_travel": 0.0,
+        "commanded_travel": null,
+        "first_tenth_step_noise_std_rad": 0.0,
+        "signal_to_noise": null
+      }
+    ],
+    "command_records": {
+      "n_commanded_samples": 0,
+      "safety_filter_recorded": true,
+      "filter_changed_command": 0
+    },
+    "trajectories": [
+      "H0-static"
+    ]
+  },
+  "gate_H_D": {
+    "checks": {
+      "units_and_joint_order_recorded": true,
+      "no_unexplained_dropped_frames": true,
+      "control_period_within_2x_nominal": true,
+      "safety_filtered_command_recorded": true,
+      "signal_above_noise": true,
+      "session_stop_recorded": true
+    },
+    "verdict": "PASS",
+    "failed": []
+  },
+  "note": "derived quantities live here; the raw log is untouched"
+}
