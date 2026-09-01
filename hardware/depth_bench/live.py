@@ -708,7 +708,7 @@ def main() -> None:
 
   board, spec = M.load_target(args.target)
 
-  names = (["d405", "zedx", "odin1"] if args.backends == "auto"
+  names = (["d405", "d455", "zedx", "odin1"] if args.backends == "auto"
            else args.backends.split(","))
   found = []
   for bname in names:

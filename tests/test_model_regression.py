@@ -15,7 +15,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from piper_push import objects, shapes
+from piper_push import layout, objects, shapes
 from piper_push import robot as piper
 
 
@@ -371,6 +371,8 @@ def test_action_space_covers_the_postures_the_task_needs():
       [-0.646, 2.185, -1.817, 1.398, -0.057, 0.000],  # near corner
     ]
   )
+  # Rigidly rotating the task changes only joint 1 in these IK solutions.
+  reference[:, 0] += layout.WORKSPACE_YAW_RAD
   inside = np.abs(reference - offsets) <= scale + 1e-9
   assert inside.all(), f"unreachable joints: {np.argwhere(~inside)}"
 

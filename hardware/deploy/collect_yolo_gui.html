@@ -1,0 +1,107 @@
+<!-- Standalone and network-free, served by collect_yolo_gui.py. -->
+<meta charset="utf-8">
+<title>YOLO manual capture</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#30363d; --fg:#e6edf3;
+          --dim:#8b949e; --ok:#3fb950; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",sans-serif; }
+  header { padding:14px 22px; background:var(--panel);
+           border-bottom:1px solid var(--line); font-weight:650; }
+  main { max-width:1120px; margin:0 auto; padding:20px;
+         display:grid; grid-template-columns:minmax(500px,1.55fr) minmax(300px,.75fr);
+         gap:18px; }
+  @media(max-width:880px){ main{grid-template-columns:1fr;} }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:11px; padding:16px; margin-bottom:16px; }
+  #view { width:100%; display:block; background:#000; border-radius:10px;
+          border:1px solid var(--line); }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--dim);
+       text-transform:uppercase; letter-spacing:.08em; }
+  .kv { display:flex; justify-content:space-between; gap:12px; padding:5px 0;
+        border-bottom:1px solid #222831; font-variant-numeric:tabular-nums; }
+  .kv span:first-child { color:var(--dim); }
+  .status { padding:10px 12px; border-radius:8px; margin-bottom:12px;
+            background:#301f0b; color:#ffd48a; }
+  .status.ok { background:#0e2b17; color:#72dc88; }
+  button { width:100%; padding:18px; border:0; border-radius:9px;
+           font:700 18px/1.2 inherit; color:#06130a; background:var(--ok);
+           cursor:pointer; }
+  button:disabled { opacity:.3; cursor:default; }
+  .hint { color:var(--dim); font-size:13px; }
+  code { color:#c9d1d9; overflow-wrap:anywhere; }
+  .safety { border-left:3px solid var(--ok); padding-left:11px; }
+</style>
+<header>YOLO manual capture · camera only</header>
+<main>
+  <div>
+    <img id="view" src="/stream">
+    <div class="card" style="margin-top:16px">
+      <div id="status" class="status">Starting camera…</div>
+      <button id="save" disabled>Save this frame</button>
+      <p class="hint">Move the four objects, take your hand completely out of
+      the image, wait for four green outlines, then click once. Space also
+      saves. One click writes exactly one gray + depth frame.</p>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>Session</h2>
+      <div class="kv"><span>camera</span><b id="camera">…</b></div>
+      <div class="kv"><span>objects detected</span><b id="detected">0</b></div>
+      <div class="kv"><span>depth valid</span><b id="fill">0%</b></div>
+      <div class="kv"><span>frames saved</span><b id="saved">0</b></div>
+      <p class="hint">Output: <code id="out">…</code></p>
+    </div>
+    <div class="card safety">
+      <h2>Hardware safety</h2>
+      <b>CAN disconnected · no arm commands</b>
+      <p class="hint">The program opens only the RealSense camera. Park the
+      arm outside the green object workspace; without joint feedback, the
+      automatic teacher cannot subtract a visible robot link.</p>
+    </div>
+  </div>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+let state = null, busy = false;
+async function poll(){
+  try {
+    state = await (await fetch('/state', {cache:'no-store'})).json();
+    const L = state.live || {};
+    const ready = !!L.ready && (L.frame_age_s || 9) < .5;
+    byId('camera').textContent = state.camera + ' · ' + (state.serial || '?');
+    byId('detected').textContent = (L.detected || 0) + ' / ' +
+      (state.expected || 'any');
+    byId('fill').textContent = ((L.depth_fill || 0) * 100).toFixed(1) + '%';
+    byId('saved').textContent = state.saved;
+    byId('out').textContent = state.out;
+    byId('status').textContent = ready
+      ? 'Ready: ' + L.detected + ' green objects, hand out of frame?'
+      : (L.why || 'Waiting…');
+    byId('status').className = ready ? 'status ok' : 'status';
+    byId('save').disabled = !ready || busy;
+  } catch(e) { byId('status').textContent = 'GUI disconnected: ' + e; }
+}
+async function save(){
+  if (!state || busy || byId('save').disabled) return;
+  busy = true;
+  byId('save').disabled = true;
+  byId('save').textContent = 'Saving…';
+  try {
+    const r = await (await fetch('/save', {method:'POST'})).json();
+    byId('status').textContent = r.ok ? 'Saved frame ' + r.saved : r.why;
+  } finally {
+    busy = false;
+    byId('save').textContent = 'Save this frame';
+    await poll();
+  }
+}
+byId('save').onclick = save;
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); save(); }
+});
+setInterval(poll, 300);
+poll();
+</script>

@@ -134,6 +134,7 @@ class Kinematics:
       ] for n in self.joint_names
     ])
     self._spheres: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+    self._table_geoms = None
     missing = [n for n in self.joint_names
                if mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n) < 0]
     if missing:
@@ -142,6 +143,73 @@ class Kinematics:
   def update(self, q: np.ndarray) -> None:
     self.data.qpos[self._qadr] = q
     mujoco.mj_kinematics(self.model, self.data)
+
+  def collision_plane_clearance(
+    self, normal: np.ndarray, plane_z: float,
+    exclude_bodies: tuple[str, ...] = ("base_link",),
+  ) -> tuple[float, str]:
+    """Exact minimum collision-geometry distance above a calibrated plane.
+
+    Mesh vertices and box corners are cached in their local frames.  At run
+    time only FK, a rotation of the fixed plane normal, and dot products are
+    needed.  The robot base is excluded because it is bolted through the table;
+    all moving links, flange, gripper shells and pads remain checked.
+    """
+    n = np.asarray(normal, dtype=np.float64).reshape(3)
+    norm = float(np.linalg.norm(n))
+    if not np.isfinite(n).all() or norm < 1e-9:
+      raise ValueError("table normal must be a finite nonzero vector")
+    n = n / norm
+    if n[2] <= 0.0:
+      raise ValueError("table normal must point upward in the base frame")
+
+    if self._table_geoms is None:
+      cached = []
+      for gid in range(self.model.ngeom):
+        if self.model.geom_group[gid] != _COLLISION_GROUP:
+          continue
+        body = mujoco.mj_id2name(
+          self.model, mujoco.mjtObj.mjOBJ_BODY,
+          int(self.model.geom_bodyid[gid]))
+        geom = mujoco.mj_id2name(
+          self.model, mujoco.mjtObj.mjOBJ_GEOM, gid) or f"geom_{gid}"
+        if self.model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_MESH:
+          mid = int(self.model.geom_dataid[gid])
+          first = int(self.model.mesh_vertadr[mid])
+          count = int(self.model.mesh_vertnum[mid])
+          vertices = np.asarray(
+            self.model.mesh_vert[first:first + count], dtype=np.float64)
+          radius = None
+        elif self.model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_BOX:
+          h = np.asarray(self.model.geom_size[gid], dtype=np.float64)
+          vertices = np.asarray([
+            [sx * h[0], sy * h[1], sz * h[2]]
+            for sx in (-1.0, 1.0)
+            for sy in (-1.0, 1.0)
+            for sz in (-1.0, 1.0)
+          ])
+          radius = None
+        else:
+          # Conservative fallback for a future primitive collision geom.
+          vertices = None
+          radius = float(self.model.geom_rbound[gid])
+        cached.append((gid, body, geom, vertices, radius))
+      self._table_geoms = cached
+
+    best, best_name = float("inf"), ""
+    excluded = set(exclude_bodies)
+    for gid, body, geom, vertices, radius in self._table_geoms:
+      if body in excluded:
+        continue
+      centre = float(self.data.geom_xpos[gid] @ n)
+      if vertices is None:
+        surface = centre - radius
+      else:
+        local_n = self.data.geom_xmat[gid].reshape(3, 3).T @ n
+        surface = centre + float(np.min(vertices @ local_n))
+      if surface < best:
+        best, best_name = surface, geom
+    return float(best - n[2] * float(plane_z)), best_name
 
   @property
   def site_pos(self) -> np.ndarray:
@@ -225,6 +293,21 @@ class Kinematics:
     return np.asarray(centres, dtype=np.float64), radii
 
 
+CONTACT_EFFORT = 0.20
+"""Gripper load above which the drive is pushing against something.
+
+Measured, not assumed -- see ``ProprioBuilder._contact_bit`` for the sweep it
+came from and ``hardware/deploy/gripper_effort.json`` for the samples.  It
+replaces a 0.15 that the repository documented as "a guess until someone
+squeezes something and reads the number"."""
+
+CONTACT_ASSERT = 3
+CONTACT_RELEASE = 6
+"""Consecutive samples to turn the contact bit on and off.  The empty gripper's
+transients are two steps; a genuine hold drops out for one or two.  At 50 Hz
+this is 60 ms to assert and 120 ms to release."""
+
+
 class ProprioBuilder:
   """Assemble the proprioception vector and check it against the exported spec."""
 
@@ -238,7 +321,9 @@ class ProprioBuilder:
   }
 
   def __init__(self, spec_path: pathlib.Path | str = SPEC_FILE,
-               contact_effort: float = 0.15) -> None:
+               contact_effort: float = CONTACT_EFFORT,
+               contact_assert: int = CONTACT_ASSERT,
+               contact_release: int = CONTACT_RELEASE) -> None:
     spec = _spec(spec_path)
     self.spec = spec
     self.terms = spec["groups"]["proprio"]["terms"]
@@ -246,6 +331,11 @@ class ProprioBuilder:
     self.default_q = np.asarray(spec["default_joint_pos"], dtype=np.float32)
     self.joint_names = spec["joint_names"]
     self.contact_effort = contact_effort
+    self.contact_assert = int(contact_assert)
+    self.contact_release = int(contact_release)
+    self._above = 0
+    self._below = 0
+    self._contact = False
 
     unknown = [t["name"] for t in self.terms if t["name"] not in self.WIDTHS]
     if unknown:
@@ -262,11 +352,65 @@ class ProprioBuilder:
         )
     self.kin = Kinematics(self.joint_names)
 
+  def _contact_bit(self, effort: float) -> bool:
+    """The gripper drive's current, as the contact sensor the policy expects.
+
+    In simulation ``pad_contact`` is a contact sensor: once the pads touch the
+    object it stays on for as long as they are touching.  Here it has to come
+    from the only thing the real gripper reports, which is the drive's load,
+    and a load is not a contact -- it spikes on every transient and settles.
+
+    Measured on this arm with :mod:`hardware.deploy.gripcal`, four close/open
+    cycles each way, normalised by ``GRIPPER_TORQUE_NM``::
+
+        free   p50 0.083   p90 0.118   p99 0.641   max 0.660
+        held   p50 0.082   p90 1.045   p99 1.128   max 1.180
+
+    The medians are identical because most of a sweep is the gripper moving,
+    which looks the same whether or not it holds anything; the separation is
+    entirely in the tail.  At a 0.20 threshold the empty gripper produced eight
+    runs of median **2** control steps and the held one four runs of median
+    **31** -- one per cycle, which is exactly what a contact sensor does.
+
+    A bare threshold is still not enough, and the arm showed why.  During a
+    policy run the gripper is chasing a new target every step and never
+    settles, so it lives in the transient regime where the two distributions
+    overlap; the reconstructed bit toggled almost every other step::
+
+        0 1 1 1 0 1 1 1 1 0 0 1 0 0 1 1 1 1 0 0 0 1 0 0 0
+
+    A policy trained on "contact holds, so close and lift" reads that as
+    "contact, gone, contact, gone" and lets go -- which is what the arm did,
+    after closing on the object.
+
+    So the crossing has to persist.  ``contact_assert`` consecutive samples
+    above the threshold to turn it on, chosen above the two-step transients the
+    empty gripper makes; ``contact_release`` below to turn it off, chosen long
+    enough to bridge the one- and two-step dropouts seen while genuinely
+    holding.  Stateful, therefore, and ``reset`` clears it.
+    """
+    if effort > self.contact_effort:
+      self._above += 1
+      self._below = 0
+    else:
+      self._below += 1
+      self._above = 0
+    if not self._contact and self._above >= self.contact_assert:
+      self._contact = True
+    elif self._contact and self._below >= self.contact_release:
+      self._contact = False
+    return self._contact
+
+  def reset(self) -> None:
+    """Forget the contact latch.  Called wherever the policy is reset."""
+    self._above = self._below = 0
+    self._contact = False
+
   def __call__(self, js: JointFeedback,
                last_action: np.ndarray) -> np.ndarray:
     self.kin.update(js.position)
     gi = self.joint_names.index("gripper_joint1")
-    loaded = float(abs(js.gripper_effort) > self.contact_effort)
+    loaded = float(self._contact_bit(abs(js.gripper_effort)))
     parts = {
       # ``joint_pos_rel`` and ``joint_vel_rel``: relative to the default pose,
       # and the default velocity is zero, so the second one is just velocity.

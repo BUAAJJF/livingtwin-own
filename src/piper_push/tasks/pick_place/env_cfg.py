@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import math
 
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg, mdp
@@ -30,9 +31,10 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
+from mjlab.utils.spec_config import GeomCfg
 from mjlab.viewer import ViewerConfig
 
-from piper_push import camera, objects, robot as piper, shapes
+from piper_push import camera, layout, objects, robot as piper, shapes
 from piper_push.actions import RateLimitedJointPositionActionCfg
 from piper_push.tasks.pick_place import mdp as pick_mdp
 
@@ -41,25 +43,31 @@ BIN = "bin"
 TASK = "pick"
 PAD_SENSOR = "pad_contact"
 PALM_SENSOR = "palm_contact"
+TABLE_GUARD_SENSOR = "table_clearance_guard"
+TABLE_IMPACT_SENSOR = "robot_table_impact"
+CONTROL_DECIMATION = 10
 
 # S0: a straight-down grasp is usable at every azimuth within +-80 deg for
 # r in [0.16, 0.52] m.  Objects live well inside that; the end-effector gets a
 # wider envelope because it has to stand over objects at the edge and reach the
 # bin, which sits outside the spawn sector.
 SPAWN_RADIUS = (0.24, 0.46)
-SPAWN_ANGLE = (-0.14, 0.73)  # -8 to +42 deg; the bin is at -0.63 rad
+SPAWN_ANGLE = layout.rotate_angle_range((-0.14, 0.73))
+# 82 to 132 deg after the installed rig's +90 deg layout rotation; the bin is
+# at +0.94 rad (54 deg).
 EE_ENVELOPE_RADIUS = (0.14, 0.54)
-EE_ENVELOPE_ANGLE = (-1.05, 1.05)  # +-60 deg
+EE_ENVELOPE_ANGLE = layout.rotate_angle_range((-1.05, 1.05))
 OBJECT_LOST_RADIUS = (0.10, 0.58)
-OBJECT_LOST_ANGLE = (-1.22, 1.22)
+OBJECT_LOST_ANGLE = layout.rotate_angle_range((-1.22, 1.22))
 # Where the object is ALLOWED to be, which is not the same as where it starts.
-# The bin sits at -0.63 rad and the spawn sector stops at -0.14, so a guard
-# policing the spawn sector charges 10 x 0.372 x 0.49 = 1.83 per step for
-# carrying the object to the bin, against a carry that pays 1.08.  Measured:
+# Before the common layout rotation the bin sits at -0.63 rad and the spawn
+# sector stops at -0.14; their separation is unchanged by the +90 degree yaw.
+# A guard policing only the spawn sector charges 10 x 0.372 x 0.49 = 1.83 per
+# step for carrying the object to the bin, against a carry that pays 1.08. Measured:
 # drop_error sat at 0.21 m for 3000 iterations, which is exactly the sector
 # boundary, and the penalty read -0.023 because the policy was obeying it.
 OBJECT_ALLOWED_RADIUS = (0.15, 0.55)
-OBJECT_ALLOWED_ANGLE = (-0.95, 0.90)
+OBJECT_ALLOWED_ANGLE = layout.rotate_angle_range((-0.95, 0.90))
 # S0: straight down runs out at 150 mm for r <= 0.35 and 130 mm at r = 0.42.
 # Release happens at 115 mm, so 0.30 is clear of every useful pose and well
 # under where the arm ends up if it flings itself.
@@ -85,6 +93,32 @@ def ghost_links() -> SceneEntityCfg:
   return SceneEntityCfg("robot", body_names=piper.GHOST_LINKS)
 
 
+def sight_arm() -> SceneEntityCfg:
+  """The links that can stand between the camera and the object.
+
+  link1 is left out: it is the shoulder, it barely moves in the plane of the
+  view, and charging it would put a constant term on a pose the policy cannot
+  change without giving up the workspace.
+  """
+  return SceneEntityCfg("robot", body_names=("link[2-6]",))
+
+
+def sight_hand() -> SceneEntityCfg:
+  """The gripper, charged separately because it is the one that matters.
+
+  It is the part that arrives at the object, so it is the part most often
+  between the object and a camera bolted to the world -- and it is the part
+  whose approach direction the policy has the most freedom to choose.
+  """
+  return SceneEntityCfg("robot",
+                        body_names=("gripper_base", "gripper_link[12]"))
+
+
+def fingers() -> SceneEntityCfg:
+  """The two finger bodies, whose separation IS the jaw axis."""
+  return SceneEntityCfg("robot", body_names=("gripper_link[12]",))
+
+
 def _ramp(
   name: str, a: float, b: float, c: float, at_b: int = 200, at_c: int = 500
 ) -> CurriculumTermCfg:
@@ -107,6 +141,7 @@ def make_pick_place_env_cfg(
   profile: str = "bare_gripper",
   shape_variety: float = 1.0,
   vision: bool = False,
+  wrist: bool = False,
   num_objects: int = 1,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
@@ -127,6 +162,17 @@ def make_pick_place_env_cfg(
   ``vision`` adds the third-person camera and the observation group built
   from it.  It does not remove the object state -- the critic keeps it, and
   which groups reach the actor is decided in the runner config.
+
+  ``wrist`` adds a SECOND camera, on the hand, in its own observation group.
+  The two views fail in opposite ways and that is the whole reason for the
+  second one: measured on the rig, the arm blocked the third-person camera's
+  line to the object 52% of the time on a fast run, and it blocks it precisely
+  when the hand is over the object -- which is when a wrist camera is pointed
+  straight at it.  A wrist camera's own failure is losing the object out of
+  frame when the hand is elsewhere, which is when the third-person view is
+  clear.  Separate groups, not extra channels on one: they have different
+  intrinsics, different range, different noise, and the encoder should not be
+  made to share filters across two sensors that agree about nothing.
 
   The vision variant also keeps the proprioception the *state* policy was
   trained on, under ``full_proprio``.  Two things need it and both are
@@ -276,7 +322,17 @@ def make_pick_place_env_cfg(
     "reset_base": EventTermCfg(
       func=mdp.reset_root_state_uniform,
       mode="reset",
-      params={"pose_range": {}, "velocity_range": {}},
+      params={
+        # Centre on the measured D455 plane.  The range covers the 3.92 mm
+        # hand-eye residual and a small remount/table shift; play/evaluation is
+        # exact so reported clearance still refers to the physical setup.
+        "pose_range": {} if play else {
+          "z": (-0.004, 0.004),
+          "roll": (-math.radians(0.25), math.radians(0.25)),
+          "pitch": (-math.radians(0.25), math.radians(0.25)),
+        },
+        "velocity_range": {},
+      },
     ),
     # The bin is a mocap body, and this is the only thing that moves it onto
     # each environment's own patch of table.
@@ -461,6 +517,62 @@ def make_pick_place_env_cfg(
       weight=-4.0,
       params={"sensor_names": palm_names},
     ),
+    # -- keep the camera's view of the object, and arrive without shoving it --
+    #
+    # Five terms, all of them state quantities, all of them therefore learnable
+    # by the TEACHER.  That is the point: the student imitates the teacher's
+    # actions, so a habit the teacher never formed is one the student cannot
+    # copy.  Every one of these exists because the deployment failed on it.
+    #
+    # Measured on the rig 2026-09-01: the arm blocks the fixed camera's line to
+    # the object, the loop holds when the mask empties, and holding cannot
+    # uncover what it is covering -- one run froze in a single pose for 15.3 s
+    # and spent 2429 steps held.  And objects were batted off the table by a
+    # hand that arrived closed.
+    "premature_touch": RewardTermCfg(
+      func=pick_mdp.premature_touch,
+      weight=-6.0,
+      params={"command_name": TASK, "palm_sensors": palm_names,
+              "clearance_m": 0.015},
+    ),
+    "jaws_ready": RewardTermCfg(
+      func=pick_mdp.jaws_ready,
+      weight=0.4,
+      params={"command_name": TASK, "near_m": 0.10, "clearance_m": 0.015},
+    ),
+    # The tube between camera and object.  Two terms rather than one so the
+    # hand can be priced above the arm without a second radius: the hand is
+    # what arrives at the object and what most often ends up in front of it.
+    "sight_arm": RewardTermCfg(
+      func=pick_mdp.sight_cylinder,
+      weight=-2.0,
+      params={"command_name": TASK, "asset_cfg": sight_arm(), "radius": 0.07},
+    ),
+    "sight_hand": RewardTermCfg(
+      func=pick_mdp.sight_cylinder,
+      weight=-4.0,
+      params={"command_name": TASK, "asset_cfg": sight_hand(), "radius": 0.07},
+    ),
+    "wrist_side_on": RewardTermCfg(
+      func=pick_mdp.wrist_side_on,
+      weight=0.8,
+      params={"command_name": TASK, "asset_cfg": fingers(), "near_m": 0.20},
+    ),
+    # Contact, not proximity.  See the note on ``table_touch``: the shell this
+    # task removed charged for being near the table and the teacher answered by
+    # not reaching.  This charges for arriving hard, and leaves the approach
+    # free.
+    "table_touch": RewardTermCfg(
+      func=pick_mdp.table_touch,
+      weight=-2.0,
+      params={"impact_sensor": TABLE_IMPACT_SENSOR, "force_threshold_n": 1.0},
+    ),
+    # Fingertip/table contact is deliberately not a reward or termination.
+    # A binary MuJoCo contact is poorly transferable to the real setup (which
+    # has no table force sensor), and a light brush is acceptable during a
+    # grasp.  The sensors remain in the scene for offline contact auditing;
+    # link geometry, speed and smoothness terms still discourage a dangerous
+    # arm-level strike without making simulator contact part of the policy.
     # -- move smoothly and cheaply -------------------------------------------
     "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.15),
     "action_acc": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.08),
@@ -500,7 +612,12 @@ def make_pick_place_env_cfg(
 
   cfg = ManagerBasedRlEnvCfg(
     scene=SceneCfg(
-      terrain=TerrainEntityCfg(terrain_type="plane"),
+      terrain=TerrainEntityCfg(
+        terrain_type="plane",
+        # Bit 2 is reserved for the inactive fingertip safety shells.  Objects
+        # remain on bit 1 and therefore never pair with those shells.
+        geoms=(GeomCfg(geom_names_expr=("terrain",), conaffinity=3),),
+      ),
       num_envs=1,
       env_spacing=1.6,
       entities={
@@ -514,6 +631,28 @@ def make_pick_place_env_cfg(
         ),
       },
       sensors=(
+        ContactSensorCfg(
+          name=TABLE_GUARD_SENSOR,
+          primary=ContactMatch(
+            mode="geom", pattern="[lr]f_table_guard", entity="robot"
+          ),
+          secondary=ContactMatch(mode="geom", pattern="terrain"),
+          fields=("found", "dist"),
+          reduce="mindist",
+        ),
+        ContactSensorCfg(
+          name=TABLE_IMPACT_SENSOR,
+          primary=ContactMatch(
+            mode="geom",
+            pattern=(".*_collision", "[lr]f_pad"),
+            entity="robot",
+            exclude=("base_link_collision",),
+          ),
+          secondary=ContactMatch(mode="geom", pattern="terrain"),
+          fields=("force",),
+          reduce="maxforce",
+          history_length=CONTROL_DECIMATION,
+        ),
         # Both pads, filtered to the object: "is either pad touching anything"
         # would count the table and the bin wall as a grasp.
         *(
@@ -567,6 +706,20 @@ def make_pick_place_env_cfg(
       "lift_decay": _ramp("lift", 0.8, 0.4, 0.20, 600, 1400),
       "transport_decay": _ramp("transport", 1.5, 1.0, 0.60, 600, 1400),
       "in_bin_decay": _ramp("object_in_bin", 3.0, 2.0, 1.0, 600, 1400),
+      # The visibility terms are ramped IN rather than applied at full weight,
+      # and this is not caution for its own sake.  A field over a region the
+      # arm has to work in is exactly the shape of the 5 mm proximity shell
+      # that drove the robust teacher to inactivity, and the camera sits at a
+      # corner of the workspace so the tube covers a real part of it.  Learn to
+      # pick things up first, then learn to do it without standing in the way.
+      "sight_arm_weight": _ramp("sight_arm", -0.3, -1.0, -2.0, 200, 600),
+      "sight_hand_weight": _ramp("sight_hand", -0.6, -2.0, -4.0, 200, 600),
+      "table_touch_weight": _ramp("table_touch", -0.3, -1.0, -2.0, 200, 600),
+      # And the two hints fade, like every other hint here: opening the jaws
+      # early and turning them across the view are things to do on the way to a
+      # placement, not things worth doing instead of one.
+      "jaws_ready_decay": _ramp("jaws_ready", 0.4, 0.2, 0.10, 600, 1400),
+      "wrist_decay": _ramp("wrist_side_on", 0.8, 0.5, 0.30, 600, 1400),
     },
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
@@ -610,7 +763,7 @@ def make_pick_place_env_cfg(
         cone="elliptic",
       ),
     ),
-    decimation=10,  # 500 Hz physics, 50 Hz control.
+    decimation=CONTROL_DECIMATION,  # 500 Hz physics, 50 Hz control.
     episode_length_s=12.0,
   )
 
@@ -652,6 +805,7 @@ def make_pick_place_env_cfg(
         "rot_jitter": 0.0 if play else camera.ROT_JITTER_RAD,
       },
     )
+
     # The grasp flag is computed from the object's velocity and lift
     # height, which nothing on the real robot can measure.  A policy
     # that has to survive deployment gets the servo error instead --
@@ -675,6 +829,43 @@ def make_pick_place_env_cfg(
     cfg.observations["proprio"].terms["squeeze"] = ObservationTermCfg(
       func=pick_mdp.gripper_squeeze,
       noise=None if play else Unoise(n_min=-0.0005, n_max=0.0005),
+    )
+
+  if wrist:
+    assert vision, "the wrist camera supplements the scene camera, not replaces it"
+    cfg.scene.sensors = (cfg.scene.sensors or ()) + (camera.wrist_camera_cfg(),)
+    cfg.observations["wrist"] = ObservationGroupCfg(
+      terms={
+        "scene": ObservationTermCfg(
+          func=pick_mdp.CameraScene,
+          params={
+            "sensor_name": camera.WRIST_CAMERA_NAME,
+            "command_name": TASK,
+            "cutoff_distance": camera.WRIST_CUTOFF_M,
+            "noise_cfg": dataclasses.replace(
+              camera.WRIST_DEPTH_NOISE, strength=0.0 if play else 1.0
+            ),
+            "mask_jitter_px": 0 if play else camera.MASK_JITTER_PX,
+          },
+        )
+      },
+      enable_corruption=False,
+      concatenate_terms=True,
+    )
+    # The bracket, not the tripod.  A wrist camera does not get knocked, but
+    # it is bolted to a printed part and no two are seated the same, so the
+    # jitter is a machining tolerance and it is an order of magnitude tighter
+    # than the third-person camera's.
+    cfg.events["wrist_camera_pose"] = EventTermCfg(
+      func=camera.randomize_camera_pose,
+      mode="startup" if play else "reset",
+      params={
+        "pos_jitter": 0.0 if play else camera.WRIST_POS_JITTER_M,
+        "rot_jitter": 0.0 if play else camera.WRIST_ROT_JITTER_RAD,
+        "sensor_name": camera.WRIST_CAMERA_NAME,
+        "nominal_pos": camera.WRIST_CAMERA_POS,
+        "nominal_quat": camera.WRIST_CAMERA_QUAT,
+      },
     )
 
   if play:

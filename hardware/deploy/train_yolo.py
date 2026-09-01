@@ -26,12 +26,16 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-YOLO_DIR = HERE / "yolo"
+YOLO_DIR = HERE / "yolo_d455"
+"""The D455 set.  ``yolo/`` is the older D405 one; pass --data/--out to use it."""
 
 
 def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--data", default=str(YOLO_DIR / "data" / "data.yaml"))
+  p.add_argument("--out", default=str(YOLO_DIR),
+                 help="output directory for train/ and best.pt; use a separate "
+                      "directory per camera")
   p.add_argument("--model", default="yolo26n-seg.pt")
   p.add_argument("--epochs", type=int, default=60)
   p.add_argument("--imgsz", type=int, default=832,
@@ -47,13 +51,14 @@ def main() -> int:
   from ultralytics import YOLO
 
   data = pathlib.Path(a.data)
+  out = pathlib.Path(a.out)
   if not data.exists():
     print(f"no dataset at {data}.  Record a session with "
           "`run.py --record`, then label it with `autolabel.py`.")
     return 1
 
   if a.check:
-    weights = YOLO_DIR / "best.pt"
+    weights = out / "best.pt"
     if not weights.exists():
       print(f"no weights at {weights}")
       return 1
@@ -73,17 +78,18 @@ def main() -> int:
   m = YOLO(a.model)
   m.train(
     data=str(data), epochs=a.epochs, imgsz=a.imgsz, batch=a.batch,
-    device=a.device, project=str(YOLO_DIR), name="train", exist_ok=True,
+    device=a.device, project=str(out), name="train", exist_ok=True,
     # A fixed camera on a fixed table: none of the usual augmentation applies.
     mosaic=0.0, mixup=0.0, copy_paste=0.0,
     fliplr=0.0, flipud=0.0, degrees=0.0, shear=0.0, perspective=0.0,
     scale=0.15, translate=0.06,
     hsv_h=0.0, hsv_s=0.2, hsv_v=0.4,
   )
-  best = YOLO_DIR / "train" / "weights" / "best.pt"
+  best = out / "train" / "weights" / "best.pt"
   if best.exists():
-    (YOLO_DIR / "best.pt").write_bytes(best.read_bytes())
-    print(f"copied {best} -> {YOLO_DIR / 'best.pt'}")
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "best.pt").write_bytes(best.read_bytes())
+    print(f"copied {best} -> {out / 'best.pt'}")
   return 0
 
 

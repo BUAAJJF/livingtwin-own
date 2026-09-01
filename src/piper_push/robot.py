@@ -27,6 +27,8 @@ from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.spec_config import CollisionCfg
 
+from piper_push import layout
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_URDF = (
     _REPO_ROOT / "piperx-mjlab" / "src" / "piper_mjlab" / "assets" / "agilex_piper_x" / "piper_x.urdf"
@@ -47,6 +49,14 @@ GRASP_SITE_POS = (0.0, 0.0, 0.1265)
 # present a single flat face to the cube.
 _PAD_POS = (0.0, -0.0115, 0.003)
 _PAD_SIZE = (0.0148, 0.0115, 0.003)
+TABLE_GUARD_MARGIN_M = 0.005
+"""Pre-contact clearance enforced during training.
+
+The guard is an inactive MuJoCo margin, not a supporting collision: crossing
+it terminates the episode but cannot become another mechanical stop for the
+policy to exploit.  A dedicated collision bit makes it pair with terrain and
+not with the object being grasped.
+"""
 
 ARM_JOINT_EXPR = ("joint[1-6]",)
 GRASP_SITE = ("grasp_site",)
@@ -84,6 +94,13 @@ def get_spec() -> mujoco.MjSpec:
             pos=_PAD_POS,
             size=_PAD_SIZE,
             group=3,
+        )
+        spec.body(body_name).add_geom(
+            name=pad_name.replace("_pad", "_table_guard"),
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=_PAD_POS,
+            size=_PAD_SIZE,
+            group=5,
         )
 
     spec.body("gripper_base").add_site(
@@ -387,13 +404,21 @@ PROFILES: dict[str, RobotProfile] = {
 # transient at reset, and an open hand is the posture an approach starts from.
 # The midpoint of the joint range the task actually needs, solved by IK over
 # the whole spawn sector at every grasp height plus the bin (scratchpad
-# s0/jrange.py).  The pushing task's posture expresses 3% of those poses:
+# s0/jrange.py).  Joint 1 follows the installed rig's +90 degree task yaw; all
+# other joints are unchanged by that rigid rotation.  The pushing task's
+# posture expresses 3% of those poses:
 # joint2 alone covers 34% of them, so a policy started there could not reach a
 # grasp however well it learned.
 PICK_HOME_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0.0, 0.0, 0.0),
+    # The 2026-08-26 D455 table fit puts the surface 3.784 mm below the robot
+    # base and gives n_base=(-0.000760, 0.015389, 0.999881).  The terrain stays
+    # at world z=0; translating and rotating the base by the inverse plane pose
+    # reproduces that measured relation without tilting gravity or the table.
+    pos=(0.0, 0.0, 0.0037840020355038384),
+    rot=(0.9999703224374927, 0.007694792341192091,
+         0.0003800198450988439, 0.0),
     joint_pos={
-        "joint1": 0.06,
+        "joint1": 0.06 + layout.WORKSPACE_YAW_RAD,
         "joint2": 1.72,
         "joint3": -1.25,
         "joint4": 1.13,
@@ -405,18 +430,21 @@ PICK_HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 
 # As the push task's, except the pads take priority 3 (see PAD_PRIORITY).
 PICK_COLLISION = CollisionCfg(
-    geom_names_expr=(".*_collision", "[lr]f_pad"),
+    geom_names_expr=(".*_collision", "[lr]f_pad", "[lr]f_table_guard"),
     contype={
+        "[lr]f_table_guard": 2,
         "(link6|gripper_base)_collision": 1,
         "[lr]f_pad": 1,
         ".*_collision": 0,
     },
     conaffinity={
+        "[lr]f_table_guard": 0,
         "(link6|gripper_base)_collision": 1,
         "[lr]f_pad": 1,
         ".*_collision": 0,
     },
     condim={
+        "[lr]f_table_guard": 1,
         "[lr]f_pad": 6,
         ".*_collision": 3,
     },
@@ -435,9 +463,14 @@ PICK_COLLISION = CollisionCfg(
         "[lr]f_pad": (0.95, 0.99, 0.001),
     },
     priority={
+        "[lr]f_table_guard": 0,
         "[lr]f_pad": PAD_PRIORITY,
         ".*_collision": 0,
     },
+    margin={"[lr]f_table_guard": TABLE_GUARD_MARGIN_M},
+    # Contacts exist in the sensor inside the margin but never enter the
+    # solver, so the guard cannot hold the hand above the table.
+    gap={"[lr]f_table_guard": TABLE_GUARD_MARGIN_M},
 )
 
 

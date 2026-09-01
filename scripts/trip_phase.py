@@ -61,7 +61,9 @@ if recurrent:
 
 u = env.unwrapped
 pick = u.command_manager.get_term("pick")
-obj = pick._object
+if pick.num_objects != 1:
+    raise RuntimeError("trip_phase currently requires the single-object task")
+obj = pick._objects[0]
 robot = u.scene["robot"]
 pads = u.scene.sensors["pad_contact"]
 dt = u.step_dt

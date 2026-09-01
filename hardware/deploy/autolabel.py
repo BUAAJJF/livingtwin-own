@@ -64,13 +64,28 @@ def polygons(binary: np.ndarray, epsilon_px: float = 1.5) -> list[np.ndarray]:
 
 
 def label_session(session: pathlib.Path, rig: "config.Rig", out: pathlib.Path,
-                  min_fill: float = 0.90, min_instance_fill: float = 0.80,
+                  min_fill: float | None = None,
+                  min_instance_fill: float = 0.80,
                   stride: int = 1) -> dict:
   meta = json.loads((session / "meta.json").read_text())
   reproj = rectify.Reprojector(rig)
   segmenter = mask.DepthSegmenter(rig, reproj)
   tracker = mask.TargetTracker()
   kin = proprio.Kinematics()
+
+  if min_fill is None:
+    # Absolute whole-image fill is a property of the camera pose as much as of
+    # sensor confidence: this D455 view legitimately contains only about 65%
+    # valid depth while the old close-range D405 threshold was 90%.  Select the
+    # better two thirds of each recording as the teacher frames, then apply the
+    # stricter per-instance validity gate below.
+    fills = []
+    for rec in meta:
+      f = np.load(session / f"{rec['i']:06d}.npz")
+      fills.append(float((f["depth"] > 0).mean()))
+    min_fill = float(np.quantile(fills, 0.35)) if fills else 1.0
+    print(f"{session}: adaptive frame fill threshold {min_fill:.3f} "
+          f"(35th percentile)")
 
   kept, seen, reasons = [], 0, {"fill": 0, "unconfirmed": 0, "instance": 0,
                                 "no gray": 0}
@@ -125,10 +140,30 @@ def label_session(session: pathlib.Path, rig: "config.Rig", out: pathlib.Path,
 def write_dataset(items, out: pathlib.Path, val_fraction: float = 0.15,
                   seed: int = 0) -> None:
   rng = random.Random(seed)
-  idx = list(range(len(items)))
-  rng.shuffle(idx)
-  n_val = int(len(idx) * val_fraction)
-  split = {i: ("val" if k < n_val else "train") for k, i in enumerate(idx)}
+  sessions: dict[str, list[int]] = {}
+  for i, (session, *_rest) in enumerate(items):
+    sessions.setdefault(str(session.resolve()), []).append(i)
+  split = {}
+  if len(sessions) >= 2:
+    # Adjacent video frames are near duplicates.  A random frame split leaks
+    # the same scene into train and validation and reports a flattering mAP.
+    # Hold out complete recording sessions instead.
+    names = sorted(sessions)
+    rng.shuffle(names)
+    n_val_sessions = min(len(names) - 1,
+                         max(1, int(round(len(names) * val_fraction))))
+    val_sessions = set(names[:n_val_sessions])
+    for name, indices in sessions.items():
+      for i in indices:
+        split[i] = "val" if name in val_sessions else "train"
+  else:
+    # One session cannot test environmental generalisation, but a contiguous
+    # time block at least avoids putting adjacent frames on both sides.
+    indices = next(iter(sessions.values()))
+    indices = sorted(indices, key=lambda i: int(items[i][1]))
+    n_val = min(len(indices) - 1, max(1, int(round(len(indices) * val_fraction))))
+    val = set(indices[-n_val:])
+    split = {i: ("val" if i in val else "train") for i in indices}
 
   for sub in ("train", "val"):
     (out / "images" / sub).mkdir(parents=True, exist_ok=True)
@@ -155,6 +190,9 @@ def write_dataset(items, out: pathlib.Path, val_fraction: float = 0.15,
     "# to recognise -- the model is here to find things where the depth cannot,\n"
     "# not to tell them apart.\n"
   )
+  n_train = sum(v == "train" for v in split.values())
+  print(f"split by recording session: {n_train} train, "
+        f"{len(items) - n_train} val frame(s) from {len(sessions)} session(s)")
 
 
 def main() -> int:
@@ -170,7 +208,9 @@ def main() -> int:
                       "session with a new calibration is labelling a different "
                       "scene.  run.py --record should be pointed at a "
                       "directory that keeps its own copy.")
-  p.add_argument("--min-fill", type=float, default=0.90)
+  p.add_argument("--min-fill", type=float, default=None,
+                 help="absolute whole-frame depth fill; default adapts to the "
+                      "35th percentile of each session")
   p.add_argument("--min-instance-fill", type=float, default=0.80)
   p.add_argument("--stride", type=int, default=2,
                  help="frames at 50 Hz are nearly duplicates; every other one "

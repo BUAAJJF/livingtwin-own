@@ -21,7 +21,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import math
+
 import mujoco
+import numpy as np
 import torch
 import torch.nn.functional as F
 from mjlab.entity import Entity
@@ -36,7 +39,7 @@ from mjlab.utils.lab_api.math import (
   sample_uniform,
 )
 
-from piper_push import depth_noise, objects, shapes
+from piper_push import depth_noise, layout, objects, shapes
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -116,8 +119,8 @@ class PickCommandCfg(CommandTermCfg):
   grasp_site: str = "grasp_site"
 
   spawn_radius: tuple[float, float] = (0.24, 0.46)
-  spawn_angle: tuple[float, float] = (-0.14, 0.73)
-  """Radians. Clear of the bin, which sits at -0.63 rad."""
+  spawn_angle: tuple[float, float] = layout.rotate_angle_range((-0.14, 0.73))
+  """Radians in the rotated base layout. Clear of the bin at +0.94 rad."""
   spawn_clearance_m: float = 0.09
   spawn_object_gap: float = 0.012
   """Clear space between two spawned objects, on top of their half-widths.
@@ -171,8 +174,8 @@ class PickCommandCfg(CommandTermCfg):
   spawn_attempts: int = 6
   """How many times to resample a spawn pose before giving up on clearance."""
 
-  bin_center: tuple[float, float] = (0.30, -0.22)
-  bin_inner: tuple[float, float] = (0.080, 0.070)
+  bin_center: tuple[float, float] = objects.BIN_CENTER
+  bin_inner: tuple[float, float] = objects.BIN_INNER
   bin_rim_z: float = 0.060
   release_clearance_m: float = 0.055
   """How far above the rim the drop target sits."""
@@ -847,6 +850,15 @@ class CameraScene:
     self._corr: depth_noise.DepthCorruption | None = None
     self._noise_cfg: depth_noise.DepthNoiseCfg | None = None
     self._mask_jitter = 0
+    self._min_px = None
+    self._keep = None
+    self._dropout_spec = None
+    self._pixel_radius = None
+    self._protected = None
+    self._table_edge = None
+    self._scenery = None
+    self._scenery_depth = None
+    self._cutoff = 1.5
 
   def _build(self, sensor_name: str, shape, device, noise_cfg, mask_jitter):
     from piper_push import camera as camera_mod
@@ -862,11 +874,180 @@ class CameraScene:
       device=device,
       cfg=noise_cfg,
     )
+    self._pixel_radius, self._protected = self._workspace_image_mask(
+      height, width, device)
     del sensor_name
+
+  @staticmethod
+  def _workspace_image_mask(height: int, width: int, device) -> torch.Tensor:
+    """Per pixel: the radius it sees on the table, and whether it is protected.
+
+    Computed once from the nominal camera, which is what the calibration
+    measured; the per-environment camera jitter is 30 mm and 3 degrees and
+    moves this boundary by a few pixels, which is inside what a domain
+    randomisation about *not knowing what is out there* should tolerate
+    anyway.
+    """
+    from piper_push import camera as camera_mod
+    from piper_push.tasks.pick_place import env_cfg as task
+
+    fovy = math.radians(camera_mod.FOVY_DEG)
+    fy = 0.5 * height / math.tan(0.5 * fovy)
+    u, v = np.meshgrid(np.arange(width, dtype=np.float64),
+                       np.arange(height, dtype=np.float64))
+    rays = np.stack([(u.ravel() - (width - 1) / 2) / fy,
+                     (v.ravel() - (height - 1) / 2) / fy,
+                     np.ones(width * height)], axis=1)
+    R = camera_mod.quat_matrix() @ np.diag([1.0, -1.0, -1.0])
+    origin = np.asarray(camera_mod.CAMERA_POS, dtype=np.float64)
+    dirs = rays @ R.T
+    with np.errstate(divide="ignore", invalid="ignore"):
+      t = np.where(np.abs(dirs[:, 2]) > 1e-9, -origin[2] / dirs[:, 2], np.inf)
+    t = np.where(t > 0, t, np.inf)
+    hit = origin[None, :] + t[:, None] * dirs
+    r = np.hypot(hit[:, 0], hit[:, 1])
+    a = np.arctan2(hit[:, 1], hit[:, 0])
+    (rlo, rhi) = task.OBJECT_LOST_RADIUS
+    (alo, ahi) = task.OBJECT_LOST_ANGLE
+    # The radius on the plane each pixel looks at.  A ray that never meets the
+    # plane -- the horizon and above -- is infinitely far out and is always
+    # beyond whatever edge is drawn.
+    r = np.where(np.isfinite(t), r, np.inf)
+    protected = (np.isfinite(t) & (r > rlo) & (r < rhi) & (a > alo) & (a < ahi))
+    del rhi
+    return (torch.as_tensor(r.reshape(height, width), dtype=torch.float32,
+                            device=device),
+            torch.as_tensor(protected.reshape(height, width), device=device))
 
   def reset(self, env_ids=None) -> None:
     if self._corr is not None:
       self._corr.reset(env_ids)
+    self._draw_scenery(env_ids)
+    if self._min_px is not None and self._dropout_spec is not None:
+      self._draw_dropout(self._dropout_spec, env_ids)
+
+  def _draw_scenery(self, env_ids=None) -> None:
+    """Pick, per environment, what lies beyond the task's own sector.
+
+    The simulated world has exactly one piece of scenery -- an infinite
+    ``PLANE`` -- so everything outside the working area is that plane receding
+    smoothly to the far clip.  No deployment scene looks like that, and the
+    difference is not cosmetic: feeding one recorded deployment channel 0 into
+    this environment, with the mask left untouched, took the trained policy
+    from 170 objects placed to zero.
+
+    Rather than model a particular room, this randomises the one thing that is
+    genuinely unknown -- what is out there -- across the cases a table can
+    actually sit in:
+
+    ``plane``  the floor continues, which is the old behaviour and is what a
+               table flush with a large surface looks like;
+    ``void``   nothing beyond the edge, every pixel at the far clip;
+    ``wall``   a surface at a random distance, which is a room;
+    ``rough``  banded random depth, which is clutter.
+
+    A policy that has seen all four has no reason to read anything into the
+    region, which is the property the deployment needs and the reason this is
+    better than correcting the image afterwards.
+    """
+    n = self._env.num_envs
+    dev = (self._pixel_radius.device
+           if self._pixel_radius is not None else None)
+    if self._scenery is None:
+      self._scenery = torch.zeros(n, dtype=torch.long, device=dev)
+      self._scenery_depth = torch.zeros(n, device=dev)
+      self._table_edge = torch.full((n,), 99.0, device=dev)
+    ids = (torch.arange(n, device=dev) if env_ids is None
+           else torch.as_tensor(env_ids, device=dev).reshape(-1))
+    if ids.numel() == 0:
+      return
+    self._scenery[ids] = torch.randint(0, 4, (ids.numel(),), device=dev)
+    self._scenery_depth[ids] = 0.6 + 1.4 * torch.rand(ids.numel(), device=dev)
+    # Where the table stops.  Never inside the sector the task uses, and often
+    # well outside it: a mat on a bench, a bench in a room, a floor that keeps
+    # going.  Randomising the *edge* as well as what is past it is what stops
+    # this teaching that the world ends at the working area -- which is never
+    # true on a real bench and would be its own sim-to-real gap.
+    self._table_edge[ids] = 0.55 + 1.45 * torch.rand(ids.numel(), device=dev)
+
+  def _apply_scenery(self, depth: torch.Tensor) -> torch.Tensor:
+    """Replace the region outside the sector, per the draw for each env."""
+    if self._pixel_radius is None or self._scenery is None:
+      return depth
+    beyond = (self._pixel_radius[None, None]
+              > self._table_edge.view(-1, 1, 1, 1))
+    out = beyond & ~self._protected[None, None]
+    kind = self._scenery.view(-1, 1, 1, 1)
+    far = torch.full_like(depth, float(self._cutoff))
+    wall = self._scenery_depth.view(-1, 1, 1, 1).expand_as(depth)
+    rough = wall * (0.6 + 0.8 * torch.rand_like(depth))
+    new = torch.where(kind == 1, far,
+                      torch.where(kind == 2, wall,
+                                  torch.where(kind == 3, rough, depth)))
+    return torch.where(out, new, depth)
+
+  def _drop_mask(self, mask: torch.Tensor, spec) -> torch.Tensor:
+    """Lose the target when too little of it is left to detect.
+
+    MuJoCo already occludes correctly -- the arm hides the object and the
+    rendered mask loses those pixels.  What the simulator does not have is a
+    DETECTOR: its mask is ground truth per pixel, so one surviving pixel still
+    reads as a sighting.  The rig has to rebuild the mask from depth, and it
+    must clear a minimum blob before anything is reported at all.  Measured on
+    2026-08-31 the real blob went 564 px -> 100 px -> nothing as the arm came
+    across the line of sight, while the simulator called the same scene visible
+    99% of the time.
+
+    So this is a threshold, not a coin flip: below ``min_px`` the target is
+    simply gone.  That keeps the loss where the rig puts it -- decided by where
+    the arm is relative to the camera, which the policy controls -- instead of
+    at random times the policy can only wait out.
+
+    Geometry is not the whole story, and the residual term says so.  A pixel
+    floor reproduces 75% visibility here against the rig's 20% on the run where
+    the object was actually present, because the rig's detector also loses the
+    object for reasons the renderer has no model of: depth dropping out on a
+    dark curved surface, ``mask.arm_mask`` deleting everything within 20 mm of
+    the arm -- which is where the object is when the gripper is on it -- and
+    the component and height filters behind those.  So a per-episode survival
+    probability multiplies the threshold.
+
+    The two are kept separate on purpose.  The floor is closed loop: the policy
+    controls whether its arm is on the line of sight, so it can learn to keep
+    it clear.  The residual is open loop and it cannot; it is there so the
+    policy also learns to act through a loss it did not cause.
+
+    ``spec`` is ``(min_px_lo, min_px_hi, keep_lo, keep_hi)``, drawn per episode.
+    """
+    if self._min_px is None or self._min_px.shape[0] != mask.shape[0]:
+      self._draw_dropout(spec, None, mask.shape[0], mask.device)
+    px = (mask > 0.5).flatten(1).sum(dim=1)
+    seen = px >= self._min_px
+    if self._keep is not None:
+      seen = seen & (torch.rand_like(self._keep) < self._keep)
+    return mask * seen.to(mask.dtype).view(-1, 1, 1, 1)
+
+  def _draw_dropout(self, spec, env_ids, n=None, dev=None) -> None:
+    """Redraw the per-episode detection floor.
+
+    ``CameraScene`` has no num_envs of its own -- it learns the batch from the
+    first depth image it is handed -- so the shape comes from the caller.
+    """
+    vals = [float(x) for x in spec]
+    lo, hi = vals[0], vals[1]
+    k_lo, k_hi = (vals[2], vals[3]) if len(vals) >= 4 else (1.0, 1.0)
+    if n is None:
+      if self._min_px is None:
+        return
+      n, dev = self._min_px.shape[0], self._min_px.device
+    if self._min_px is None or self._min_px.shape[0] != n:
+      self._min_px = torch.zeros(n, device=dev)
+      self._keep = torch.ones(n, device=dev)
+      env_ids = None
+    idx = slice(None) if env_ids is None else env_ids
+    k = n if env_ids is None else len(env_ids)
+    self._min_px[idx] = lo + (hi - lo) * torch.rand(k, device=dev)
+    self._keep[idx] = k_lo + (k_hi - k_lo) * torch.rand(k, device=dev)
 
   def _jitter_mask(self, mask: torch.Tensor) -> torch.Tensor:
     """Move the mask boundary by a pixel, in a direction drawn per environment.
@@ -893,6 +1074,8 @@ class CameraScene:
     noise_cfg: "depth_noise.DepthNoiseCfg | None" = None,
     mask_jitter_px: int = 1,
     featureless_objects_only: bool = True,
+    scenery_dr: bool = False,
+    mask_dropout: "tuple[float, float, float, float] | None" = None,
   ) -> torch.Tensor:
     sensor = env.scene[sensor_name]
     depth = sensor.data.depth
@@ -915,14 +1098,19 @@ class CameraScene:
     if cfg.strength > 0.0:
       if self._corr is None:
         self._build(sensor_name, depth.shape, depth.device, cfg, mask_jitter_px)
+        self._cutoff = float(cutoff_distance)
+        self._draw_scenery(None)
+      # Before the sensor model, not after: whatever is out there is a real
+      # surface and the camera's noise applies to it like any other.
+      if scenery_dr:
+        depth = self._apply_scenery(depth)
       # Which pixels the camera has nothing to match on.  The objects, and not
       # the table: the rig puts a textured mat down, so the table's quality is
       # a deployment decision that has been taken, while an object's is not.
       # Blurred by a pixel so the boundary is not a step -- the sensor's
       # matching window straddles it and its quality there is somewhere
       # between the two.
-      featureless = mask if not featureless_objects_only else \
-        torch.ones_like(mask)
+      featureless = mask if featureless_objects_only else torch.ones_like(mask)
       featureless = F.avg_pool2d(featureless, 3, 1, 1)
       # Clamp before corrupting, not after: the far plane is the sky, and the
       # relative gradient at the horizon of an unclamped depth buffer is
@@ -933,6 +1121,9 @@ class CameraScene:
       # is the convention hardware/deploy/obs.py maps the driver's zero onto,
       # so the two pipelines agree about what "no data" looks like.
       depth = torch.where(valid, depth, torch.full_like(depth, cutoff_distance))
+      if mask_dropout is not None:
+        self._dropout_spec = mask_dropout
+        mask = self._drop_mask(mask, mask_dropout)
       if self._mask_jitter > 0:
         mask = self._jitter_mask(mask)
       mask = mask * valid.to(mask.dtype)
@@ -1034,6 +1225,178 @@ def palm_pushing(env: "ManagerBasedRlEnv", sensor_names: tuple[str, ...]) -> tor
     assert found is not None
     hit |= (found > 0).any(dim=1)
   return hit.float()
+
+
+def _sight_axis(env: "ManagerBasedRlEnv", cmd: "PickCommand"):
+  """The camera, the target, and the unit vector between them, env-local.
+
+  The camera hangs off ``base_link`` and every environment is laid out on the
+  same grid, so its pose in ``piper_push.camera`` is already the environment's
+  own frame -- the same frame ``all_pos_local`` reports objects in.  Nothing
+  here needs the camera to exist as a sensor, which is the point: these terms
+  have to work for the STATE teacher, which renders nothing.
+  """
+  from piper_push import camera as sim_camera
+
+  cam = torch.tensor(sim_camera.CAMERA_POS, device=env.device,
+                     dtype=torch.float32)
+  obj = cmd._object_pos_local()
+  d = obj - cam
+  length = torch.linalg.norm(d, dim=-1, keepdim=True).clamp_min(1e-6)
+  return cam, obj, d / length, length.squeeze(-1)
+
+
+def sight_cylinder(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  asset_cfg: SceneEntityCfg,
+  radius: float = 0.07,
+) -> torch.Tensor:
+  """How far the named bodies reach into the tube between camera and target.
+
+  A FINITE cylinder, and the finiteness is the whole design.  The rig's fixed
+  camera loses the object exactly when the robot comes between the two, and
+  measured on 2026-09-01 that is what turned a transient occlusion into a
+  fifteen-second deadlock: the loop holds when the mask empties, and a held
+  pose cannot uncover what it is covering.  So the simulator should charge for
+  standing in the way, and the teacher should learn to approach from behind.
+
+  Distance to the *segment* would be the obvious form and it is unusable: the
+  segment ends at the object, so a hand that has arrived is at distance zero
+  and is charged forever, which is an instruction never to grasp anything.
+  A cylinder has a far cap.  A point is inside only if its projection along
+  the axis falls between the camera and the object::
+
+      t = dot(p - cam, u) / |obj - cam|      inside when 0 < t < 1
+      r = |(p - cam) - t |obj-cam| u|        lateral distance to the axis
+      cost = max(radius - r, 0)  where inside
+
+  So the whole half-space behind the object is free at any lateral distance,
+  and the approach that costs nothing is the one that comes from behind and
+  closes along the view direction.  That is the behaviour wanted, expressed as
+  the region to stay out of rather than as a trajectory to follow.
+
+  This is the term most likely to break the run, and it is worth saying why in
+  the file rather than in a commit message.  A 5 mm proximity shell around the
+  table once drove the robust teacher to inactivity, and this is the same
+  shape of object: a field over a region the arm has to work in.  The camera
+  sits at one corner of the workspace, so the tube covers a real fraction of
+  it.  Keep the weight low, ramp it with the curriculum, and read
+  ``objects_placed`` at iteration 200 before trusting anything else.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  cam, _obj, u, length = _sight_axis(env, cmd)
+  robot: Entity = env.scene[asset_cfg.name]
+  p = (robot.data.body_link_pos_w[:, asset_cfg.body_ids]
+       - env.scene.env_origins.unsqueeze(1))            # (B, K, 3)
+
+  rel = p - cam.view(1, 1, 3)
+  t = (rel * u.unsqueeze(1)).sum(dim=-1)                # (B, K) metres along
+  inside = (t > 0.0) & (t < length.unsqueeze(1))
+  radial = torch.linalg.norm(rel - t.unsqueeze(-1) * u.unsqueeze(1), dim=-1)
+  return ((radius - radial).clamp_min(0.0) * inside).sum(dim=-1)
+
+
+def wrist_side_on(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  asset_cfg: SceneEntityCfg,
+  near_m: float = 0.20,
+) -> torch.Tensor:
+  """Turn the jaws across the view rather than along it.
+
+  Two finger plates on the camera's axis put one of them in front of the
+  object; the same two across the axis put one either side and leave the
+  object visible between them.  ``asset_cfg`` names the two finger bodies and
+  the axis is read straight from their positions -- no quaternion convention
+  to get wrong, and it stays correct if the gripper is ever remodelled.
+
+  Paid near the object and while carrying it, because both are moments the
+  deployment loses the target.  Deliberately weaker than ``grasp``: for a long
+  thin object the jaws must line up across its length and that can be the same
+  axis the camera is on, and when the two disagree the grasp is what matters.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  _cam, obj, u, _l = _sight_axis(env, cmd)
+  robot: Entity = env.scene[asset_cfg.name]
+  p = (robot.data.body_link_pos_w[:, asset_cfg.body_ids]
+       - env.scene.env_origins.unsqueeze(1))
+  jaw = p[:, 0] - p[:, 1]
+  jaw = jaw / torch.linalg.norm(jaw, dim=-1, keepdim=True).clamp_min(1e-6)
+  along = (jaw * u).sum(dim=-1).abs()                   # 1 = edge on, 0 = across
+
+  site = cmd._site_pos_w() - env.scene.env_origins
+  near = torch.linalg.norm(site - obj, dim=-1) < near_m
+  return (1.0 - along) * (near | cmd.grasped).float()
+
+
+def premature_touch(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  palm_sensors: tuple[str, ...],
+  clearance_m: float = 0.015,
+) -> torch.Tensor:
+  """Touching the object with a hand too closed to receive it.
+
+  Not "any contact before the grasp": closing on the object IS contact before
+  the grasp, and charging it would price the one moment the task is paid for.
+  The separator is the jaw opening.  A hand wide enough to admit the object is
+  approaching it; a hand narrower than the object that is already touching it
+  is pushing it, and on the rig that is how an object leaves the table.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  hit = (cmd.pad_found > 0).any(dim=1)
+  for name in palm_sensors:
+    found = env.scene[name].data.found
+    assert found is not None
+    hit |= (found > 0).any(dim=1)
+  need = 2.0 * cmd.object_half_size[:, :2].amax(dim=-1) + clearance_m
+  narrow = cmd._gripper_opening() < need
+  return (hit & narrow & ~cmd.grasped).float()
+
+
+def jaws_ready(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  near_m: float = 0.10,
+  clearance_m: float = 0.015,
+) -> torch.Tensor:
+  """Open before arriving, rather than on arrival.
+
+  The counterpart to ``premature_touch``: that one prices the collision, this
+  one pays for the posture that avoids it.  Gated on being near the object so
+  it cannot be collected from across the table, and decayed by the curriculum
+  like the other guidance terms -- it is a hint about how to arrive, not a
+  thing worth doing for its own sake.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  site = cmd._site_pos_w() - env.scene.env_origins
+  near = torch.linalg.norm(site - cmd._object_pos_local(), dim=-1) < near_m
+  need = 2.0 * cmd.object_half_size[:, :2].amax(dim=-1) + clearance_m
+  return (near & (cmd._gripper_opening() >= need) & ~cmd.grasped).float()
+
+
+def table_touch(
+  env: "ManagerBasedRlEnv",
+  impact_sensor: str,
+  force_threshold_n: float = 1.0,
+) -> torch.Tensor:
+  """Actual contact with the table, charged as an event.
+
+  Distinct from the 5 mm proximity shell this task removed, and the difference
+  is the reason it is allowed back.  That shell fired on *approach* -- it made
+  a region of space expensive and the teacher answered by staying out of it,
+  which meant not reaching.  This fires on contact: everything up to touching
+  is free, so there is no gradient pushing the hand away from the table, only
+  one against arriving hard.
+  """
+  sensor = env.scene.sensors[impact_sensor]
+  src = sensor.data.force_history
+  if src is None:
+    src = sensor.data.force
+  assert src is not None
+  peak = src.norm(dim=-1).view(env.num_envs, -1).amax(dim=1)
+  return (peak > force_threshold_n).float()
 
 
 def holding(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
@@ -1276,6 +1639,41 @@ def joint_velocity_trip(
     [limits.get(n, float("inf")) for n in names], device=vel.device
   )
   return (vel > cap).any(dim=-1)
+
+
+def robot_table_violation(
+  env: "ManagerBasedRlEnv",
+  guard_sensor: str,
+  impact_sensor: str,
+  force_threshold_n: float = 1.0e-5,
+  activate_after_steps: int = 0,
+) -> torch.Tensor:
+  """Return simulated robot/table contact for diagnostics only.
+
+  ``guard_sensor`` observes an inactive 5 mm geom margin.  It cannot support
+  the fingers or change their trajectory. ``impact_sensor`` keeps one control
+  step of force history.  This function is intentionally not installed as a
+  reward or termination: binary simulator contacts have no equivalent signal
+  on the real robot, and light fingertip/table contact is allowed.  Contact
+  audit tools may still call it explicitly.
+  """
+  if env.common_step_counter < activate_after_steps:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+  guard = env.scene.sensors[guard_sensor].data.found
+  near = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  if guard is not None:
+    near = guard.view(env.num_envs, -1).any(dim=1)
+
+  history = env.scene.sensors[impact_sensor].data.force_history
+  if history is None:
+    force = env.scene.sensors[impact_sensor].data.force
+    hit = (force.norm(dim=-1).view(env.num_envs, -1).amax(dim=1)
+           > force_threshold_n)
+  else:
+    hit = (history.norm(dim=-1).view(env.num_envs, -1).amax(dim=1)
+           > force_threshold_n)
+  return near | hit
 
 
 # ---------------------------------------------------------------------------

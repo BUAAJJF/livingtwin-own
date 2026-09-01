@@ -31,19 +31,30 @@ import torch
 from mjlab.managers.event_manager import requires_model_fields
 from mjlab.sensor import CameraSensorCfg
 
-from piper_push import depth_noise
+from piper_push import d455_noise, depth_noise
 
 CAMERA_NAME = "scene_cam"
 PARENT_BODY = "robot/base_link"
 
-CAMERA_POS = (0.589, 0.535, 0.480)
-"""Metres in the robot base frame: 796 mm out along the table at +42.2 deg to
-the robot's left, 480 mm up."""
+CAMERA_POS = (-0.45412298521619643, 0.7674826404014604, 0.4887319349211286)
+"""Metres in the robot base frame, measured by the 2026-08-26 D455 hand-eye
+calibration (3.92 mm residual)."""
 
-CAMERA_AIM = (0.321, 0.071, 0.030)
-"""What it points at -- the centroid of the object area and the bin together.
-Deliberately biased towards the bin, so aiming by eye at the object area puts
-the bin out of frame."""
+CAMERA_AIM = (0.01973900232618861, 0.4720208499413744, -0.01103385281335817)
+"""Intersection of the measured D455 optical axis with its fitted table plane."""
+
+CAMERA_QUAT = (
+  0.45621114674051794,
+  0.1920645871413448,
+  -0.36009682378417324,
+  -0.7907672612447207,
+)
+"""MuJoCo ``wxyz`` camera orientation in the robot base frame.
+
+Unlike a look-at point, this retains the measured 1.91 degree camera roll.
+The sign is arbitrary; this is the positive-w representative of the D455
+OpenCV extrinsic after the ``diag(1, -1, -1)`` optical-to-MuJoCo conversion.
+"""
 
 FOVY_DEG = 52.0
 WIDTH, HEIGHT = 224, 168
@@ -64,12 +75,11 @@ ROT_JITTER_RAD = math.radians(2.0)
 # The camera has since been measured (``hardware/depth_bench``) and the fitted
 # model lives in ``piper_push.depth_noise``, which carries every number and the
 # measurement it came from.  The short version of what the guess got wrong:
-# the error grows as z^2 and at this camera's 0.70 m is 10 mm, not 4; a third
-# of it is a fixed pattern that no amount of temporal filtering removes; it is
-# correlated across ~3 pixels of this image rather than independent; and the
-# dropout is not scattered at all -- it is concentrated on depth
-# discontinuities, which for a 25-45 mm object is the entire object.
-DEPTH_NOISE = depth_noise.DepthNoiseCfg()
+# the error grows as z^2; its static and temporal components differ; it is
+# spatially correlated rather than independent; and invalid depth concentrates
+# at stereo discontinuities instead of being uniformly scattered.  The D455
+# model also quantises disparity on the hardware's 1/32-pixel grid.
+DEPTH_NOISE = d455_noise.DEPTH_NOISE
 MASK_JITTER_PX = 1
 """How far the target mask's boundary can be wrong.  On hardware the mask comes
 from ``hardware/deploy/mask.py``, not from a segmentation buffer."""
@@ -96,6 +106,19 @@ def look_at_quat(pos, target=CAMERA_AIM) -> tuple[float, float, float, float]:
   return tuple(float(x) for x in q)
 
 
+def quat_matrix(quat=CAMERA_QUAT) -> np.ndarray:
+  """Rotation matrix for a MuJoCo ``wxyz`` quaternion."""
+  w, x, y, z = (float(v) for v in quat)
+  return np.array([
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w),
+     2 * (x * z + y * w)],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z),
+     2 * (y * z - x * w)],
+    [2 * (x * z - y * w), 2 * (y * z + x * w),
+     1 - 2 * (x * x + y * y)],
+  ], dtype=np.float64)
+
+
 def fovx_deg(fovy: float = FOVY_DEG, width: int = WIDTH, height: int = HEIGHT) -> float:
   return 2 * math.degrees(math.atan(math.tan(math.radians(fovy / 2)) * width / height))
 
@@ -116,7 +139,7 @@ def camera_cfg(width: int = WIDTH, height: int = HEIGHT) -> CameraSensorCfg:
     name=CAMERA_NAME,
     parent_body=PARENT_BODY,
     pos=CAMERA_POS,
-    quat=look_at_quat(CAMERA_POS),
+    quat=CAMERA_QUAT,
     fovy=FOVY_DEG,
     width=width,
     height=height,
@@ -130,18 +153,89 @@ def camera_cfg(width: int = WIDTH, height: int = HEIGHT) -> CameraSensorCfg:
   )
 
 
+WRIST_CAMERA_NAME = "wrist_cam"
+WRIST_PARENT_BODY = "robot/gripper_base"
+# Behind and above the pads, tilted down the approach axis: far enough back
+# that the fingers frame the view rather than fill it.  Nothing is mounted yet
+# -- this is the pose to BUILD to if the measurement below says it is worth it.
+# Derived, not guessed: the grasp site sits at (0, 0, 0.1265) in gripper_base,
+# so the approach axis is +z and the camera looks along it from 120 mm back.
+# This is the ideal on-axis mount -- an upper bound on what a wrist view can
+# see, before any bracket has to make room for the fingers.
+WRIST_CAMERA_POS = (0.0, 0.0, 0.0065)
+WRIST_CAMERA_QUAT = (0.0, 0.7071067811865476, 0.7071067811865476, 0.0)
+WRIST_FOVY_DEG = 70.0
+
+WRIST_CUTOFF_M = 0.8
+"""Metres.  The third-person camera cuts off at 1.5 m because it stands back
+from the table; the wrist camera is 120 mm from the grasp site and a D405's
+useful range starts at 70 mm, so a far clip that reaches the far wall would
+spend most of the image's dynamic range on geometry the hand cannot act on."""
+
+# A bracket is not a calibration.  The third-person camera moves when somebody
+# leans on the frame, which is why its jitter is 20 mm; a wrist mount moves by
+# its own machining tolerance and by however well the bolt pattern was seated,
+# which is smaller and does not drift between runs.
+WRIST_POS_JITTER_M = 0.004
+WRIST_ROT_JITTER_RAD = math.radians(1.5)
+
+WRIST_DEPTH_NOISE = depth_noise.DepthNoiseCfg()
+"""The D405 model, which is what ``depth_noise`` fits by default.
+
+The third-person camera is a D455 and carries the separately fitted
+``d455_noise`` config; the wrist is a D405 and must not inherit it.  The two
+sensors differ in exactly the way that matters here -- the D455's 95 mm stereo
+baseline quantises disparity coarsely at range, and the D405's 18 mm baseline
+at 120 mm does not -- so sharing one config would model the wrist as blurrier
+than it is and the policy would learn to distrust the better sensor.
+"""
+
+
+def wrist_camera_cfg(width: int = WIDTH, height: int = HEIGHT) -> CameraSensorCfg:
+  """A camera on the hand, which the arm cannot occlude.
+
+  The third-person camera loses the target exactly when the hand reaches for
+  it: measured on the rig, 15% of frames had a detectable object while it was
+  present, and 71% of the pixels where the object should have been belonged to
+  the arm or the table instead.  A camera that travels with the hand cannot be
+  blocked by the arm -- but it has the opposite failure, losing the object out
+  of frame whenever the hand is not pointed at it, so the two are complements
+  and the number that matters is the union.
+  """
+  return CameraSensorCfg(
+    name=WRIST_CAMERA_NAME,
+    parent_body=WRIST_PARENT_BODY,
+    pos=WRIST_CAMERA_POS,
+    quat=WRIST_CAMERA_QUAT,
+    fovy=WRIST_FOVY_DEG,
+    width=width,
+    height=height,
+    data_types=("depth", "segmentation"),
+    use_textures=False,
+    use_shadows=False,
+    enabled_geom_groups=(0, 2),
+  )
+
+
 @requires_model_fields("cam_pos", "cam_quat")
 def randomize_camera_pose(
   env,
   env_ids: torch.Tensor | None,
   pos_jitter: float = POS_JITTER_M,
   rot_jitter: float = ROT_JITTER_RAD,
+  sensor_name: str = CAMERA_NAME,
+  nominal_pos: tuple[float, float, float] = CAMERA_POS,
+  nominal_quat: tuple[float, float, float, float] = CAMERA_QUAT,
 ) -> None:
   """Jitter the camera about its nominal pose, per environment.
 
   This is what makes the calibration requirement reachable.  A policy trained
   at one exact viewpoint fails when the camera is a centimetre off, and a
   camera is a centimetre off as soon as someone brushes the frame.
+
+  The defaults are the third-person D455.  A wrist camera passes its own
+  name and nominal pose: same mechanism, but the jitter it models is a
+  bracket's machining tolerance rather than a knocked tripod.
   """
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device)
@@ -150,34 +244,19 @@ def randomize_camera_pose(
   if n == 0:
     return
 
-  cam_idx = env.scene.sensors[CAMERA_NAME].camera_idx
-  base = torch.tensor(CAMERA_POS, device=env.device)
+  cam_idx = env.scene.sensors[sensor_name].camera_idx
+  base = torch.tensor(nominal_pos, device=env.device)
   pos = base + (2 * torch.rand(n, 3, device=env.device) - 1) * pos_jitter
 
-  # Re-aim at the same point rather than perturbing the quaternion: a camera
-  # nudged on its mount still points roughly where it was aimed, and this keeps
-  # the jitter from quietly walking the target out of frame.
-  aim = torch.tensor(CAMERA_AIM, device=env.device)
-  fwd = torch.nn.functional.normalize(aim - pos, dim=-1)
-  world_up = torch.tensor([0.0, 0.0, 1.0], device=env.device).expand(n, 3)
-  right = torch.nn.functional.normalize(torch.cross(fwd, world_up, dim=-1), dim=-1)
-  up = torch.cross(right, fwd, dim=-1)
-
-  # Then a small free rotation on top, which is the part a mount actually gets
-  # wrong.
+  # A small free rotation on top of the *full* measured orientation.  Building
+  # it again from a look-at point would silently discard the D455's measured
+  # roll, which was one of the out-of-distribution axes in the old scene.
   axis = torch.nn.functional.normalize(torch.randn(n, 3, device=env.device), dim=-1)
   ang = (2 * torch.rand(n, 1, device=env.device) - 1) * rot_jitter
   k = torch.sin(ang / 2) * axis
   dq = torch.cat([torch.cos(ang / 2), k], dim=-1)
 
-  R = torch.stack([right, up, -fwd], dim=-1)
-  w = torch.sqrt(torch.clamp(1 + R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2], min=1e-9)) / 2
-  q = torch.stack([
-    w,
-    (R[:, 2, 1] - R[:, 1, 2]) / (4 * w),
-    (R[:, 0, 2] - R[:, 2, 0]) / (4 * w),
-    (R[:, 1, 0] - R[:, 0, 1]) / (4 * w),
-  ], dim=-1)
+  q = torch.tensor(nominal_quat, device=env.device).expand(n, 4)
 
   w0, v0 = dq[:, :1], dq[:, 1:]
   w1, v1 = q[:, :1], q[:, 1:]

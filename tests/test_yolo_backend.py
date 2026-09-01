@@ -32,6 +32,7 @@ import pytest
 import mjlab.tasks  # noqa: F401  -- before piper_push; see deploy/__init__.py
 
 from hardware.deploy import config, mask, rectify, yolo_backend
+from piper_push import layout
 
 HERE = pathlib.Path(__file__).resolve().parents[1] / "hardware" / "deploy"
 ONNX = HERE / "yolo" / "best.onnx"
@@ -86,6 +87,11 @@ def _table_scene(rig, reproj, boxes=()):
     depth[sel] -= height * 0.9
     masks.append(sel.reshape(H, W))
   return np.clip(depth, 0, 1.5).reshape(H, W), masks
+
+
+def _task_xy(x: float, y: float) -> tuple[float, float]:
+  """An S0 fixture point in the installed rig's rotated task frame."""
+  return layout.rotate_xy((x, y))
 
 
 # --------------------------------------------------------------------------
@@ -159,7 +165,8 @@ def test_a_detection_outside_the_workspace_is_rejected():
   room behind it.  Nothing in the network knows the room is not the table."""
   rig = config.Rig.nominal()
   reproj = rectify.Reprojector(rig)
-  depth, masks = _table_scene(rig, reproj, [(0.35, 0.05, 0.022, 0.05)])
+  xy = _task_xy(0.35, 0.05)
+  depth, masks = _table_scene(rig, reproj, [(*xy, 0.022, 0.05)])
   H, W = depth.shape
   inside = masks[0]
   # Something at the top of the frame, which looks across the table and out
@@ -179,10 +186,11 @@ def test_a_detection_on_the_arm_is_rejected():
   object, and the model was trained on frames it was in."""
   rig = config.Rig.nominal()
   reproj = rectify.Reprojector(rig)
-  depth, masks = _table_scene(rig, reproj, [(0.35, 0.05, 0.022, 0.05)])
+  xy = _task_xy(0.35, 0.05)
+  depth, masks = _table_scene(rig, reproj, [(*xy, 0.022, 0.05)])
   seg = _segmenter(np.stack(masks))
   # A sphere cover that swallows the object's own position.
-  arm = (np.array([[0.35, 0.05, 0.02]]), np.array([0.08]))
+  arm = (np.array([[*xy, 0.02]]), np.array([0.08]))
   out = seg(depth, rgb=np.zeros(depth.shape, np.uint8), arm=arm)
   assert len(out.instances) == 0
   assert any(r[0] in ("arm", "the arm") for r in seg.rejected), seg.rejected
@@ -211,7 +219,8 @@ def test_a_detection_with_no_depth_is_placed_on_the_table():
   """
   rig = config.Rig.nominal()
   reproj = rectify.Reprojector(rig)
-  depth, masks = _table_scene(rig, reproj, [(0.35, 0.05, 0.025, 0.05)])
+  xy = _task_xy(0.35, 0.05)
+  depth, masks = _table_scene(rig, reproj, [(*xy, 0.025, 0.05)])
   holed = depth.copy()
   holed[masks[0]] = 0.0                     # the white-object failure, exactly
 
@@ -221,11 +230,11 @@ def test_a_detection_with_no_depth_is_placed_on_the_table():
   assert seg.n_unplaced == 1
   c = out.instances[0].centroid_base
   assert np.isfinite(c).all(), "an unplaceable instance can never be a target"
-  assert np.linalg.norm(c[:2] - np.array([0.35, 0.05])) < 0.03, c
+  assert np.linalg.norm(c[:2] - np.array(xy)) < 0.03, c
   # And the depth segmenter, on the same frame, finds nothing there -- which is
   # the entire argument for having a second backend.
   d = mask.DepthSegmenter(rig, reproj)(holed)
-  assert all(np.linalg.norm(i.centroid_base[:2] - [0.35, 0.05]) > 0.03
+  assert all(np.linalg.norm(i.centroid_base[:2] - xy) > 0.03
              for i in d.instances)
 
 
@@ -235,9 +244,10 @@ def test_the_fused_backend_adds_what_the_depth_one_missed():
   depth backend's outline."""
   rig = config.Rig.nominal()
   reproj = rectify.Reprojector(rig)
+  first, second = _task_xy(0.32, 0.10), _task_xy(0.45, -0.08)
   depth, masks = _table_scene(rig, reproj,
-                              [(0.32, 0.10, 0.025, 0.05),
-                               (0.45, -0.08, 0.025, 0.05)])
+                              [(*first, 0.025, 0.05),
+                               (*second, 0.025, 0.05)])
   holed = depth.copy()
   holed[masks[1]] = 0.0
 
@@ -248,7 +258,7 @@ def test_the_fused_backend_adds_what_the_depth_one_missed():
   assert len(alone.instances) == 1, [i.centroid_base for i in alone.instances]
   assert len(both.instances) == 2, [i.centroid_base for i in both.instances]
   assert fused.n_from_yolo == 1
-  found = sorted(np.linalg.norm(i.centroid_base[:2] - [0.45, -0.08])
+  found = sorted(np.linalg.norm(i.centroid_base[:2] - second)
                  for i in both.instances)
   assert found[0] < 0.03, found
 
@@ -261,7 +271,8 @@ def test_the_shared_filters_are_the_same_filters():
   disagree about where the table ends, and the disagreement only shows up as
   the robot occasionally reaching somewhere it should not.
   """
-  pts = np.array([[0.3, 0.0, 0.05], [3.0, 0.0, 0.05], [0.3, 0.0, 1.0]])
+  inside = _task_xy(0.3, 0.0)
+  pts = np.array([[*inside, 0.05], [3.0, 0.0, 0.05], [*inside, 1.0]])
   keep = mask.workspace_mask(pts)
   assert list(keep) == [True, False, False]
   (xlo, xhi), _, _ = config.WORKSPACE

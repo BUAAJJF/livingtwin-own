@@ -127,6 +127,8 @@ class Reprojector:
     self._rays = torch.as_tensor(rays.reshape(-1, 3), dtype=torch.float32,
                                  device=self.device)
 
+    self._T_base_virtual = T_base_virtual
+    self._virtual_rays = None
     T_bv = config.sim_camera_extrinsic() if T_base_virtual is None \
       else np.asarray(T_base_virtual, dtype=np.float64)
     T = np.linalg.inv(T_bv) @ rig.T_base_cam       # source -> virtual
@@ -163,6 +165,70 @@ class Reprojector:
     self.fov_fraction = float(self._in_fov.numel()) / self._rays.shape[0]
 
   # -----------------------------------------------------------------------
+
+  def ground_plane_depth(self, rig: "config.Rig",
+                         normal=None, plane_z: float | None = None) -> np.ndarray:
+    """Depth of the calibrated table plane, per virtual-camera pixel.
+
+    The simulator's world is an *infinite plane* at z = 0 -- the scene's only
+    scenery geom is ``terrain``, a MuJoCo PLANE -- with the bin, the object and
+    the robot standing on it.  Nothing else exists: no walls, no floor at a
+    different height, no room.
+
+    The deployment's channel 0 is the rest of the lab.  Injecting one recorded
+    frame's channel 0 into the simulator, with the mask left untouched, took
+    the policy from working to **zero objects placed and zero grasp attempts**,
+    which is what says this matters more than any of the geometry that had
+    already been checked.
+
+    This is the surface to substitute against.  Returned as metres along each
+    virtual ray; ``inf`` where a ray never meets the plane.
+    """
+    n = np.asarray(rig.table_normal_base if normal is None else normal,
+                   dtype=np.float64).reshape(3)
+    n = n / np.linalg.norm(n)
+    z = float(rig.table_z if plane_z is None else plane_z)
+    Tbv = (config.sim_camera_extrinsic() if self._T_base_virtual is None
+           else np.asarray(self._T_base_virtual, dtype=np.float64))
+    rays = self.virtual_rays()                     # (N, 3) in the virtual frame
+    dirs = rays @ Tbv[:3, :3].T                    # into the base frame
+    origin = Tbv[:3, 3]
+    denom = dirs @ n
+    # A plane through (0, 0, table_z): n . (p - p0) = 0 with p0 = (0, 0, z).
+    num = (np.array([0.0, 0.0, z]) - origin) @ n
+    with np.errstate(divide="ignore", invalid="ignore"):
+      t = np.where(np.abs(denom) > 1e-9, num / denom, np.inf)
+    t = np.where(t > 0, t, np.inf)
+    # ``t`` is distance along the ray; the depth convention is the z component
+    # in the camera frame, and the rays are built with unit z.
+    return (t * rays[:, 2]).reshape(self.virtual.height, self.virtual.width)
+
+  def virtual_points_base(self, depth: np.ndarray,
+                          rig: "config.Rig") -> np.ndarray:
+    """The policy grid, unprojected into the robot base frame.
+
+    The segmenter works on the sensor grid and ``points_base`` serves that.
+    The scene substitution works on the *policy* grid, and needs the same
+    answer there -- one point per pixel, in the order the image is stored.
+    """
+    Tbv = (config.sim_camera_extrinsic() if self._T_base_virtual is None
+           else np.asarray(self._T_base_virtual, dtype=np.float64))
+    rays = self.virtual_rays()
+    cam = rays * np.asarray(depth, dtype=np.float64).reshape(-1, 1)
+    return cam @ Tbv[:3, :3].T + Tbv[:3, 3]
+
+  def virtual_rays(self) -> np.ndarray:
+    """Unit-z rays of the policy camera, one per pixel, in its own frame."""
+    if self._virtual_rays is None:
+      K = self.virtual.K
+      u, v = np.meshgrid(np.arange(self.virtual.width, dtype=np.float64),
+                         np.arange(self.virtual.height, dtype=np.float64))
+      self._virtual_rays = np.stack([
+        (u.ravel() - K[0, 2]) / K[0, 0],
+        (v.ravel() - K[1, 2]) / K[1, 1],
+        np.ones(self.virtual.width * self.virtual.height),
+      ], axis=1)
+    return self._virtual_rays
 
   def points_base(self, depth: np.ndarray, rig: "config.Rig") -> np.ndarray:
     """The measured cloud in the robot base frame, ``(N, 3)``, valid only.

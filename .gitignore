@@ -42,3 +42,32 @@ runs/
 results/wm1_damping/data/*.pt
 results/wm1_damping/**/*.log
 results/wm1_damping/adapt/*__r*.json
+
+# --- artefacts that are large and are not the source of truth ---------------
+
+# Exported deployment policies: 794 MB of weights.  scripts/check_export.py
+# rebuilds any of them from a training checkpoint, and the checkpoints live on
+# the training host, not here.
+hardware/deploy/policies/
+# The YOLO backend's trained weights, rebuilt by hardware/deploy/train_yolo.py
+# from the labels under hardware/deploy/yolo_d455/dataset.
+hardware/deploy/yolo_d455/
+# Checkpoints converted for export.
+checkpoints/
+
+# The Fast-FoundationStereo bench vendors its own PyTorch and TensorRT wheels,
+# the upstream checkouts and the built engines: 12 GB between them.  The
+# scripts, the measured numbers in TENSORRT_RESULTS.md and FAST_RESULTS.md, and
+# the build recipe ARE tracked; build_trt_engine.py reproduces the engines.
+hardware/depth_bench/foundation_stereo_bench/_deps/
+hardware/depth_bench/foundation_stereo_bench/_deps_trt/
+hardware/depth_bench/foundation_stereo_bench/third_party/
+hardware/depth_bench/foundation_stereo_bench/results/
+
+# Review pages rendered from a recording, tens of megabytes of JPEG each.
+# hardware/deploy/review.py regenerates them from the session.
+/detail.html
+
+# Merge leftovers.  Several of these carry the pre-D455 version of a file and
+# reading one as current has already cost an afternoon.
+*.orig

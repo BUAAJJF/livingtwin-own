@@ -1,0 +1,8 @@
+_deps/
+data/
+pretrained_models/
+third_party/
+*.pth
+*.onnx
+*.plan
+

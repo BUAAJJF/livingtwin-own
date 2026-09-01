@@ -40,6 +40,27 @@ from piper_push import robot as sim_robot
 from . import config
 from .proprio import JointFeedback
 
+RESPONSE_PLAIN = 0x00
+RESPONSE_MIT = 0xAD
+"""``MotionCtrl_2``'s fourth field: the drives' response law.
+
+The SDK calls ``0xAD`` "MIT mode" and its ``piper_set_mit.py`` demo describes it
+as "设置机械臂为mit控制模式，这个模式下，机械臂相应最快" -- the ordinary position
+path, executed with the fastest response the drives have.  It is NOT the
+per-joint impedance interface (``JointMitCtrl``, see ``mit.py``), which this
+arm's S-V1.8-9 firmware accepts on the bus and then ignores.
+
+Measured on this rig, joint6 tracking a 1.2 rad/s triangle at 50 Hz, with the
+speed field held at 100 so the flag is the only thing that changed:
+
+    plain   lag p50 0.190   p95 0.329   |dq| p50 0.50
+    0xAD    lag p50 0.089   p95 0.106   |dq| p50 0.97
+    plain   lag p50 0.190   p95 0.329   |dq| p50 0.51   (repeat, to bracket it)
+
+Default is PLAIN so that the calibration and teaching tools keep the behaviour
+they were tested against; ``run.py --control mit`` turns it on for the policy.
+"""
+
 ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 GRIPPER_JOINT = "gripper_joint1"
 
@@ -85,9 +106,16 @@ class ActionMapper:
   """
 
   def __init__(self, spec: dict, dt: float = 1.0 / config.CONTROL_HZ,
-               clip_actions: float | None = None):
+               clip_actions: float | None = None,
+               accel_limit: float | None = None,
+               gripper_accel_limit: float | None = None):
     self.dt = float(dt)
     self.clip_actions = clip_actions
+    self.accel_limit = (None if accel_limit is None else np.asarray(
+      [float(accel_limit)] * 6 + [float(
+        gripper_accel_limit if gripper_accel_limit is not None else accel_limit
+      )], dtype=np.float64))
+    self.previous_velocity = np.zeros(7, dtype=np.float64)
     names = list(spec["joint_names"])
     default = np.asarray(spec["default_joint_pos"], dtype=np.float64)
 
@@ -132,6 +160,7 @@ class ActionMapper:
     ``position`` is the measured joint state, ``(8,)`` in the simulator's joint
     order or ``(7,)`` as six arm joints and a finger.
     """
+    self.previous_velocity[:] = 0.0
     if position is None:
       self.previous = self.default_target.copy()
       return
@@ -141,16 +170,30 @@ class ActionMapper:
     else:
       self.previous = np.array([p[i] for i in self.arm_idx] + [p[self.grip_idx]])
 
-  def __call__(self, action: np.ndarray) -> np.ndarray:
+  def __call__(self, action: np.ndarray,
+               dt: float | None = None) -> np.ndarray:
     """``(7,)`` policy output to ``(7,)`` joint targets: six radians, one metre."""
     a = np.asarray(action, dtype=np.float64).reshape(-1)
+    step_dt = self.dt if dt is None else float(dt)
+    if not np.isfinite(step_dt) or step_dt <= 0.0:
+      raise ValueError("action mapping dt must be finite and positive")
     if a.size != 7:
       raise ValueError(f"expected 7 actions, got {a.size}")
     if self.clip_actions is not None:
       a = np.clip(a, -self.clip_actions, self.clip_actions)
     target = np.clip(a * self.scale + self.offset, self.lo, self.hi)
-    delta = np.clip(target - self.previous, -self.max_step, self.max_step)
+    delta = target - self.previous
+    if self.accel_limit is not None:
+      requested_velocity = delta / step_dt
+      dv = self.accel_limit * step_dt
+      velocity = np.clip(requested_velocity,
+                         self.previous_velocity - dv,
+                         self.previous_velocity + dv)
+      delta = velocity * step_dt
+    max_step = self.max_step * (step_dt / self.dt)
+    delta = np.clip(delta, -max_step, max_step)
     self.previous = self.previous + delta
+    self.previous_velocity = delta / step_dt
     return self.previous.copy()
 
 
@@ -226,6 +269,11 @@ class PiperArm:
   RAD_TO_MDEG = 180.0 / np.pi * 1000.0
   M_TO_UM = 1e6
 
+  response_mode = RESPONSE_PLAIN
+  """Which response law ``command`` asks the drives for.  A class attribute so
+  that it exists however the object was constructed; ``run.py --control`` sets
+  it per session."""
+
   def __init__(self, can: str = config.CAN_INTERFACE,
                gripper_torque_nm: float = GRIPPER_TORQUE_NM):
     try:
@@ -245,6 +293,17 @@ class PiperArm:
   def connect(self) -> None:
     self._iface.ConnectPort()
     self.connected = True
+
+  @property
+  def iface(self):
+    """The SDK interface, for command paths that are not this class.
+
+    ``mit.MitDriver`` streams impedance frames to the same drives over the same
+    connection, and one process must not open two.  Exposed deliberately rather
+    than reached for through the private name, so that "something else is also
+    commanding this arm" is visible in the code that does it.
+    """
+    return self._iface
 
   def enable(self, timeout_s: float = 5.0) -> None:
     """Enable every joint, and refuse to continue if any of them did not.
@@ -323,10 +382,19 @@ class PiperArm:
     hi = np.array([sim_robot.SAFE_TARGET_CLIP[j][1] for j in ARM_JOINTS])
     q = np.clip(np.asarray(target[:6], dtype=np.float64), lo, hi)
     q = np.round(q * self.RAD_TO_MDEG).astype(int)
-    self._iface.MotionCtrl_2(0x01, 0x01, 100, 0x00)
+    self._iface.MotionCtrl_2(0x01, 0x01, 100, self.response_mode)
     self._iface.JointCtrl(*q.tolist())
+    self.command_gripper(target[6])
+
+  def command_gripper(self, one_finger_m: float) -> None:
+    """The gripper alone.
+
+    Its own method because MIT mode covers motors 1-6 and nothing else: an
+    impedance command path still has to drive the jaw through this message, and
+    duplicating the unit conversion in two places is how the two drift apart.
+    """
     # The policy's gripper value is one finger; the CAN message is the jaw gap.
-    opening = float(np.clip(target[6] * 2.0, 0.0, GRIPPER_JAW_GAP_M))
+    opening = float(np.clip(float(one_finger_m) * 2.0, 0.0, GRIPPER_JAW_GAP_M))
     effort = int(round(self.gripper_torque_nm * 1000.0))
     self._iface.GripperCtrl(int(round(opening * self.M_TO_UM)),
                             int(np.clip(effort, 0, 5000)), 0x01, 0)
@@ -363,6 +431,20 @@ class PiperArm:
     st = self.read()
     self.command(np.concatenate([st.q, [st.gripper]]))
 
+  def disconnect(self) -> None:
+    """Release the SDK connection without changing drive state or targets.
+
+    Read-only tools use this instead of ``close``: they never enabled or
+    commanded the arm, so issuing even a same-pose hold command on exit would
+    violate that contract.  Disconnecting CAN does not disable the drives.
+    """
+    if not self.connected:
+      return
+    try:
+      self._iface.DisconnectPort()
+    finally:
+      self.connected = False
+
   def close(self, disable: bool = False) -> None:
     """Release CAN without dropping gravity support.
 
@@ -387,10 +469,34 @@ class PiperArm:
           # The drive retains its last position target.
           pass
     finally:
-      try:
-        self._iface.DisconnectPort()
-      finally:
-        self.connected = False
+      self.disconnect()
+
+
+# The guided-calibration motion parameters, which are the only ones on this
+# rig that have driven the arm across the workspace without incident.  Reused
+# rather than re-chosen: a second set of numbers for the same job is a second
+# thing to get wrong.
+AUTO_SPEED_RAD_S = 0.22
+AUTO_RATE_HZ = 30.0
+AUTO_TRACKING_ERROR_RAD = 0.45
+
+
+def joint_trajectory(q0, q1, speed_rad_s: float = AUTO_SPEED_RAD_S,
+                     rate_hz: float = AUTO_RATE_HZ) -> np.ndarray:
+  """A rest-to-rest joint path whose peak speed is bounded.
+
+  ``3 u^2 - 2 u^3`` peaks at 1.5 times its average speed, hence the 1.5 in the
+  duration.  The first row is the measured position, so enabling the arm is
+  immediately followed by a hold at exactly where it already is.
+  """
+  a = np.asarray(q0, dtype=np.float64).reshape(6)
+  b = np.asarray(q1, dtype=np.float64).reshape(6)
+  distance = float(np.max(np.abs(b - a)))
+  duration = max(0.8, 1.5 * distance / max(float(speed_rad_s), 1e-3))
+  n = max(2, int(np.ceil(duration * float(rate_hz))) + 1)
+  u = np.linspace(0.0, 1.0, n)
+  blend = 3.0 * u ** 2 - 2.0 * u ** 3
+  return a[None, :] + blend[:, None] * (b - a)[None, :]
 
 
 def feedback(state: ArmState, target: np.ndarray) -> JointFeedback:

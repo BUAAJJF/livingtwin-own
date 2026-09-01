@@ -54,7 +54,8 @@ def main() -> int:
   p.add_argument("--sensor", default="measured",
                  choices=("measured", "clean"),
                  help="depth realism to train under.  'measured' is the fitted "
-                      "D405 model in piper_push.depth_noise; 'clean' turns it "
+                      "active-stereo model selected by piper_push.camera; "
+                      "'clean' turns it "
                       "off entirely and is the control that says how much of "
                       "the difference the model is responsible for")
   p.add_argument("--log-root", default="logs/rsl_rl")

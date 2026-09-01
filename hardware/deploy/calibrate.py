@@ -217,7 +217,9 @@ class Board:
       return board.matchImagePoints(corners, ids)
 
     ok, corners = cv2.findChessboardCornersSB(
-      gray, self.squares, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY)
+      gray, self.squares,
+      flags=(cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
+             | cv2.CALIB_CB_NORMALIZE_IMAGE))
     if not ok:
       return None
     return self.object_points().reshape(-1, 1, 3).astype(np.float32), corners
@@ -493,6 +495,101 @@ def _transform_mean(Ts: list[np.ndarray]) -> np.ndarray:
   return out
 
 
+POSE_RANSAC_MIN_RECORDS = 12
+POSE_RANSAC_SAMPLE_SIZE = 8
+POSE_RANSAC_ITERATIONS = 256
+POSE_RANSAC_TRANSLATION_MM = 5.0
+POSE_RANSAC_ROTATION_DEG = 1.5
+
+
+def _closed_eye_to_hand(T_base_grip: list[np.ndarray],
+                        T_cam_board: list[np.ndarray],
+                        indices: np.ndarray) -> np.ndarray:
+  """Park--Martin eye-to-hand solution for one pose subset."""
+  A = [np.linalg.inv(T_base_grip[int(i)]) for i in indices]
+  B = [T_cam_board[int(i)] for i in indices]
+  R, t = calibrate_hand_eye(
+    [x[:3, :3] for x in A], [x[:3, 3] for x in A],
+    [x[:3, :3] for x in B], [x[:3, 3] for x in B])
+  X = np.eye(4)
+  X[:3, :3] = R
+  X[:3, 3] = np.asarray(t).ravel()
+  return X
+
+
+def pose_ransac_inliers(T_base_grip: list[np.ndarray],
+                        T_cam_board: list[np.ndarray],
+                        min_rotation_span_deg: float = MIN_ROT_SPAN_DEG,
+                        seed: int = 455) -> np.ndarray:
+  """Pose-level consensus from the rigid board-on-gripper constraint.
+
+  Corner RANSAC cannot reject a whole observation whose own PnP is sharp but
+  whose robot pose, board mount, or timestamp is wrong.  For a candidate camera
+  transform, every ``inv(T_base_grip) @ T_base_cam @ T_cam_board`` must be the
+  same board-in-gripper transform.  Random diverse pose subsets propose the
+  camera transform and this physical invariant scores every complete pose.
+  """
+  n = len(T_base_grip)
+  all_indices = np.arange(n, dtype=int)
+  if n < POSE_RANSAC_MIN_RECORDS:
+    return all_indices
+
+  def span(indices):
+    return max((_angle_between(T_base_grip[int(i)][:3, :3],
+                               T_base_grip[int(j)][:3, :3])
+                for k, i in enumerate(indices) for j in indices[k + 1:]),
+               default=0.0)
+
+  def score(X, centre_indices):
+    mounts = [np.linalg.inv(G) @ X @ C
+              for G, C in zip(T_base_grip, T_cam_board)]
+    centre = _transform_mean([mounts[int(i)] for i in centre_indices])
+    dt = np.asarray([
+      np.linalg.norm(T[:3, 3] - centre[:3, 3]) * 1000.0 for T in mounts])
+    dr = np.asarray([
+      _angle_between(T[:3, :3], centre[:3, :3]) for T in mounts])
+    keep = np.flatnonzero(
+      (dt <= POSE_RANSAC_TRANSLATION_MM)
+      & (dr <= POSE_RANSAC_ROTATION_DEG))
+    quality = (len(keep),
+               -float(np.median(dt[keep])) if len(keep) else -1e9,
+               -float(np.median(dr[keep])) if len(keep) else -1e9)
+    return keep, quality
+
+  rng = np.random.default_rng(seed)
+  candidates = [all_indices]
+  candidates.extend(np.sort(rng.choice(
+    n, POSE_RANSAC_SAMPLE_SIZE, replace=False))
+    for _ in range(POSE_RANSAC_ITERATIONS))
+  best = None
+  for indices in candidates:
+    if span(indices) < min_rotation_span_deg:
+      continue
+    try:
+      X = _closed_eye_to_hand(T_base_grip, T_cam_board, indices)
+      keep, quality = score(X, indices)
+    except (RuntimeError, ValueError, np.linalg.LinAlgError):
+      continue
+    if best is None or quality > best[0]:
+      best = (quality, keep)
+  if best is None:
+    return all_indices
+
+  keep = best[1]
+  minimum_consensus = max(MIN_POSES, int(np.ceil(0.60 * n)))
+  for _ in range(4):
+    if len(keep) < minimum_consensus or span(keep) < min_rotation_span_deg:
+      return all_indices
+    X = _closed_eye_to_hand(T_base_grip, T_cam_board, keep)
+    updated, _ = score(X, keep)
+    if np.array_equal(updated, keep):
+      break
+    keep = updated
+  if len(keep) < minimum_consensus or span(keep) < min_rotation_span_deg:
+    return all_indices
+  return keep.astype(int)
+
+
 def _pack_transform(T: np.ndarray) -> np.ndarray:
   return np.r_[cv2.Rodrigues(T[:3, :3])[0].ravel(), T[:3, 3]]
 
@@ -600,7 +697,8 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
           min_rotation_span_deg: float = MIN_ROT_SPAN_DEG,
           K: np.ndarray | None = None,
           dist: np.ndarray | None = None,
-          refine: bool = True):
+          refine: bool = True,
+          robust: bool = True):
   """Camera pose in the base frame, plus a residual per pose.
 
   The residual is the thing to read.  ``calibrateHandEye`` will return a
@@ -621,7 +719,7 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
     records, n_flipped = _unflip(records, board, gripper_site)
 
   kin = Kinematics(site_name=gripper_site)
-  R_bg, t_bg, R_cb, t_cb = [], [], [], []
+  T_base_grip, T_cam_board = [], []
   for r in records:
     kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
     T_bg = np.eye(4)
@@ -629,15 +727,13 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
     T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
     # Eye-to-hand: hand the solver the inverse poses and it returns the camera
     # in the base frame instead of the camera in the gripper frame.
-    T_gb = np.linalg.inv(T_bg)
-    R_bg.append(T_gb[:3, :3])
-    t_bg.append(T_gb[:3, 3])
     T_cb_i = _rt(r["rvec"], r["tvec"])
-    R_cb.append(T_cb_i[:3, :3])
-    t_cb.append(T_cb_i[:3, 3])
+    T_base_grip.append(T_bg)
+    T_cam_board.append(T_cb_i)
 
-  spans = [_angle_between(R_bg[i], R_bg[j])
-           for i in range(len(R_bg)) for j in range(i + 1, len(R_bg))]
+  spans = [_angle_between(T_base_grip[i][:3, :3],
+                          T_base_grip[j][:3, :3])
+           for i in range(len(records)) for j in range(i + 1, len(records))]
   rot_span = max(spans) if spans else 0.0
   if rot_span < min_rotation_span_deg:
     # Return rather than raise, so the caller can print the number and say what
@@ -648,12 +744,16 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
             "worst_mm": float("nan"), "worst_pose": -1, "per_pose_mm": [],
             "n_flipped": n_flipped}
 
-  R, t = calibrate_hand_eye(R_bg, t_bg, R_cb, t_cb)
-  T_base_cam = np.eye(4)
-  T_base_cam[:3, :3] = R
-  T_base_cam[:3, 3] = np.asarray(t).ravel()
+  inlier_indices = (pose_ransac_inliers(
+    T_base_grip, T_cam_board, min_rotation_span_deg)
+    if robust else np.arange(len(records), dtype=int))
+  outlier_indices = sorted(set(range(len(records)))
+                           - set(inlier_indices.tolist()))
+  T_base_cam = _closed_eye_to_hand(
+    T_base_grip, T_cam_board, inlier_indices)
+  fit_records = [records[int(i)] for i in inlier_indices]
 
-  refined = (refine_reprojection(records, T_base_cam, K, dist, gripper_site)
+  refined = (refine_reprojection(fit_records, T_base_cam, K, dist, gripper_site)
              if refine and (board is None or board.kind == "charuco") else None)
   if refined is not None:
     T_base_cam = refined["T_base_cam"]
@@ -661,26 +761,25 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   # The board in the gripper frame, from every pose.  Constant if the solution
   # is right.
   in_gripper = []
-  for r, Rc, tc in zip(records, R_cb, t_cb):
-    kin.update(np.asarray(r["joint_pos"], dtype=np.float64))
-    T_bg = np.eye(4)
-    T_bg[:3, :3] = kin.data.site_xmat[kin.site_id].reshape(3, 3)
-    T_bg[:3, 3] = kin.data.site_xpos[kin.site_id]
-    T_cb_i = np.eye(4)
-    T_cb_i[:3, :3], T_cb_i[:3, 3] = Rc, tc
+  for T_bg, T_cb_i in zip(T_base_grip, T_cam_board):
     in_gripper.append(np.linalg.inv(T_bg) @ T_base_cam @ T_cb_i)
 
   origins = np.stack([T[:3, 3] for T in in_gripper])
-  centre = origins.mean(axis=0)
+  centre = origins[inlier_indices].mean(axis=0)
   per_pose_mm = np.linalg.norm(origins - centre, axis=1) * 1000
+  inlier_mm = per_pose_mm[inlier_indices]
+  worst_inlier = int(inlier_indices[int(np.argmax(inlier_mm))])
   result = {
     "T_base_cam": T_base_cam,
-    "residual_mm": float(np.sqrt((per_pose_mm ** 2).mean())),
-    "worst_mm": float(per_pose_mm.max()),
-    "worst_pose": int(per_pose_mm.argmax()),
+    "residual_mm": float(np.sqrt(np.mean(inlier_mm ** 2))),
+    "residual_all_mm": float(np.sqrt(np.mean(per_pose_mm ** 2))),
+    "worst_mm": float(per_pose_mm[worst_inlier]),
+    "worst_pose": worst_inlier,
     "per_pose_mm": per_pose_mm.tolist(),
     "rot_span_deg": rot_span,
     "n_poses": len(records),
+    "n_inliers": int(len(inlier_indices)),
+    "outlier_poses": outlier_indices,
     "n_flipped": n_flipped,
   }
   if refined is not None:
@@ -698,23 +797,11 @@ def solve(records: list[dict], gripper_site: str = "grasp_site",
   return result
 
 
-def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
-  """Height and tilt of the table in the base frame, from one depth frame."""
-  from . import rectify
-
-  rig = config.Rig(T_base_cam=T_base_cam, K=K)
-  reproj = rectify.Reprojector(rig)
-  pts = reproj.points_base(depth, rig)
-  (xlo, xhi), (ylo, yhi), _ = config.WORKSPACE
-  sel = ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
-         & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
-         & (np.abs(pts[:, 2] - config.TABLE_Z_M) < 0.08))
-  if sel.sum() < 5000:
-    raise RuntimeError(
-      f"only {int(sel.sum())} points near the expected table height.  Either "
-      "the extrinsic is wrong or the camera is not looking at the table."
-    )
-  q = pts[sel]
+def _fit_plane_points(q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """Robust plane centre, upward normal and residuals for base-frame points."""
+  q = np.asarray(q, dtype=np.float64).reshape(-1, 3)
+  if len(q) < 4 or not np.isfinite(q).all():
+    raise RuntimeError("not enough finite points to fit a plane")
   w = np.ones(q.shape[0])
   for _ in range(4):
     mu = (q * w[:, None]).sum(0) / w.sum()
@@ -725,11 +812,114 @@ def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
     r = (q - mu) @ n
     s = 1.4826 * np.median(np.abs(r)) + 1e-4
     w = 1.0 / (1.0 + (r / (2.5 * s)) ** 2)
+  return mu, n, (q - mu) @ n
+
+
+def fit_table(depth: np.ndarray, T_base_cam: np.ndarray, K: np.ndarray) -> dict:
+  """Height and tilt of the table in the base frame, from one depth frame.
+
+  Calibration may stream the D405 at 1280x720 while deployment uses 848x480.
+  Build rays from the actual frame shape here; the deployment reprojector is
+  deliberately fixed to deployment resolution and must not be used for this
+  one-shot measurement.
+  """
+  depth = np.asarray(depth, dtype=np.float64)
+  if depth.ndim != 2:
+    raise RuntimeError(f"depth must be a 2-D image, got {depth.shape}")
+  h, w = depth.shape
+  K = np.asarray(K, dtype=np.float64).reshape(3, 3)
+  u, v = np.meshgrid(np.arange(w, dtype=np.float64),
+                     np.arange(h, dtype=np.float64))
+  valid = np.isfinite(depth) & (depth > 0)
+  d = depth[valid]
+  cam = np.column_stack(((u[valid] - K[0, 2]) / K[0, 0] * d,
+                         (v[valid] - K[1, 2]) / K[1, 1] * d, d))
+  T = np.asarray(T_base_cam, dtype=np.float64).reshape(4, 4)
+  pts = cam @ T[:3, :3].T + T[:3, 3]
+  (xlo, xhi), (ylo, yhi), _ = config.WORKSPACE
+  sel = ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
+         & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
+         & (np.abs(pts[:, 2] - config.TABLE_Z_M) < 0.08))
+  if sel.sum() < 5000:
+    raise RuntimeError(
+      f"only {int(sel.sum())} points near the expected table height.  Either "
+      "the extrinsic is wrong or the camera is not looking at the table."
+    )
+  q = pts[sel]
+  mu, n, r = _fit_plane_points(q)
+  # The plane's height AT THE BASE ORIGIN, not the centroid of the patch that
+  # happened to be visible.  ``config.Rig`` defines the plane as passing
+  # through (0, 0, table_z) and ``proprio.collision_plane_clearance`` subtracts
+  # ``n[2] * table_z`` on that understanding, so returning the centroid puts
+  # the safety plane wherever the camera was looking: on the measured D455 rig
+  # -- 0.88 deg of tilt, centroid 0.4 m out along +y -- the two differ by
+  # 6.1 mm, which is most of the +-7 mm the table height is randomised over.
+  # ``fit_table_board_samples`` has always projected it back; this did not.
+  table_z = float(mu[2] + (n[0] * mu[0] + n[1] * mu[1]) / n[2])
   return {
-    "table_z": float(mu[2]),
+    "normal_base": n.tolist(),
+    "table_z": table_z,
+    "centroid_z": float(mu[2]),
+    "centroid_xy": [float(mu[0]), float(mu[1])],
     "tilt_deg": float(np.degrees(np.arccos(np.clip(n[2], -1, 1)))),
-    "flatness_mm": float(1.4826 * np.median(np.abs((q - mu) @ n)) * 1000),
+    "flatness_mm": float(1.4826 * np.median(np.abs(r)) * 1000),
     "n_points": int(sel.sum()),
+    "source": "D405 depth plane",
+  }
+
+
+def fit_table_board_samples(records: list[dict], T_base_cam: np.ndarray,
+                            board: Board) -> dict:
+  """Joint table plane from a checkerboard moved across the tabletop.
+
+  Every record is a fused metric PnP observation.  Transforming its known
+  checker corners into the robot base produces samples of the same physical
+  plane at different x/y locations.  Fitting all of them together measures
+  both the table and disagreement between placements without using D405 depth.
+  """
+  if board.kind != "checker":
+    raise ValueError("table helper board must be a checkerboard")
+  if len(records) < 3:
+    raise RuntimeError(
+      f"need at least 3 table-board samples; have {len(records)}")
+  T_bc = np.asarray(T_base_cam, dtype=np.float64).reshape(4, 4)
+  obj = board.object_points()
+  clouds, centres = [], []
+  for rec in records:
+    T_cb = _rt(rec["rvec"], rec["tvec"])
+    T_bb = T_bc @ T_cb
+    q = obj @ T_bb[:3, :3].T + T_bb[:3, 3]
+    clouds.append(q)
+    centres.append(q.mean(0))
+  all_points = np.concatenate(clouds, axis=0)
+  mu, n, residual = _fit_plane_points(all_points)
+  if abs(n[2]) < 0.5:
+    raise RuntimeError(
+      f"fitted board plane is {np.degrees(np.arccos(np.clip(n[2], -1, 1))):.1f} "
+      "deg from base up; check the hand-eye extrinsic and keep the board flat")
+  # Height of the fitted plane at the robot-base origin.  Unlike a mean z,
+  # this has one fixed meaning when samples cover different x/y positions.
+  table_z = float(mu[2] + (n[0] * mu[0] + n[1] * mu[1]) / n[2])
+  per_sample = []
+  offset = 0
+  for q in clouds:
+    r = residual[offset:offset + len(q)]
+    per_sample.append(float(np.sqrt(np.mean(r ** 2)) * 1000))
+    offset += len(q)
+  centres = np.asarray(centres)
+  return {
+    "table_z": table_z,
+    "tilt_deg": float(np.degrees(np.arccos(np.clip(n[2], -1, 1)))),
+    "flatness_mm": float(1.4826 * np.median(np.abs(residual)) * 1000),
+    "n_points": int(len(all_points)),
+    "n_samples": int(len(records)),
+    "per_sample_mm": per_sample,
+    "worst_sample": int(np.argmax(per_sample)),
+    "coverage_x_mm": float((centres[:, 0].max() - centres[:, 0].min()) * 1000),
+    "coverage_y_mm": float((centres[:, 1].max() - centres[:, 1].min()) * 1000),
+    "normal_base": n.tolist(),
+    "source": (f"{board.squares[0]}x{board.squares[1]} checkerboard, "
+               f"{board.square_m * 1000:.1f} mm squares"),
   }
 
 
@@ -756,6 +946,19 @@ def load_poses(path=POSES_FILE) -> tuple[Board, list[dict]]:
 def save_poses(board: Board, records: list[dict], path=POSES_FILE) -> None:
   pathlib.Path(path).write_text(json.dumps(
     {"board": board.to_dict(), "poses": records}, indent=2))
+
+
+def paths_for(camera: str) -> tuple[pathlib.Path, pathlib.Path]:
+  """The pose file and rig file for a camera.
+
+  The D405 keeps the unsuffixed names this file was written with; anything
+  else is explicit.  Same convention as ``run.py`` and ``calibgui.py``, and it
+  matters more now that the default camera is the D455: without it, ``--solve``
+  would read a D455 and overwrite the D405's ``rig.json``.
+  """
+  suffix = "" if camera == "d405" else f"_{camera}"
+  return (POSES_FILE.with_name(f"calib_poses{suffix}.json"),
+          pathlib.Path(config.RIG_FILE).with_name(f"rig{suffix}.json"))
 
 
 def board_from_args(args) -> Board:
@@ -799,7 +1002,8 @@ def preview(args) -> int:
 
   board = board_from_args(args)
   print(f"board: {board.describe()}\n")
-  reader = sensor.Reader(serial=args.serial, width=1280, height=720,
+  reader = sensor.Reader(serial=args.serial, backend=args.camera,
+                         width=1280, height=720,
                          gray_source="left_ir")
   first = reader.wait_for_first()
   if getattr(first, "ir", None) is None:
@@ -835,7 +1039,8 @@ def collect(args) -> int:
   """
   from . import robot, sensor
 
-  reader = sensor.Reader(serial=args.serial, width=1280, height=720,
+  reader = sensor.Reader(serial=args.serial, backend=args.camera,
+                         width=1280, height=720,
                          gray_source="left_ir")
   reader.wait_for_first()
   # Connected but deliberately not enabled: a disabled PiPER is back-drivable,
@@ -847,14 +1052,15 @@ def collect(args) -> int:
     arm.connect()
 
   board = board_from_args(args)
+  poses_file, _ = paths_for(args.camera)
   records = []
-  if POSES_FILE.exists():
-    stored, records = load_poses()
+  if poses_file.exists():
+    stored, records = load_poses(poses_file)
     if stored != board and records:
       print(f"REFUSING to append: {len(records)} pose(s) were recorded "
             f"against\n  {stored.describe()}\nand this run is using\n  "
             f"{board.describe()}\nPoses from two boards cannot be solved "
-            f"together.  Delete {POSES_FILE.name} to start over.")
+            f"together.  Delete {poses_file.name} to start over.")
       reader.close()
       if arm is not None:
         arm.close()
@@ -907,7 +1113,7 @@ def collect(args) -> int:
         "image_size": list(reader.meta["resolution"]),
         "image_source": reader.meta.get("gray_source"),
       })
-      save_poses(board, records)
+      save_poses(board, records, poses_file)
       print(f"  recorded: {pose['n_corners']} corners, "
             f"reprojection {pose['reproj_rms_px']:.2f} px")
   finally:
@@ -918,10 +1124,11 @@ def collect(args) -> int:
 
 
 def run_solve(args) -> int:
-  if not POSES_FILE.exists():
-    print(f"no poses at {POSES_FILE}; run --collect first")
+  poses_file, rig_file = paths_for(args.camera)
+  if not poses_file.exists():
+    print(f"no poses at {poses_file}; run --collect first")
     return 1
-  board, records = load_poses()
+  board, records = load_poses(poses_file)
   if len(records) < MIN_POSES:
     print(f"{len(records)} poses is not enough; {MIN_POSES} is the minimum")
     return 1
@@ -977,7 +1184,7 @@ def run_solve(args) -> int:
   rig = config.Rig(T_base_cam=T, residual_mm=out["residual_mm"])
   if args.table:
     from . import sensor
-    reader = sensor.Reader(serial=args.serial)
+    reader = sensor.Reader(serial=args.serial, backend=args.camera)
     frame = reader.wait_for_first()
     reader.close()
     rig.K = reader.K
@@ -991,8 +1198,8 @@ def run_solve(args) -> int:
       print("WARNING: the table is more than 1.5 degrees off level in the "
             "base frame.  Either it is, or the calibration is wrong.")
     rig.table_z = table["table_z"]
-  rig.save()
-  print(f"\nwrote {config.RIG_FILE}")
+  rig.save(rig_file)
+  print(f"\nwrote {rig_file}")
   return 0
 
 
@@ -1027,6 +1234,10 @@ def main() -> int:
                  help="also measure the table plane (default on)")
   p.add_argument("--no-table", dest="table", action="store_false")
   p.add_argument("--serial", default=None)
+  p.add_argument("--camera", choices=("d405", "d455"), default="d455",
+                 help="which sensor, and therefore which pose and rig files.  "
+                      "The D405 keeps the unsuffixed names it was written "
+                      "with; every other camera is explicit.")
   p.add_argument("--can", default=config.CAN_INTERFACE)
   p.add_argument("--dry-run", action="store_true")
   p.add_argument("--max-residual-mm", type=float, default=4.0)

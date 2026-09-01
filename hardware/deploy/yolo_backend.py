@@ -63,7 +63,9 @@ import cv2
 import numpy as np
 
 HERE = pathlib.Path(__file__).resolve().parent
-YOLO_DIR = HERE / "yolo"
+YOLO_DIR = HERE / "yolo_d455"
+"""The D455 model.  The D405 set is in ``yolo/``; ``run.py`` picks the
+directory from ``--camera`` and refuses a model belonging to the other one."""
 
 IMGSZ = 832
 """Close to the sensor's 848 wide, so the network sees a 40 mm object at the 25

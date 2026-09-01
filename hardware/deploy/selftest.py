@@ -124,12 +124,21 @@ def d405_camera_cfg() -> CameraSensorCfg:
   any error the resampling makes is the resampling's, not a calibration's.  The
   hand-eye path is checked separately in ``tests/test_deploy.py``, against a
   pose it knows the answer to.
+
+  ``CAMERA_QUAT``, not ``look_at_quat(CAMERA_POS)``.  The two agreed until the
+  policy camera took its orientation from the measured D455 calibration, which
+  carries 1.91 degrees of roll; ``look_at_quat`` rebuilds the frame from the
+  world's up vector and so cannot express roll at all.  The identity this
+  docstring claims was then off by that angle, and every check downstream read
+  it as the pipeline's error: resampled depth 7.5 mm at p50 against 0.40, mask
+  IoU 0.664 against 0.918, and "the policy cannot tell the two paths apart"
+  failing at 19% of what the image is worth.  None of it was the pipeline.
   """
   return CameraSensorCfg(
     name=D405_CAM,
     parent_body=sim_camera.PARENT_BODY,
     pos=sim_camera.CAMERA_POS,
-    quat=sim_camera.look_at_quat(sim_camera.CAMERA_POS),
+    quat=sim_camera.CAMERA_QUAT,
     fovy=d405_fovy(),
     width=config.D405_WIDTH,
     height=config.D405_HEIGHT,

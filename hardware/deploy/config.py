@@ -36,6 +36,7 @@ import numpy as np
 import mjlab.tasks  # noqa: F401
 
 from piper_push import camera as sim_camera
+from piper_push import layout as sim_layout
 from piper_push import objects as sim_objects
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -86,10 +87,42 @@ simulator for the same reason the camera pose is -- on the rig the bin goes
 where this says, and the segmenter needs to know so it does not report the rim
 as the tallest object on the table."""
 
-WORKSPACE = ((-0.10, 0.75), (-0.45, 0.45), (-0.02, 0.40))
+_WORKSPACE_XY_UNROTATED = ((-0.10, 0.75), (-0.45, 0.45))
+WORKSPACE = (*sim_layout.rotate_aabb_xy(_WORKSPACE_XY_UNROTATED), (-0.02, 0.40))
 """Base-frame box that anything interesting is inside, as (x, y, z) ranges.
-Used to throw away the far wall, the floor and whatever else is in frame before
-segmentation looks at what is left."""
+The coarse bound: it throws away the far wall, the floor and whatever else is
+in frame.  It is *not* where an object may be -- see ``WORKSPACE_SECTOR``,
+which is the shape training actually uses and which this box circumscribes."""
+
+# The sector, imported rather than restated.  ``piper_push`` is already fully
+# imported by this point (see the mjlab note at the top of this file), so the
+# task module is safe to read here and cannot drift from what was trained.
+from piper_push.tasks.pick_place import env_cfg as _task  # noqa: E402
+
+WORKSPACE_SECTOR = (
+  _task.OBJECT_ALLOWED_RADIUS,
+  _task.OBJECT_ALLOWED_ANGLE,
+  (-0.02, 0.40),
+)
+"""Where an object is allowed to be, as ``((r_lo, r_hi), (a_lo, a_hi), (z_lo,
+z_hi))`` in base-frame polar coordinates -- the same annular sector
+``OBJECT_ALLOWED_RADIUS`` / ``OBJECT_ALLOWED_ANGLE`` define for training.
+
+The deployment used the circumscribing *box* instead, and the box contains two
+regions the sector does not.  Both produced instances on the rig:
+
+* **inside the inner radius**, r < 150 mm, which is where the robot's own base
+  column stands.  It came back as a 102 mm tall, 283 px component -- squarely
+  inside the 24-90 mm the objects occupy once smoothing is allowed for -- and
+  ``link_spheres`` does not remove it, because the sphere cover follows the
+  collision geometry and the base's cover does not reach the table.
+* **outside the outer radius**, r > 550 mm, where the camera's own mount sits.
+  That came back as a 1218 px component, seven times an object's area, and the
+  nearest-to-the-hand rule chose it in 15% of a recorded session.
+
+Neither is a segmentation failure: both are real things standing above the
+table.  They are simply not places the task ever puts an object, and training
+has always known that."""
 
 
 @dataclasses.dataclass
@@ -106,6 +139,10 @@ class Rig:
 
   T_base_cam: np.ndarray
   table_z: float = TABLE_Z_M
+  table_normal_base: np.ndarray | None = None
+  """Unit normal of the measured table plane in the robot base frame.  The
+  plane passes through the point (0, 0, table_z).  Old rig files omit it and
+  are treated as level for backward compatibility."""
   K: np.ndarray | None = None
   """D405 depth intrinsics at ``(D405_WIDTH, D405_HEIGHT)``.  Read from the
   camera at run time; stored so a recorded session can be replayed without
@@ -139,6 +176,9 @@ class Rig:
     return cls(
       T_base_cam=np.asarray(d["T_base_cam"], dtype=np.float64),
       table_z=float(d.get("table_z", TABLE_Z_M)),
+      table_normal_base=(
+        np.asarray(d["table_normal_base"], dtype=np.float64)
+        if d.get("table_normal_base") is not None else None),
       K=np.asarray(d["K"], dtype=np.float64) if d.get("K") else None,
       serial=d.get("serial"),
       residual_mm=d.get("residual_mm"),
@@ -150,6 +190,9 @@ class Rig:
     pathlib.Path(path).write_text(json.dumps({
       "T_base_cam": self.T_base_cam.tolist(),
       "table_z": self.table_z,
+      "table_normal_base": (
+        np.asarray(self.table_normal_base).tolist()
+        if self.table_normal_base is not None else None),
       "K": self.K.tolist() if self.K is not None else None,
       "serial": self.serial,
       "residual_mm": self.residual_mm,
@@ -166,13 +209,10 @@ def sim_camera_extrinsic() -> np.ndarray:
   is the one place in the deployed code that knows it.
   """
   pos = CAMERA_POS
-  fwd = CAMERA_AIM - pos
-  fwd = fwd / np.linalg.norm(fwd)
-  right = np.cross(fwd, np.array([0.0, 0.0, 1.0]))
-  right /= np.linalg.norm(right)
-  up = np.cross(right, fwd)
-  # Columns are the camera axes in the base frame, in OpenCV order.
-  R = np.stack([right, -up, fwd], axis=1)
+  # MuJoCo camera axes are (right, up, backward); OpenCV's are (right,
+  # down, forward).  Reading the configured quaternion, rather than rebuilding
+  # it from CAMERA_AIM, preserves the calibrated D455 roll.
+  R = sim_camera.quat_matrix() @ np.diag([1.0, -1.0, -1.0])
   T = np.eye(4)
   T[:3, :3] = R
   T[:3, 3] = pos

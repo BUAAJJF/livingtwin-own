@@ -1,0 +1,40 @@
+{
+  "method": "pose-level RANSAC Park-Martin initialization + soft-L1 joint corner refinement",
+  "n_poses": 44,
+  "n_inliers": 41,
+  "outlier_poses": [
+    0,
+    2,
+    3
+  ],
+  "residual_inlier_mm": 3.9159902127428294,
+  "residual_all_mm": 4.0923896702262565,
+  "worst_inlier_mm": 7.040939770509815,
+  "worst_inlier_pose": 22,
+  "reprojection_before_px": 1.773312643843262,
+  "reprojection_after_px": 1.1595416787759503,
+  "table": {
+    "table_z": -0.0037840020355038384,
+    "tilt_deg": 0.882841650799263,
+    "flatness_mm": 0.4112919558971888,
+    "n_points": 528,
+    "n_samples": 6,
+    "per_sample_mm": [
+      0.32951474093692096,
+      0.15125842517832727,
+      0.7521660859741126,
+      0.5867605654343603,
+      0.15643935247345475,
+      0.4165861843463039
+    ],
+    "worst_sample": 2,
+    "coverage_x_mm": 621.7579620035507,
+    "coverage_y_mm": 329.3035951977947,
+    "normal_base": [
+      -0.0007600171340716867,
+      0.015389127957010917,
+      0.9998812915114865
+    ],
+    "source": "11x8 checkerboard, 25.0 mm squares"
+  }
+}

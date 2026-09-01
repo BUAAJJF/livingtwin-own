@@ -1,0 +1,101 @@
+{
+  "sensor": "Intel RealSense D455",
+  "serial": "262822300638",
+  "method": "calibrated active-stereo output model (DREDS-style effects)",
+  "depth_scale_m": 0.0001,
+  "emitter": "on",
+  "sources": [
+    {
+      "path": "/home/yunfan/Project/PiperPush/LivingTwin/recordings/d455_yolo/session01",
+      "available": 2513,
+      "used": 800
+    },
+    {
+      "path": "/home/yunfan/Project/PiperPush/LivingTwin/recordings/d455_yolo/manual_20260826_163148",
+      "available": 100,
+      "used": 100
+    }
+  ],
+  "calibration_sources": {
+    "handeye": {
+      "path": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/deploy/calib_poses_d455.json",
+      "poses": 44,
+      "fused_frames": 1056,
+      "reprojection_rms_px_median": 0.1346860244787162,
+      "reprojection_rms_px_p95": 0.21747528236952643,
+      "corner_spread_px_median": 0.120464697139879,
+      "corner_spread_px_p95": 0.26745023519124583
+    },
+    "table": {
+      "path": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/deploy/calib_table_poses_d455.json",
+      "poses": 6,
+      "fused_frames": 104,
+      "reprojection_rms_px_median": 0.13340187058598799,
+      "reprojection_rms_px_p95": 0.2367403843660885,
+      "corner_spread_px_median": 0.04698219817658032,
+      "corner_spread_px_p95": 0.15583374541302952
+    },
+    "rig": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/deploy/rig_d455.json"
+  },
+  "validation_split": "last input folder held out by source",
+  "development_frames": 800,
+  "held_out_frames": 100,
+  "final_fit_frames": 900,
+  "plane_gate_m": 0.03,
+  "params": {
+    "sigma_static_per_m": 0.0046298316486761155,
+    "sigma_temporal_per_m": 0.002872283649994447,
+    "corr_len_native_px": 27.69191327548662,
+    "native_f_px_per_rad": 427.34912109375,
+    "edge_g50_per_rad": 7.286181745132278,
+    "edge_exp": 2.0,
+    "texture_penalty": [
+      1.0,
+      1.35
+    ],
+    "surface_fill": [
+      0.9744444444444444,
+      1.0
+    ],
+    "bias_scale": 0.009608675574373598,
+    "bias_offset_m": 0.0004367948217503289,
+    "bias_scale_jitter": 0.005,
+    "bias_offset_jitter_m": 0.002,
+    "shadow_mrad": 4.0,
+    "stereo_baseline_m": 0.095,
+    "stereo_focal_px": 427.34912109375,
+    "disparity_subpixel_levels": 32
+  },
+  "development": {
+    "bias_scale": 0.009347555829336468,
+    "bias_offset_m": 0.0006702150119444246,
+    "sigma_static_per_m": 0.004448464760597133,
+    "sigma_temporal_per_m": 0.00169803041992444,
+    "corr_len_native_px": 26.48561837208632,
+    "plane_pixels": 162747,
+    "plane_residual_rms_m": 0.0065722750853229855
+  },
+  "held_out": {
+    "bias_scale": 0.011553367363813589,
+    "bias_offset_m": -0.001160735189486889,
+    "sigma_static_per_m": 0.0056169693523060275,
+    "sigma_temporal_per_m": 0.0030328150020200485,
+    "corr_len_native_px": 31.93627472447094,
+    "plane_pixels": 163850,
+    "plane_residual_rms_m": 0.004941475676821948
+  },
+  "fit": {
+    "bias_scale": 0.009608675574373598,
+    "bias_offset_m": 0.0004367948217503289,
+    "sigma_static_per_m": 0.0046298316486761155,
+    "sigma_temporal_per_m": 0.002872283649994447,
+    "corr_len_native_px": 27.69191327548662,
+    "plane_pixels": 162864,
+    "plane_residual_rms_m": 0.006199112425610388
+  },
+  "notes": [
+    "Calibration JSON contains poses and the metric table plane, not raw depth; the plane is used as ground truth for the YOLO depth frames.",
+    "The long YOLO sequence estimates temporal/static structure; manually accepted layouts form a source-held validation domain before both sources are combined for the final parameter estimate.",
+    "Disparity quantisation is the D400 hardware model; remaining parameters are fitted from this camera's recordings."
+  ]
+}

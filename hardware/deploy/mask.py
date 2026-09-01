@@ -76,9 +76,30 @@ class SegmenterCfg:
   decides whether the thing it is part of is real: keeping the pixel threshold
   low means an object's sloping sides are included in its outline rather than
   cropped to its cap."""
-  max_height_m: float = 0.14
-  """Objects are 24-90 mm tall.  Anything half again as tall as the tallest is
-  the arm, the bin or a person, and there is no reason to consider it."""
+  max_height_m: float = 0.40
+  """Pixel ceiling: how far above the table a pixel may be and still be
+  considered part of anything.  Deliberately the workspace's own ceiling, so
+  that this gate does *not* decide what is an object -- ``max_top_z_m`` does.
+
+  It used to be 0.14, the same number as the component ceiling, and that made
+  the component ceiling unreachable: every pixel above 140 mm was dropped
+  before the components were formed, so a component's top was always below the
+  bound it was then tested against.  A 270 mm structure on the rig came out as
+  a 137 mm one -- inside the 24-90 mm the objects occupy once the smoothing is
+  allowed for -- and the nearest-to-the-hand rule aimed the policy at it in 223
+  of 239 frames of a recorded session.  Truncating a thing until it looks like
+  an object is worse than not seeing it."""
+
+  max_top_z_m: float = 0.11
+  """Component ceiling: how tall the *whole* thing may be and still be one of
+  the task's objects, which are 24-90 mm.  The margin over 90 covers the
+  Gaussian smoothing, the calibration residual and the sensor's own scatter at
+  the far edge of the table.
+
+  Separate from ``max_height_m`` on purpose, and the separation is the point:
+  one gate says which pixels may join a component, the other says whether the
+  component that formed is a thing to pick up.  Sharing one constant between
+  them silently disables the second."""
   min_area_px: int = 150
   """A 25 mm object at 0.8 m covers about 180 sensor pixels.  Set below that so
   a badly holed one still survives, and above the ~60 px a blob of correlated
@@ -128,13 +149,30 @@ class SegmenterCfg:
   at 0.6 m was 28 mm.  The scatter is therefore measured as a coefficient on
   z^2 and the threshold is evaluated at each component's own range."""
 
-  width_range_m: tuple[float, float] = (0.015, 0.16)
+  width_range_m: tuple[float, float] = (0.015, 0.20)
   """Longest horizontal extent a component may have.  The task's objects are
   25-45 mm across the jaws but up to 90 mm tall, and a toppled one presents its
-  height as its footprint -- which is what set this: a 90 mm object lying down,
-  grown by the smoothing, measured 114 mm and was thrown away by a 100 mm
+  height as its footprint -- which is what first set this: a 90 mm object lying
+  down, grown by the smoothing, measured 114 mm and was thrown away by a 100 mm
   ceiling.  This is a weak filter and it is meant to be; ``max_elongation`` is
-  the one that does the work."""
+  the one that does the work.
+
+  160 mm was still too tight, and it was the single cause of the deployment's
+  lost target.  Measured 2026-09-01 over five recorded policy runs: on the
+  three that failed, EVERY frame that lost the object lost it here, and the
+  rejected component's extent was 164.0, 164.3 and 164.1 mm -- 4 mm over.  The
+  object's own pixels were all present, all with valid depth, and none of them
+  were removed by ``arm_mask``; the component simply merges with what is left
+  of the gripper as the hand arrives, and the merged blob is a few millimetres
+  too wide.  Raising the ceiling to 180 mm recovers 23% -> 95%, 40% -> 100%
+  and 38% -> 99% detection on those three, changes nothing on the two that
+  already worked, and adds no false instance on any of them (the median
+  instance count per frame stays at exactly 1 up to a 240 mm ceiling).
+
+  200 mm rather than the 180 mm that is merely sufficient: the failure mode is
+  a blob that grew, and both the growth and the object are variable.  It stays
+  well inside the range where the recordings show no false positive, and
+  ``max_elongation`` still rejects the arm, which is long and thin."""
 
   max_elongation: float = 5.0
   """Long extent over short.  The objects are blocky -- their aspect ratio is
@@ -177,29 +215,61 @@ def full_mask(seg: "Segmentation", label: int, decimate: int) -> np.ndarray:
 
 
 def workspace_mask(pts: np.ndarray) -> np.ndarray:
-  """Which points are inside the box anything interesting is inside.
+  """Which points are somewhere the task ever puts an object.
 
   Shared by both backends rather than written twice.  The depth backend applies
   it to every point before it looks for components; the YOLO backend applies it
   to a detection after the fact, because a network that was trained on this
   table will occasionally fire on something across the room and the cheapest
   way to know is to ask where it is.
+
+  The shape is the **annular sector** training samples objects in, not the box
+  that circumscribes it.  Two things stand above the table inside the box and
+  outside the sector, and both were chosen as targets on the rig: the robot's
+  own base column, inside the 150 mm inner radius, and the camera mount, beyond
+  the 550 mm outer one.  Neither is a segmentation failure -- they are real
+  objects, in places the task never puts one.
+
+  The box is still evaluated first.  It is three comparisons against a
+  quarter of a million points and it rejects the room, which leaves the two
+  square roots and an ``arctan2`` to run on what is left.
   """
   (xlo, xhi), (ylo, yhi), (zlo, zhi) = config.WORKSPACE
-  return ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
+  keep = ((pts[:, 0] > xlo) & (pts[:, 0] < xhi)
           & (pts[:, 1] > ylo) & (pts[:, 1] < yhi)
           & (pts[:, 2] > zlo) & (pts[:, 2] < zhi))
+
+  (rlo, rhi), (alo, ahi), _ = config.WORKSPACE_SECTOR
+  idx = np.flatnonzero(keep)
+  if idx.size == 0:
+    return keep
+  x, y = pts[idx, 0], pts[idx, 1]
+  r2 = x * x + y * y
+  ok = (r2 > rlo * rlo) & (r2 < rhi * rhi)
+  # The sector spans 35.6 to 141.6 degrees after the layout rotation, so it
+  # does not straddle the atan2 branch cut and a plain interval test is right.
+  # Guarded anyway, because the angles come from the task config and a future
+  # layout could move them across it.
+  ang = np.arctan2(y, x)
+  if alo <= ahi:
+    ok &= (ang > alo) & (ang < ahi)
+  else:
+    ok &= (ang > alo) | (ang < ahi)
+  keep[idx[~ok]] = False
+  return keep
 
 
 def arm_mask(pts: np.ndarray, arm, clearance_m: float,
              within: np.ndarray | None = None) -> np.ndarray:
   """Which points are the robot, from the sphere cover of its own geometry.
 
-  Bounding box first.  Twenty-four sphere tests over a quarter of a million
-  points is 116 ms -- six control periods -- and the arm occupies a few percent
-  of the frame, so almost all of that work is spent proving that the table is
-  not the robot.  Three comparisons reject it instead, and the spheres then run
-  on what is left.
+  Bounding boxes first, and there are two of them.  Twenty-four sphere tests
+  over a quarter of a million points is 116 ms -- six control periods -- and
+  the arm occupies a few percent of the frame, so almost all of that work is
+  spent proving that the table is not the robot.  One box around the whole arm
+  rejects most of the frame in a single pass; each sphere's own box then
+  rejects the rest of what it is not, and only what survives both reaches a
+  squared distance.
   """
   out = np.zeros(pts.shape[0], dtype=bool)
   if arm is None:
@@ -208,20 +278,60 @@ def arm_mask(pts: np.ndarray, arm, clearance_m: float,
   radii = np.asarray(arm[1], dtype=pts.dtype) + clearance_m
   if centres.size == 0:
     return out
+  # Restrict once to the workspace, then use each sphere's own AABB.  A single
+  # AABB around the complete arm spans from the base to the hand and contains
+  # most of the table; testing every point in that box against every sphere
+  # measured 125 ms on the D455.  Each individual sphere covers only a small
+  # patch, so cheap axis comparisons discard almost everything before a
+  # squared-distance calculation is allocated.
+  idx = (np.arange(pts.shape[0]) if within is None
+         else np.flatnonzero(within))
+  if idx.size == 0:
+    return out
+
+  # One box around every sphere, before any individual one.  The per-sphere
+  # AABBs below are cheap per point but they each run over every point that is
+  # still pending, so their cost is spheres x points however small each box is
+  # -- 24 x 129k on the D455, and 48.9 ms of a 20 ms budget, against 1.8 ms for
+  # the unprojection that produced the points.  The union bound is one pass and
+  # discards 84% of the workspace, because the arm is a thin thing in a wide
+  # frame.
+  #
+  # Exact, not an approximation: a point inside sphere i satisfies
+  # ``p > centre_i - radius_i >= lo`` and ``p < centre_i + radius_i <= hi``, so
+  # nothing that the per-sphere tests would have dropped is discarded here.
   lo = (centres - radii[:, None]).min(axis=0)
   hi = (centres + radii[:, None]).max(axis=0)
-  near = ((pts > lo) & (pts < hi)).all(axis=1)
-  if within is not None:
-    near &= within
+  near = (within.copy() if within is not None
+          else np.ones(pts.shape[0], dtype=bool))
+  for k in range(3):
+    col = pts[:, k]
+    near &= col > lo[k]
+    near &= col < hi[k]
   idx = np.flatnonzero(near)
   if idx.size == 0:
     return out
+
   sub = pts[idx]
   drop = np.zeros(idx.size, dtype=bool)
-  # One geom at a time.  The broadcast form is two lines shorter and allocates
-  # an (N, G, 3), which is 300 MB at full frame.
   for centre, radius in zip(centres, radii):
-    drop |= ((sub - centre) ** 2).sum(axis=1) < radius * radius
+    # One axis at a time, carrying indices rather than masks.  The obvious
+    # ``(sub > centre - radius) & (sub < centre + radius)).all(axis=1)`` builds
+    # three (n, 3) boolean temporaries per sphere and reads every pending point
+    # three times whatever the first axis already ruled out; narrowing shrinks
+    # the array before the next comparison sees it.
+    cand = np.flatnonzero(~drop)
+    if cand.size == 0:
+      break
+    for k in range(3):
+      col = sub[cand, k]
+      cand = cand[(col > centre[k] - radius) & (col < centre[k] + radius)]
+      if cand.size == 0:
+        break
+    if cand.size == 0:
+      continue
+    delta = sub[cand] - centre
+    drop[cand] = np.einsum("ij,ij->i", delta, delta) < radius * radius
   out[idx[drop]] = True
   return out
 
@@ -441,7 +551,7 @@ class DepthSegmenter:
       z = float(np.median(rng_keep[starts[i]:ends[i]]))
       floor_z = max(c.min_top_z_floor_m,
                     c.min_top_z_sigmas * self.noise_per_m * z * z)
-      if not (floor_z <= top <= c.max_height_m):
+      if not (floor_z <= top <= c.max_top_z_m):
         self.rejected.append(("height", top))
         continue
       lo, hi = np.percentile(p[:, :2], [2, 98], axis=0)
@@ -797,7 +907,7 @@ class YoloSegmenter:
     top = float(np.percentile(height, 97))
     z = float(np.median(rng))
     floor_z = max(c.min_top_z_floor_m, c.min_top_z_sigmas * self.noise_per_m * z * z)
-    if not (floor_z <= top <= c.max_height_m):
+    if not (floor_z <= top <= c.max_top_z_m):
       return centroid, top, ("height", top)
     lo, hi = np.percentile(p[:, :2], [2, 98], axis=0)
     span = np.sort(hi - lo)

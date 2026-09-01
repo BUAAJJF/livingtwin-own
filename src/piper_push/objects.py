@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import mujoco
 
+from piper_push import layout
+
 # ---------------------------------------------------------------------------
 # Graspable object
 # ---------------------------------------------------------------------------
@@ -148,12 +150,16 @@ def get_object_spec(
 # Bin
 # ---------------------------------------------------------------------------
 
-# S0 checked five placements by IK; this one clears every one of them with the
-# most margin.  Radius 0.372 m and azimuth -36 deg put it inside the reachable
-# band at every height the release needs, and outside the object spawn sector.
-BIN_CENTER = (0.30, -0.22)
-BIN_INNER = (0.080, 0.070)
-"""Inner half-extents: a 160 x 140 mm opening, room for several objects."""
+# S0 checked five placements by IK; the unrotated point (0.30, -0.22) clears
+# every one of them with the most margin.  The installed rig's whole task
+# layout is +90 degrees about the base, including the bin footprint.
+BIN_CENTER = layout.rotate_xy((0.30, -0.22))
+BIN_INNER = layout.rotate_half_extents((0.080, 0.070))
+"""Rotated base-frame half-extents: a 140 x 160 mm axis-aligned footprint.
+
+It is the same physical 160 x 140 mm opening as before, turned with the rest
+of the task, and has room for several objects.
+"""
 BIN_WALL_HEIGHT = 0.060
 """Rim height.  Release happens 55 mm above it, at z = 115 mm, which S0 solved
 to 1.5 mm and 0.3 deg.  A taller rim eats into the straight-down envelope,

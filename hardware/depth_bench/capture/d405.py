@@ -50,18 +50,20 @@ def add_args(ap) -> None:
   ap.add_argument("--serial", default=None)
 
 
-def available() -> list[dict]:
-  """Every RealSense on the bus, so the live viewer can find them itself."""
+def available(model_filter: str = "D405") -> list[dict]:
+  """Matching RealSense cameras on the bus."""
   out = []
   for dev in rs.context().query_devices():
     try:
-      out.append({
+      item = {
         "backend": NAME,
         "serial": dev.get_info(rs.camera_info.serial_number),
         "model": dev.get_info(rs.camera_info.name),
         "firmware": dev.get_info(rs.camera_info.firmware_version),
         "usb": dev.get_info(rs.camera_info.usb_type_descriptor),
-      })
+      }
+      if model_filter.lower() in item["model"].lower():
+        out.append(item)
     except Exception:
       continue
   return out
@@ -114,10 +116,25 @@ class Stream:
   ends up flattering a sensor that the measurement then contradicts.
   """
 
-  def __init__(self, args, serial: str | None = None):
+  def __init__(self, args, serial: str | None = None, *,
+               backend_name: str = NAME, expected_model: str = "D405",
+               emitter_description: str = "none (D405 is passive stereo)"):
     serial = serial or getattr(args, "serial", None)
-    if not rs.context().query_devices().size():
+    devices = rs.context().query_devices()
+    if not devices.size():
       raise RuntimeError("no RealSense device found; check the USB 3 cable")
+
+    if serial is None:
+      matches = [dev.get_info(rs.camera_info.serial_number) for dev in devices
+                 if expected_model.lower() in
+                 dev.get_info(rs.camera_info.name).lower()]
+      if len(matches) == 1:
+        serial = matches[0]
+      elif not matches:
+        raise RuntimeError(f"no RealSense {expected_model} found")
+      else:
+        raise RuntimeError(
+          f"multiple RealSense {expected_model} cameras found; pass --serial")
 
     cfg = rs.config()
     if serial:
@@ -149,13 +166,29 @@ class Stream:
     # distortion, where the colour stream carries -0.052 of radial.
     self.infrared = (self.gray_source == "left_ir"
                      or bool(getattr(args, "infrared", False)))
+    # The RIGHT imager as well, for anything that wants to compute its own
+    # disparity instead of reading the ASIC's.  It is off by default: it is a
+    # third USB stream this camera does not need, and the bench measured this
+    # unit wedging permanently when its controller is oversubscribed.
+    self.stereo = bool(getattr(args, "stereo", False))
+    if self.stereo:
+      self.infrared = True
     if self.infrared:
       cfg.enable_stream(rs.stream.infrared, 1, args.width, args.height,
+                        rs.format.y8, args.fps)
+    if self.stereo:
+      cfg.enable_stream(rs.stream.infrared, 2, args.width, args.height,
                         rs.format.y8, args.fps)
 
     self._pipe = rs.pipeline()
     profile = self._pipe.start(cfg)
     dev = profile.get_device()
+    model = dev.get_info(rs.camera_info.name)
+    if expected_model.lower() not in model.lower():
+      self._pipe.stop()
+      raise RuntimeError(
+        f"{backend_name} backend selected {model!r}; pass that camera's serial "
+        f"or connect a RealSense {expected_model}")
     sensor = dev.first_depth_sensor()
     self._depth_sensor = sensor
     if sensor.supports(rs.option.visual_preset):
@@ -163,6 +196,13 @@ class Stream:
     if sensor.supports(rs.option.depth_units):
       sensor.set_option(rs.option.depth_units, args.depth_units)
     self._scale = sensor.get_depth_scale()
+    emitter = getattr(args, "emitter", None)
+    if emitter is not None and sensor.supports(rs.option.emitter_enabled):
+      sensor.set_option(rs.option.emitter_enabled,
+                        1.0 if emitter == "on" else 0.0)
+    laser_power = getattr(args, "laser_power", None)
+    if laser_power is not None and sensor.supports(rs.option.laser_power):
+      sensor.set_option(rs.option.laser_power, float(laser_power))
 
     # Colour is resampled into the depth grid, never the other way round: the
     # depth samples are the measurement and must not be interpolated.
@@ -179,8 +219,8 @@ class Stream:
 
     di = dev.get_info
     self.meta = {
-      "backend": NAME,
-      "model": di(rs.camera_info.name),
+      "backend": backend_name,
+      "model": model,
       "serial": di(rs.camera_info.serial_number),
       "firmware": di(rs.camera_info.firmware_version),
       "usb": di(rs.camera_info.usb_type_descriptor),
@@ -191,24 +231,48 @@ class Stream:
       "preset": args.preset,
       "depth_units_m": self._scale,
       "filters": bool(getattr(args, "filters", False)),
-      "emitter": "none (D405 is passive stereo)",
+      "emitter": (
+        "on" if (sensor.supports(rs.option.emitter_enabled)
+                 and sensor.get_option(rs.option.emitter_enabled) > 0.5)
+        else "off" if sensor.supports(rs.option.emitter_enabled)
+        else emitter_description
+      ),
+      "laser_power": (sensor.get_option(rs.option.laser_power)
+                      if sensor.supports(rs.option.laser_power) else None),
       "stereo_baseline_m": (sensor.get_option(rs.option.stereo_baseline) / 1000.0
                             if sensor.supports(rs.option.stereo_baseline) else None),
       "fx_px": float(intr.fx),
+      # What turns disparity into metres.  Read from the device rather than the
+      # rig file: the rig's intrinsics describe the depth grid, and a learned
+      # stereo model is producing disparity in the LEFT IMAGER, which is the
+      # same frame but need not stay so if the streams are ever reconfigured.
+      "stereo_focal_baseline": (
+        float(intr.fx) * float(sensor.get_option(rs.option.stereo_baseline)) / 1000.0
+        if sensor.supports(rs.option.stereo_baseline) else None),
     }
 
   def read(self) -> tuple[np.ndarray, np.ndarray]:
     """One aligned pair: depth in metres (0 = invalid) and greyscale."""
     return self.read3()[:2]
 
+  def read4(self):
+    """``read3`` plus the raw right infrared frame, or None if not enabled."""
+    d, g, ir = self.read3()
+    return d, g, ir, self._right
+
   def read3(self) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """The aligned pair, plus the raw left infrared frame if it was enabled."""
     raw = self._pipe.wait_for_frames()
     ir = None
+    self._right = None
     if self.infrared:
       f = raw.get_infrared_frame(1)
       if f:
         ir = np.asanyarray(f.get_data()).copy()
+    if self.stereo:
+      f = raw.get_infrared_frame(2)
+      if f:
+        self._right = np.asanyarray(f.get_data()).copy()
     if self.gray_source == "left_ir":
       # The depth frame is defined in this left imager's optical frame.  No
       # colour-to-depth warp, no black alignment holes at marker edges, and no
@@ -256,7 +320,7 @@ class Stream:
       except RuntimeError:
         continue
     raise RuntimeError(
-      f"D405 does not report a {width}x{height} depth profile")
+      f"{self.meta['model']} does not report a {width}x{height} depth profile")
 
   def close(self) -> None:
     try:

@@ -106,6 +106,21 @@
       requires the full 30° spread. Change <b>orientation</b>, not just
       position.</p>
     </div>
+    <div class="card" style="margin-top:16px">
+      <h2>Table calibration · loose checkerboard</h2>
+      <div id="tablelive"></div>
+      <button id="tabrec" class="big go" disabled>record this table position</button>
+      <div class="why" id="tabwhy"></div>
+      <ul class="poses" id="tablelist" style="margin-top:8px"></ul>
+      <button id="tabsave" style="margin-top:12px" disabled>fit and write table to rig.json</button>
+      <button id="tabreset" style="margin-top:12px" disabled>reset table samples</button>
+      <div id="tabresult"></div>
+      <p class="hint">Use the loose <b>11×8 inner-corner, 25 mm</b>
+      checkerboard. Keep it completely flat, wait for the magenta overlay to
+      become stable, record, then move it at least 50 mm. Collect 6 positions
+      spread across the working area. These samples are separate from the
+      gripper hand-eye poses and never command the arm.</p>
+    </div>
   </div>
 
   <div>
@@ -230,6 +245,52 @@ function render(s) {
        : !L.still ? L.still_detail
        : !L.arm_novel ? L.arm_novel_detail : L.novel_detail);
 
+  const TL = s.table_live || {};
+  const canTable = !!(TL.detected && TL.still && TL.novel && !moving);
+  $("tablelive").innerHTML =
+    row(!!TL.detected, false, "11×8 checkerboard",
+      TL.detected
+        ? `${TL.n_corners} corners · ${TL.reproj_px} px · ${TL.range_mm} mm`
+        : "not detected — use the loose 25 mm checkerboard shown in the preview") +
+    row(!!TL.still, !TL.still, "stable multi-frame detection",
+      TL.still_detail || `${TL.fusion_frames || 0}/${TL.fusion_required || 8} frames`) +
+    row(!!TL.novel, !TL.novel, "new table area",
+      TL.novel_detail || "move the board across the tabletop") +
+    row(s.n_table_samples >= s.table_board.min_samples,
+        s.n_table_samples > 0,
+        `table samples ${s.n_table_samples}/${s.table_board.recommended_samples}`,
+        TL.tilt_deg != null
+          ? `current board plane tilt ${TL.tilt_deg.toFixed(2)}° in base frame`
+          : "record at least 3; 6 spread-out positions are recommended");
+  $("tabrec").disabled = !canTable;
+  $("tabwhy").textContent = canTable ? ""
+    : (moving ? "arm is moving"
+       : !TL.detected ? "table checkerboard not detected"
+       : !TL.still ? TL.still_detail : TL.novel_detail);
+  $("tablelist").innerHTML = (s.table_samples || []).map(p =>
+    `<li><span class="n">${p.i}</span><span class="r">${p.reproj_px} px` +
+    (p.fusion_frames ? ` · ${p.fusion_frames} frames` : "") +
+    (p.corner_spread_px != null ? ` · spread ${p.corner_spread_px} px` : "") +
+    ` · center ${p.center_cam_mm.map(x => x.toFixed(0)).join(", ")} mm` +
+    `</span><button onclick="dropTable(${p.i})">drop</button></li>`).join("")
+    || `<li style="color:var(--dim)">none yet</li>`;
+  $("tabsave").disabled = !(sol && sol.ok &&
+    s.n_table_samples >= s.table_board.min_samples);
+  $("tabreset").disabled = s.n_table_samples === 0;
+  let tableHtml = "";
+  if (s.table && s.table.table_z != null) {
+    tableHtml = `<div style="margin-top:12px">` +
+      `<div class="kv"><span>table z at base origin</span><b>${(s.table.table_z * 1000).toFixed(2)} mm</b></div>` +
+      `<div class="kv"><span>tilt</span><b>${s.table.tilt_deg.toFixed(3)}°</b></div>` +
+      `<div class="kv"><span>cross-placement spread</span><b>${s.table.flatness_mm.toFixed(3)} mm</b></div>` +
+      (s.table.coverage_x_mm != null
+        ? `<div class="kv"><span>sample coverage</span><b>${s.table.coverage_x_mm.toFixed(0)} × ${s.table.coverage_y_mm.toFixed(0)} mm</b></div>`
+        : "") + `</div>`;
+  } else if (s.table && s.table.error) {
+    tableHtml = `<p class="why">${s.table.error}</p>`;
+  }
+  $("tabresult").innerHTML = tableHtml;
+
   const g = s.guidance, t = s.next_target, m = s.motion || {status:"idle"};
   let targetHtml = "";
   if (!g) {
@@ -273,8 +334,9 @@ function render(s) {
        (!g ? "rough extrinsic not ready" : "no ready target"));
 
   const worst = sol && sol.ok ? sol.worst_pose : -1;
+  const outliers = new Set(sol && sol.ok ? (sol.outlier_poses || []) : []);
   $("list").innerHTML = (s.poses || []).map(p =>
-    `<li class="${p.i === worst ? 'worst' : ''}"><span class="n">${p.i}</span>` +
+    `<li class="${p.i === worst || outliers.has(p.i) ? 'worst' : ''}"><span class="n">${p.i}</span>` +
     `<span class="r">${p.n_corners} corners · ${p.reproj_px} px` +
     (p.fusion_frames ? ` · ${p.fusion_frames} frames` : "") +
     (p.corner_spread_px != null ? ` · spread ${p.corner_spread_px} px` : "") +
@@ -294,6 +356,10 @@ function render(s) {
     html = `<div style="margin-top:12px">` +
       `<div class="kv"><span>residual</span><b style="color:${good ? 'var(--ok)' : 'var(--bad)'}">` +
       `${sol.residual_mm} mm rms</b></div>` +
+      (sol.n_inliers != null
+        ? `<div class="kv"><span>pose consensus</span><b>${sol.n_inliers}/${s.n_poses} inliers` +
+          ((sol.outlier_poses || []).length ? ` · excluded #${sol.outlier_poses.join(", #")}` : "") + `</b></div>`
+        : "") +
       `<div class="kv"><span>worst pose</span><b>#${sol.worst_pose} · ${sol.worst_mm} mm</b></div>` +
       `<div class="kv"><span>rotation spread</span><b>${sol.rot_span_deg}°</b></div>` +
       (sol.joint_refined
@@ -331,9 +397,25 @@ async function tick() {
   try { render(await (await fetch("/state")).json()); } catch (e) {}
 }
 async function drop(i) { await post("/drop", {i}); tick(); }
+async function dropTable(i) { await post("/drop-table", {i}); tick(); }
 $("rec").onclick = async () => {
   const r = await post("/record");
   if (!r.ok) $("why").textContent = r.why;
+  tick();
+};
+$("tabrec").onclick = async () => {
+  const r = await post("/record-table");
+  if (!r.ok) $("tabwhy").textContent = r.why;
+  tick();
+};
+$("tabsave").onclick = async () => {
+  const r = await post("/save-table");
+  if (!r.ok) $("tabwhy").textContent = r.why;
+  tick();
+};
+$("tabreset").onclick = async () => {
+  if (!confirm("Delete all loose-checkerboard table samples? Hand-eye poses are not affected.")) return;
+  await post("/reset-table");
   tick();
 };
 $("solve").onclick = async () => { await post("/solve"); tick(); };

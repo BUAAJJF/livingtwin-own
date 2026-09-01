@@ -223,7 +223,9 @@ class PerturbedCameraScene:
                noise_cfg=None, mask_jitter_px: int = 0,
                depth_scale: float = 1.0, depth_bias_m: float = 0.0,
                depth_dropout_blob: float = 0.0,
-               obs_latency_steps: int = 0) -> torch.Tensor:
+               obs_latency_steps: int = 0,
+               scenery_dr: bool = False,
+               mask_dropout=None) -> torch.Tensor:
     del depth_scale, depth_bias_m, depth_dropout_blob, obs_latency_steps
 
     sensor = env.scene[sensor_name]
@@ -244,7 +246,8 @@ class PerturbedCameraScene:
 
     try:
       obs = self._inner(env, sensor_name, command_name, cutoff_distance,
-                        min_depth, noise_cfg, mask_jitter_px)
+                        min_depth, noise_cfg, mask_jitter_px,
+                        scenery_dr=scenery_dr, mask_dropout=mask_dropout)
     finally:
       if restore is not None:
         sensor.data.depth = restore

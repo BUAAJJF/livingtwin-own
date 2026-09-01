@@ -118,6 +118,13 @@ $M -m hardware.deploy.jointcheck --joint 2      # ... and so on
 $M -m hardware.deploy.run --policy /tmp/vision_policy --seconds 30
 ```
 
+The policy command intentionally omits `--min-table-clearance`. Light
+fingertip/table contact is allowed: the real setup has no table-force signal,
+so a binary simulator contact is neither a training termination nor a hardware
+deployment condition. Joint-speed, malformed-action, stale-observation and
+communication guards remain active. `--min-table-clearance` is still available
+as an explicitly requested conservative calibrated-geometry stop.
+
 Read the two summary lines every run prints. The first is the control loop and
 it must show **0 overruns**; the second is the perception thread and its rate
 is the observation's age. If either looks wrong, nothing downstream is worth
@@ -257,6 +264,12 @@ white-marker decoding.  Do not use the normal JSON with the white print: board
 polarity is stored as part of pose-file identity specifically to prevent that
 mix-up.
 
+The ready-to-print variant is
+[`calib_compact_white_v2_cut.pdf`](../depth_bench/targets/calib_compact_white_v2_cut.pdf):
+an A4 page with a 0.20 mm crop rectangle around the exact 180x152 mm finished
+target.  Print the A4 page at 100% and cut through the centre of that line; the
+6 mm white quiet border remains inside the cut on every side.
+
 **Motion-capture spheres**, measured the same way — the same arm poses, the
 same 0.2 px of feature noise, only the target geometry changed:
 
@@ -375,6 +388,19 @@ session has enough bootstrap poses, its rough solve supersedes that old result.
 Automatic motion checks the model and the camera view, not the physical room:
 the operator must still keep the real swept volume clear and confirm every
 move from the page.
+
+The page also has a separate **Table calibration · loose checkerboard** card.
+It is configured for the rig's 11x8-inner-corner checkerboard with 25 mm
+squares.  Lay that loose board completely flat, wait for the magenta overlay
+and eight-frame stillness gate, record it, then move it at least 50 mm to a new
+part of the table.  Three placements are the minimum and six spread across the
+working area are recommended.  These observations never enter the hand-eye
+pose file and never command the arm: their known metric corner planes are
+transformed through the solved extrinsic and jointly fitted.  **fit and write
+table to rig.json** reports table height at the robot-base origin, tilt,
+cross-placement spread and x/y coverage.  A thick backing measures its top
+surface, so subtract that thickness or use the printed sheet directly if the
+physical tabletop height is required.
 
 Exiting the GUI **holds the measured joint position and disconnects CAN; it
 does not disable the drives**.  On the real PiPER, `DisableArm(7)` removes
@@ -548,6 +574,68 @@ that would then fight ultralytics.
   range for camera-and-inference delay, so it is a delay the policy has been
   evaluated against, but nobody has measured this particular distribution.
 * `--mask yolo` has been run end to end only on synthetic data.
+* **`--mask fused` still misses the frame period, and the network is not why.**
+  The campaign notes record the D455 segmentation model at 4.5 ms p50 under
+  CUDA PyTorch and recommend fused depth + YOLO on the robot. Measured as a
+  *stage*, through this loop, on a replayed D455 session, fused cost 127.8 ms
+  a frame and took the control loop from zero overruns to 23.
+
+  Almost all of it was `arm_mask`, at 47 ms of a 20 ms budget -- see below.
+  With that fixed:
+
+  | `--mask` | perception | control loop |
+  |---|---|---|
+  | `depth`, `--device cpu` | 20.1 ms, 49.8 Hz | 0 overruns |
+  | `depth`, `--device cuda` | **19.6 ms, 51.1 Hz** | **0 overruns** |
+  | `fused`, both on cuda | 55.9 ms, 17.9 Hz | 52 overruns |
+
+  So `depth` is the default and it is comfortably ahead of the camera. Fused is
+  still 3x the frame period, and the forward pass is 8.1 ms of it. Where the
+  rest goes, per frame, measured:
+
+  | | |
+  |---|---|
+  | the network | 8.1 ms |
+  | `fit_table_plane` | 4.3 ms |
+  | `arm_mask` | 2.1 ms |
+  | unprojection, workspace, bin, the index scatter | 2.2 ms |
+  | placing each detection against the depth | ~6 ms |
+
+  And `FusedSegmenter` runs **all of that twice** -- `DepthSegmenter` at
+  decimate 2 and `YoloSegmenter` at decimate 1 each unproject the frame, fit
+  the plane, and subtract the arm and the bin for themselves. Sharing one
+  geometry pass between them is worth about 7.5 ms and is the obvious next
+  thing; until it is done, deploy with `depth`.
+
+* **`arm_mask` was 47 ms a frame, and it is the reason none of the above
+  fitted.** It subtracts the robot from the point cloud using the sphere cover
+  of its own geometry, and it already had a per-sphere bounding box in front of
+  the squared-distance test. But a per-sphere box is still spheres x points:
+  24 boxes over the 129k workspace points, each allocating three `(n, 3)`
+  boolean temporaries, single-threaded because the loop pins the thread pools.
+  The distance test was never the cost; proving that the table is not the robot
+  was.
+
+  Two changes, both exact -- the output is bit-identical over 30 frames at
+  randomised arm poses:
+
+  * one box around **every** sphere first, in a single column-wise pass. A
+    point inside sphere *i* satisfies `p > centre_i - radius_i >= lo`, so
+    nothing that the per-sphere tests would have dropped is discarded. It
+    removes 84% of the workspace.
+  * the per-sphere test narrows one axis at a time, carrying indices instead of
+    masks, so the second and third comparisons never see what the first ruled
+    out.
+
+  **47.0 ms to 2.43 ms, 19.3x.** `DepthSegmenter` went 19.4 to 8.4 ms,
+  `YoloSegmenter` 65.5 to 22.9, and the depth path from 31.9 ms a frame to
+  20.1. Re-measure with `--replay` after any change to it; the standalone
+  segmenter benchmarks are about 2x optimistic against the threaded loop.
+
+* **`--camera` did not choose the YOLO weights.** `--camera d455` with the
+  default weights loaded `yolo/best.pt`, the D405 model, and nothing said so —
+  the rig file has a serial cross-check and this had nothing. The weights now
+  follow the camera and a model belonging to the other one is refused.
 * **The depth segmenter has a size limit.** Over 24 fresh scenes under the
   measured sensor it found the object in 22, with a median IoU of 0.59; the
   two it missed were 8 and 78 pixels of the policy's image and the smallest it

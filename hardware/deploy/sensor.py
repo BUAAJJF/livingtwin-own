@@ -35,8 +35,8 @@ from . import config
 _BENCH = pathlib.Path(__file__).resolve().parents[1] / "depth_bench"
 
 
-def _bench_backend():
-  """The bench's own D405 backend, imported from where it lives.
+def _bench_backend(name: str = "d455"):
+  """The bench's own RealSense backend, imported from where it lives.
 
   Imported rather than reimplemented: two files configuring the same camera
   differently is how a deployment ends up running a sensor the measurements do
@@ -44,8 +44,8 @@ def _bench_backend():
   """
   if str(_BENCH) not in sys.path:
     sys.path.insert(0, str(_BENCH))
-  from capture import d405           # noqa: E402  -- path set above
-  return d405
+  from capture import open_backend   # noqa: E402  -- path set above
+  return open_backend(name)
 
 
 @dataclasses.dataclass
@@ -58,6 +58,21 @@ class Frame:
   depth-aligned colour stream."""
   stamp: float
   index: int
+  policy_depth: np.ndarray | None = None
+  """The depth the POLICY was given, when that is not ``depth``.
+
+  Set by the perception thread when ``--depth-source stereo`` replaces the
+  camera's own map with a computed one.  The recorder writes this in
+  preference to ``depth``, because a recording whose depth is not the run's
+  depth cannot be replayed or reviewed as that run."""
+  ir_right: np.ndarray | None = None
+  """``(480, 848)`` uint8 from the RIGHT infrared imager, or None unless the
+  reader was opened with ``stereo=True``.
+
+  Only one thing needs this: computing disparity outside the camera.  The
+  ASIC's own answer already arrives as ``depth``, and on this unit the two
+  agree to 3.7 mm where both are defined, so a second opinion is worth having
+  only where the ASIC has none."""
   ir: np.ndarray | None = None
   """``(480, 848)`` uint8 from the left infrared imager, unwarped, or None
   unless the reader was opened with ``infrared=True``.
@@ -74,13 +89,20 @@ class Reader:
   """Latest-frame-wins reader for the D405."""
 
   def __init__(self, serial: str | None = None, infrared: bool = False,
-               **overrides):
-    overrides.setdefault("infrared", infrared)
-    self._d405 = _bench_backend()
+               backend: str = "d455", stereo: bool = False, **overrides):
+    overrides.setdefault("infrared", infrared or stereo)
+    overrides.setdefault("stereo", stereo)
+    self.backend = str(backend)
+    if self.backend not in ("d405", "d455"):
+      raise ValueError(f"unsupported deployment camera backend {self.backend!r}")
+    if self.backend == "d455":
+      overrides.setdefault("emitter", "on")
+    self._camera = _bench_backend(self.backend)
     self._infrared = bool(overrides.get("infrared", False))
+    self._stereo = bool(overrides.get("stereo", False))
     self._gray_source = str(overrides.get("gray_source", "aligned_color"))
     args = _Args(serial=serial, **overrides)
-    self._stream = self._d405.Stream(args)
+    self._stream = self._camera.Stream(args)
     self.K = self._stream.K
     self.dist = self._stream.dist
     self.meta = self._stream.meta
@@ -91,14 +113,18 @@ class Reader:
     self._stop = threading.Event()
     self._errors = 0
     self._thread = threading.Thread(target=self._run, daemon=True,
-                                    name="d405-reader")
+                                    name=f"{self.backend}-reader")
     self._thread.start()
 
   def _run(self) -> None:
     index = 0
     while not self._stop.is_set():
       try:
-        depth, gray, ir = self._stream.read3()
+        if self._stereo:
+          depth, gray, ir, ir_right = self._stream.read4()
+        else:
+          depth, gray, ir = self._stream.read3()
+          ir_right = None
         self._errors = 0
       except Exception:
         self._errors += 1
@@ -109,10 +135,10 @@ class Reader:
           # someone to find the cable mid-run.
           try:
             self._stream.close()
-            self._d405.reset(self.serial)
-            self._stream = self._d405.Stream(
+            self._camera.reset(self.serial)
+            self._stream = self._camera.Stream(
               _Args(serial=self.serial, infrared=self._infrared,
-                    gray_source=self._gray_source,
+                    stereo=self._stereo, gray_source=self._gray_source,
                     width=int(self.meta["resolution"][0]),
                     height=int(self.meta["resolution"][1])))
             self._errors = 0
@@ -122,6 +148,7 @@ class Reader:
       index += 1
       with self._lock:
         self._frame = Frame(depth=depth, gray=gray, ir=ir,
+                            ir_right=ir_right,
                             stamp=time.time(), index=index)
 
   def latest(self) -> Frame | None:
@@ -161,7 +188,8 @@ class Reader:
           return f
       time.sleep(0.02)
     raise RuntimeError(
-      f"no frame from the D405 within {timeout} s.  Check `rs-enumerate-devices` "
+      f"no frame from the {self.meta.get('model', self.backend)} within "
+      f"{timeout} s. Check `rs-enumerate-devices` "
       "and that it is on a USB 3 port -- the bench found this camera stops "
       "delivering entirely when it shares a controller with another sensor."
     )
@@ -186,6 +214,9 @@ class _Args:
   depth_units: float = 1e-4
   infrared: bool = False
   """Also stream the raw left infrared imager; see ``Frame.ir``."""
+  stereo: bool = False
+  """Also stream the RIGHT imager, so a learned stereo model can compute its
+  own disparity.  Implies ``infrared``; see ``Frame.ir_right``."""
   gray_source: str = "aligned_color"
   """``left_ir`` is the direct unwarped D405 grayscale used for calibration."""
   filters: bool = False
@@ -193,3 +224,5 @@ class _Args:
   and temporal filters on here would make the robot's depth quieter than the
   simulator's, in a way whose shape no one has measured."""
   serial: str | None = None
+  emitter: str | None = None
+  laser_power: float | None = None

@@ -97,6 +97,7 @@ _CNN_MODEL = "piper_push.models:SpatialSoftmaxRecurrentModel"
 def pick_place_vision_ppo_runner_cfg(
   experiment_name: str = "piperx_pick_place_vision",
   max_iterations: int = 6000,
+  wrist: bool = False,
 ) -> RslRlOnPolicyRunnerCfg:
   """The same task through the camera.
 
@@ -127,7 +128,11 @@ def pick_place_vision_ppo_runner_cfg(
     },
   )
   cfg.obs_groups = {
-    "actor": ("proprio", "camera"),
+    # One entry per camera, and the model builds one convolutional encoder per
+    # 2D group.  Separate encoders rather than extra channels on one image:
+    # the two views share no intrinsics, no range and no noise model, and a
+    # filter bank that had to serve both would be worse at each.
+    "actor": ("proprio", "camera") + (("wrist",) if wrist else ()),
     # ``full_proprio``, not ``proprio``: the critic never runs on the robot, so
     # handing it the deployment-constrained proprioception costs information
     # for nothing.  It also makes this critic dimensionally and semantically
@@ -142,6 +147,7 @@ def pick_place_vision_ppo_runner_cfg(
 def pick_place_distill_runner_cfg(
   experiment_name: str = "piperx_pick_place_distill",
   max_iterations: int = 3000,
+  wrist: bool = False,
 ) -> RslRlDistillationRunnerCfg:
   """Bootstrap the vision policy off the state policy.
 
@@ -157,7 +163,7 @@ def pick_place_distill_runner_cfg(
   one and this has to change with it.
   """
   ppo = pick_place_ppo_runner_cfg()
-  vision = pick_place_vision_ppo_runner_cfg()
+  vision = pick_place_vision_ppo_runner_cfg(wrist=wrist)
   return RslRlDistillationRunnerCfg(
     student=vision.actor,
     teacher=ppo.actor,
@@ -180,7 +186,7 @@ def pick_place_distill_runner_cfg(
     obs_groups={
       # Byte-identical to the vision PPO actor's tuple, so the student the
       # distillation produces loads into that stage without a rename.
-      "student": ("proprio", "camera"),
+      "student": ("proprio", "camera") + (("wrist",) if wrist else ()),
       "teacher": ("full_proprio", "object"),
     },
   )

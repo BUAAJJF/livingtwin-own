@@ -56,6 +56,106 @@ def apply_plant(
 
 
 @dataclass(kw_only=True)
+class RandomizedPlantHookCfg:
+    """Per-episode timing and servo mismatch for robust training.
+
+    The real deployment loop updates at roughly 24 Hz while the simulation
+    policy runs at 50 Hz.  ``hold_weights`` therefore puts most probability on
+    holding a command for two simulator steps, without pretending that timing
+    is perfectly periodic.  All quantities are sampled independently per
+    environment at reset and stay fixed for that episode.
+    """
+
+    latency_weights: tuple[float, ...] = (0.15, 0.55, 0.30)
+    hold_weights: tuple[float, ...] = (0.15, 0.70, 0.15)
+    response_range: tuple[float, float] = (0.70, 1.0)
+    deadband_range: tuple[float, float] = (0.0, 0.004)
+
+    def build(self, action_term) -> "RandomizedPlantHook":
+        return RandomizedPlantHook(self, action_term)
+
+
+class RandomizedPlantHook:
+    """Batched implementation of :class:`RandomizedPlantHookCfg`."""
+
+    def __init__(self, cfg: RandomizedPlantHookCfg, action_term) -> None:
+        self.cfg = cfg
+        self._action_term = action_term
+        self.device = action_term.device
+        self._shape = action_term._default.shape
+        self._latency_probs = self._validate_weights(
+            cfg.latency_weights, "latency_weights")
+        self._hold_probs = self._validate_weights(cfg.hold_weights, "hold_weights")
+        self._max_latency = len(cfg.latency_weights) - 1
+        self._history = torch.empty(
+            self._max_latency + 1, *self._shape, device=self.device)
+        self._cursor = 0
+        n = self._shape[0]
+        self.latency = torch.zeros(n, dtype=torch.long, device=self.device)
+        self.hold_steps = torch.ones(n, dtype=torch.long, device=self.device)
+        self._countdown = torch.zeros(n, dtype=torch.long, device=self.device)
+        self.response = torch.ones(n, 1, device=self.device)
+        self.deadband = torch.zeros(n, 1, device=self.device)
+        self._held = action_term._default.clone()
+        self._previous = action_term._default.clone()
+        self.reset(None)
+
+    @staticmethod
+    def _validate_weights(values: tuple[float, ...], name: str) -> torch.Tensor:
+        if not values or any(float(x) < 0.0 for x in values) or sum(values) <= 0.0:
+            raise ValueError(f"{name} must be non-negative and have positive mass")
+        return torch.tensor(values, dtype=torch.float32) / float(sum(values))
+
+    def _sample_category(self, probs: torch.Tensor, n: int) -> torch.Tensor:
+        # Sampling on CPU avoids a device-specific generator and happens only
+        # on reset, not in the 50 Hz path.
+        return torch.multinomial(probs, n, replacement=True).to(self.device)
+
+    def reset(self, env_ids=None) -> None:
+        if env_ids is None:
+            ids = torch.arange(self._shape[0], device=self.device)
+        elif isinstance(env_ids, slice):
+            ids = torch.arange(self._shape[0], device=self.device)[env_ids]
+        else:
+            ids = env_ids.to(self.device, dtype=torch.long)
+        n = int(ids.numel())
+        if n == 0:
+            return
+        self.latency[ids] = self._sample_category(self._latency_probs, n)
+        self.hold_steps[ids] = 1 + self._sample_category(self._hold_probs, n)
+        self._countdown[ids] = 0
+        lo, hi = self.cfg.response_range
+        self.response[ids] = lo + (hi - lo) * torch.rand(n, 1, device=self.device)
+        lo, hi = self.cfg.deadband_range
+        self.deadband[ids] = lo + (hi - lo) * torch.rand(n, 1, device=self.device)
+        # The action term resets this before calling us.  Flush every lag slot
+        # so a command from the previous episode can never cross the boundary.
+        posture = self._action_term._previous_target[ids]
+        self._previous[ids] = posture
+        self._held[ids] = posture
+        for slot in self._history:
+            slot[ids] = posture
+
+    def __call__(self, target: torch.Tensor, action_term) -> torch.Tensor:
+        fresh = self._countdown <= 0
+        self._held.copy_(torch.where(fresh[:, None], target, self._held))
+        self._countdown.copy_(torch.where(
+            fresh, self.hold_steps - 1, self._countdown - 1))
+
+        self._history[self._cursor].copy_(self._held)
+        rows = (self._cursor - self.latency) % self._history.shape[0]
+        envs = torch.arange(self._shape[0], device=self.device)
+        delayed = self._history[rows, envs]
+        self._cursor = (self._cursor + 1) % self._history.shape[0]
+
+        delta = delayed - self._previous
+        delta = torch.where(delta.abs() < self.deadband, 0.0, delta)
+        effective = self._previous + self.response * delta
+        self._previous.copy_(effective)
+        return effective
+
+
+@dataclass(kw_only=True)
 class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     """Joint position targets with a per-joint slew ceiling.
 
@@ -412,6 +512,13 @@ class RateLimitedJointPositionAction(JointPositionAction):
             :, self._target_ids
         ]
         self._ramp_from[env_ids] = self._previous_target[env_ids]
+        # ``apply_actions`` may legitimately run before the first fresh
+        # command (for example while timestamp-accurate replay holds the
+        # command that preceded a recorded interval).  The base reset clears
+        # ``_processed_actions``; leaving it cleared here would make that
+        # first hold drive towards zero/default even though every piece of
+        # limiter state says to hold the measured reset posture.
+        self._processed_actions[env_ids] = self._previous_target[env_ids]
         # The shaping state goes back to rest with it.  A filter that carried
         # the last episode's commanded velocity across a reset would spend the
         # first steps of the new one unwinding a move that is no longer being

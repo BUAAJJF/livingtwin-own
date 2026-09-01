@@ -150,6 +150,7 @@ class DepthNoiseCfg:
   sigma_static_per_m: float = SIGMA_STATIC_PER_M
   sigma_temporal_per_m: float = SIGMA_TEMPORAL_PER_M
   corr_len_native_px: float = CORR_LEN_NATIVE_PX
+  native_f_px_per_rad: float = NATIVE_F_PX_PER_RAD
   edge_g50_per_rad: float = EDGE_G50_PER_RAD
   edge_exp: float = EDGE_EXP
   texture_penalty: tuple[float, float] = TEXTURE_PENALTY
@@ -159,6 +160,16 @@ class DepthNoiseCfg:
   bias_scale_jitter: float = BIAS_SCALE_JITTER
   bias_offset_jitter_m: float = BIAS_OFFSET_JITTER_M
   shadow_mrad: float = SHADOW_MRAD
+  stereo_baseline_m: float = 0.0
+  stereo_focal_px: float = 0.0
+  disparity_subpixel_levels: int = 0
+  """Optional active/passive stereo quantisation.
+
+  RealSense D400 depth is produced in disparity and quantised at a fixed
+  sub-pixel resolution before it becomes metres.  Zero keeps the historical
+  D405 model byte-identical; the fitted D455 config supplies its 95 mm
+  baseline, native focal length and 1/32-pixel disparity grid.
+  """
 
 
 class DepthCorruption:
@@ -192,7 +203,9 @@ class DepthCorruption:
     # is fixed in angle, not in pixels.  On the policy grid a pixel is 2.7x
     # wider, so the same window covers 2.7x fewer of them.
     self.corr_px = max(
-      1.0, self.cfg.corr_len_native_px * self.f_px_per_rad / NATIVE_F_PX_PER_RAD
+      1.0,
+      self.cfg.corr_len_native_px * self.f_px_per_rad
+      / self.cfg.native_f_px_per_rad,
     )
     self._lo_h = max(2, int(round(height / self.corr_px)))
     self._lo_w = max(2, int(round(width / self.corr_px)))
@@ -332,6 +345,19 @@ class DepthCorruption:
     # Range bias last, on the corrupted depth: it is what the camera reports,
     # not a property of the surface.
     out = out * (1.0 + self.bias_scale[:b]) + self.bias_offset[:b]
+
+    # The D400 ASIC estimates disparity, not depth.  Quantising in metres
+    # would make the error constant with range; quantising disparity preserves
+    # the z^2 growth dictated by stereo geometry.  Clamp the denominator only
+    # against numerical zero -- the clean renderer has already imposed the
+    # sensor's near/far range.
+    if (c.disparity_subpixel_levels > 0 and c.stereo_baseline_m > 0.0
+        and c.stereo_focal_px > 0.0):
+      fb = c.stereo_focal_px * c.stereo_baseline_m
+      levels = float(c.disparity_subpixel_levels)
+      disparity = fb / out.clamp_min(1.0e-4)
+      disparity = torch.round(disparity * levels) / levels
+      out = fb / disparity.clamp_min(1.0 / levels)
 
     # Validity is decided from the *clean* depth.  The geometry is what casts
     # the occlusion shadow; letting the noise decide where the edges are would

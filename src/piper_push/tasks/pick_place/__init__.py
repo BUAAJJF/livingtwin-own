@@ -10,6 +10,7 @@ from mjlab.tasks.registry import register_mjlab_task
 # them *and* checks that they still act like the trained policy.
 
 from .env_cfg import make_pick_place_env_cfg
+from .robust_cfg import make_robust_env_cfg
 from piper_push.distill import PickPlaceDistillationRunner
 
 from .rl_cfg import (
@@ -23,6 +24,17 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(),
   play_env_cfg=make_pick_place_env_cfg(play=True),
   rl_cfg=pick_place_ppo_runner_cfg(),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+# Conservative D455 deployment domain.  The ordinary tasks remain the
+# calibrated nominal domain, which gives evaluation a clean A/B axis for the
+# performance cost of robustness.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust",
+  env_cfg=make_robust_env_cfg(),
+  play_env_cfg=make_robust_env_cfg(play=True),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust"),
   runner_cls=MjlabOnPolicyRunner,
 )
 
@@ -61,6 +73,15 @@ register_mjlab_task(
   runner_cls=MjlabOnPolicyRunner,
 )
 
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust",
+  env_cfg=make_robust_env_cfg(vision=True),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust"),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
 
 # The bootstrap.  Same environment as the vision task plus one extra
 # observation group: the proprioception the state teacher was trained on, which
@@ -74,6 +95,124 @@ register_mjlab_task(
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_distill_runner_cfg(),
   runner_cls=PickPlaceDistillationRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-Robust",
+  env_cfg=make_robust_env_cfg(vision=True),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True),
+  rl_cfg=pick_place_distill_runner_cfg(
+    experiment_name="piperx_pick_place_distill_robust"),
+  runner_cls=PickPlaceDistillationRunner,
+)
+
+
+# The same three stages again, split by how much of the measured mask dropout
+# each one gets.  ``robust_cfg._scaled_dropout`` carries the argument for why
+# they differ; the short version is that imitation cannot learn to act blind
+# and reinforcement can, so the blindness is ramped in after the imitation is
+# finished rather than during it.
+#
+#   -Distill-Robust-Clear    scale 0.0   the student learns the skill
+#   -Vision-Robust-Half      scale 0.5   PPO meets half the measured loss
+#   -Vision-Robust           scale 1.0   PPO meets the rig
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-Robust-Clear",
+  env_cfg=make_robust_env_cfg(vision=True, mask_dropout_scale=0.0),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, mask_dropout_scale=0.0),
+  rl_cfg=pick_place_distill_runner_cfg(
+    experiment_name="piperx_pick_place_distill_robust"),
+  runner_cls=PickPlaceDistillationRunner,
+)
+
+# 0.75, added after the fact and for a measured reason.  Fine-tuning at 0.5
+# climbed steadily for its whole 1500 iterations -- 0.41 to 2.50 placements,
+# still rising when it stopped -- and stepping straight from there to 1.0
+# collapsed it: grasp attempts went 3.34 -> 0.13 and placements 2.50 -> 0.12
+# within 400 iterations, the same shape as distilling blind.  The step was too
+# big, not the destination unreachable.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-ThreeQ",
+  env_cfg=make_robust_env_cfg(vision=True, mask_dropout_scale=0.75),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, mask_dropout_scale=0.75),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust"),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-Half",
+  env_cfg=make_robust_env_cfg(vision=True, mask_dropout_scale=0.5),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, mask_dropout_scale=0.5),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust"),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+
+# And the hand camera.  Same three stages, same dropout ramp, one more
+# observation group and one more convolutional encoder.  The state teacher is
+# untouched by any of this -- it never looks at an image -- so both of these
+# branches load the SAME teacher checkpoint, and the comparison between them
+# isolates the second camera and nothing else.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-Robust-Wrist",
+  env_cfg=make_robust_env_cfg(
+    vision=True, wrist=True, mask_dropout_scale=0.0),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, wrist=True, mask_dropout_scale=0.0),
+  rl_cfg=pick_place_distill_runner_cfg(
+    experiment_name="piperx_pick_place_distill_robust_wrist", wrist=True),
+  runner_cls=PickPlaceDistillationRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-Wrist-ThreeQ",
+  env_cfg=make_robust_env_cfg(
+    vision=True, wrist=True, mask_dropout_scale=0.75),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, wrist=True, mask_dropout_scale=0.75),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-Wrist-Half",
+  env_cfg=make_robust_env_cfg(
+    vision=True, wrist=True, mask_dropout_scale=0.5),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, wrist=True, mask_dropout_scale=0.5),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+# The undomainrandomised wrist task exists for one reason: the DR-degradation
+# report needs a nominal cell, and evaluating a two-camera policy on the
+# one-camera nominal task would fail on a missing observation group rather
+# than measure anything.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Wrist",
+  env_cfg=make_pick_place_env_cfg(vision=True, wrist=True),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, wrist=True),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_wrist", wrist=True),
+  runner_cls=MjlabOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-Wrist",
+  env_cfg=make_robust_env_cfg(
+    vision=True, wrist=True, mask_dropout_scale=1.0),
+  play_env_cfg=make_robust_env_cfg(
+    play=True, vision=True, wrist=True, mask_dropout_scale=1.0),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
+  runner_cls=MjlabOnPolicyRunner,
 )
 
 
