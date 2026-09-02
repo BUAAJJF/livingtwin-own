@@ -1,0 +1,356 @@
+[
+ {
+  "backend": "depth",
+  "frames": 2893,
+  "with_target": 1159,
+  "with_target_pct": 40.1,
+  "with_instance": 1581,
+  "with_instance_pct": 54.6,
+  "tall_enough": 909,
+  "tall_enough_pct": 31.4,
+  "target_switches": 58,
+  "instances_mean": 0.83,
+  "confirmed_mean": 0.75,
+  "in_sector_pct": 100.0,
+  "top_mm": {
+   "p5": 18.2,
+   "median": 32.6,
+   "p95": 87.5
+  },
+  "n_px": {
+   "p5": 50.9,
+   "median": 200.0,
+   "p95": 466.0
+  },
+  "replay_ms": {
+   "median": 6.6,
+   "p95": 10.31
+  },
+  "model_ms": null,
+  "prompt": null,
+  "rejected": {
+   "height": 1940,
+   "area": 1410,
+   "footprint": 536,
+   "elongation": 3
+  },
+  "missing_mask_frames": 0,
+  "gt": {
+   "labelled_with_object": 29,
+   "labelled_empty": 24,
+   "found_when_present": 16,
+   "recall": 0.552,
+   "found_when_empty": 6,
+   "false_alarm": 0.25,
+   "recall_any_instance": 0.69,
+   "false_alarm_any_instance": 0.292,
+   "missed_frames": [
+    0,
+    50,
+    100,
+    200,
+    250,
+    300,
+    350,
+    400,
+    1250,
+    1400,
+    1750,
+    1800,
+    1900
+   ],
+   "false_alarm_frames": [
+    600,
+    1600,
+    2100,
+    2200,
+    2250,
+    2400
+   ]
+  }
+ },
+ {
+  "backend": "sam3_dart",
+  "frames": 2893,
+  "with_target": 1361,
+  "with_target_pct": 47.0,
+  "with_instance": 1682,
+  "with_instance_pct": 58.1,
+  "tall_enough": 1226,
+  "tall_enough_pct": 42.4,
+  "target_switches": 36,
+  "instances_mean": 0.75,
+  "confirmed_mean": 0.71,
+  "in_sector_pct": 100.0,
+  "top_mm": {
+   "p5": 21.8,
+   "median": 34.5,
+   "p95": 65.7
+  },
+  "n_px": {
+   "p5": 618.0,
+   "median": 1147.0,
+   "p95": 1507.0
+  },
+  "replay_ms": {
+   "median": 119.08,
+   "p95": 148.06
+  },
+  "model_ms": {
+   "median": 148.3,
+   "p95": 168.9
+  },
+  "prompt": [
+   "object"
+  ],
+  "rejected": {
+   "outside the workspace": 10227,
+   "the bin": 3533,
+   "area": 2017,
+   "footprint": 541,
+   "height": 505,
+   "arm": 292,
+   "the arm": 24,
+   "elongation": 5
+  },
+  "missing_mask_frames": 0,
+  "gt": {
+   "labelled_with_object": 29,
+   "labelled_empty": 24,
+   "found_when_present": 19,
+   "recall": 0.655,
+   "found_when_empty": 2,
+   "false_alarm": 0.083,
+   "recall_any_instance": 0.862,
+   "false_alarm_any_instance": 0.167,
+   "missed_frames": [
+    0,
+    100,
+    150,
+    500,
+    1250,
+    1350,
+    1400,
+    1800,
+    1850,
+    1900
+   ],
+   "false_alarm_frames": [
+    2200,
+    2400
+   ]
+  }
+ },
+ {
+  "backend": "sam3_inpaint",
+  "frames": 2893,
+  "with_target": 1487,
+  "with_target_pct": 51.4,
+  "with_instance": 1812,
+  "with_instance_pct": 62.6,
+  "tall_enough": 1262,
+  "tall_enough_pct": 43.6,
+  "target_switches": 35,
+  "instances_mean": 0.83,
+  "confirmed_mean": 0.79,
+  "in_sector_pct": 100.0,
+  "top_mm": {
+   "p5": 20.3,
+   "median": 33.9,
+   "p95": 74.3
+  },
+  "n_px": {
+   "p5": 609.9,
+   "median": 1141.0,
+   "p95": 1460.0
+  },
+  "replay_ms": {
+   "median": 113.38,
+   "p95": 149.4
+  },
+  "model_ms": {
+   "median": 138.7,
+   "p95": 161.3
+  },
+  "prompt": [
+   "object"
+  ],
+  "rejected": {
+   "outside the workspace": 15595,
+   "the bin": 3585,
+   "area": 1860,
+   "height": 836,
+   "arm": 730,
+   "footprint": 510,
+   "the arm": 35,
+   "elongation": 5
+  },
+  "missing_mask_frames": 0,
+  "gt": {
+   "labelled_with_object": 29,
+   "labelled_empty": 24,
+   "found_when_present": 21,
+   "recall": 0.724,
+   "found_when_empty": 3,
+   "false_alarm": 0.125,
+   "recall_any_instance": 0.931,
+   "false_alarm_any_instance": 0.25,
+   "missed_frames": [
+    0,
+    150,
+    500,
+    1350,
+    1400,
+    1800,
+    1850,
+    1900
+   ],
+   "false_alarm_frames": [
+    2050,
+    2200,
+    2400
+   ]
+  }
+ },
+ {
+  "backend": "sam3_plain",
+  "frames": 2893,
+  "with_target": 1340,
+  "with_target_pct": 46.3,
+  "with_instance": 1669,
+  "with_instance_pct": 57.7,
+  "tall_enough": 1208,
+  "tall_enough_pct": 41.8,
+  "target_switches": 37,
+  "instances_mean": 0.73,
+  "confirmed_mean": 0.7,
+  "in_sector_pct": 100.0,
+  "top_mm": {
+   "p5": 21.8,
+   "median": 34.6,
+   "p95": 67.5
+  },
+  "n_px": {
+   "p5": 617.7,
+   "median": 1145.0,
+   "p95": 1506.0
+  },
+  "replay_ms": {
+   "median": 126.53,
+   "p95": 154.78
+  },
+  "model_ms": {
+   "median": 319.0,
+   "p95": 399.6
+  },
+  "prompt": [
+   "object"
+  ],
+  "rejected": {
+   "outside the workspace": 10207,
+   "the bin": 3569,
+   "area": 2007,
+   "footprint": 535,
+   "height": 507,
+   "arm": 298,
+   "the arm": 23,
+   "elongation": 1
+  },
+  "missing_mask_frames": 0,
+  "gt": {
+   "labelled_with_object": 29,
+   "labelled_empty": 24,
+   "found_when_present": 20,
+   "recall": 0.69,
+   "found_when_empty": 2,
+   "false_alarm": 0.083,
+   "recall_any_instance": 0.897,
+   "false_alarm_any_instance": 0.208,
+   "missed_frames": [
+    0,
+    100,
+    150,
+    500,
+    1350,
+    1400,
+    1800,
+    1850,
+    1900
+   ],
+   "false_alarm_frames": [
+    2200,
+    2400
+   ]
+  }
+ },
+ {
+  "backend": "yolo",
+  "frames": 2893,
+  "with_target": 638,
+  "with_target_pct": 22.1,
+  "with_instance": 714,
+  "with_instance_pct": 24.7,
+  "tall_enough": 610,
+  "tall_enough_pct": 21.1,
+  "target_switches": 16,
+  "instances_mean": 0.27,
+  "confirmed_mean": 0.26,
+  "in_sector_pct": 100.0,
+  "top_mm": {
+   "p5": 24.6,
+   "median": 56.0,
+   "p95": 57.6
+  },
+  "n_px": {
+   "p5": 624.9,
+   "median": 5069.5,
+   "p95": 5410.0
+  },
+  "replay_ms": {
+   "median": 119.96,
+   "p95": 144.65
+  },
+  "model_ms": null,
+  "prompt": null,
+  "rejected": {
+   "the bin": 2434,
+   "arm": 297,
+   "height": 157,
+   "footprint": 43,
+   "outside the workspace": 38,
+   "the arm": 7
+  },
+  "missing_mask_frames": 0,
+  "gt": {
+   "labelled_with_object": 29,
+   "labelled_empty": 24,
+   "found_when_present": 11,
+   "recall": 0.379,
+   "found_when_empty": 0,
+   "false_alarm": 0.0,
+   "recall_any_instance": 0.414,
+   "false_alarm_any_instance": 0.0,
+   "missed_frames": [
+    0,
+    400,
+    450,
+    500,
+    850,
+    950,
+    1200,
+    1250,
+    1300,
+    1400,
+    1500,
+    1750,
+    1800,
+    1850,
+    1900,
+    2150,
+    2300,
+    2450
+   ],
+   "false_alarm_frames": []
+  }
+ }
+]

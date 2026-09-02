@@ -71,3 +71,16 @@ hardware/depth_bench/foundation_stereo_bench/results/
 # Merge leftovers.  Several of these carry the pre-D455 version of a file and
 # reading one as current has already cost an afternoon.
 *.orig
+
+# Segmentation-benchmark outputs.  The per-frame JSONL, the summary JSONs and
+# the scripts are tracked -- they are what the comparison is made from.  The
+# rendered mask stacks (53 MB) and the side-by-side page (9 MB) are rebuilt by
+# hardware/deploy/sam3_infer.py and segreport.py from the recording.
+results/segbench/**/masks_*/
+results/segbench/**/compare_*.html
+
+# Rendered comparisons from scripts/show_occlusion.py.
+/occlusion_compare.mp4
+/occlusion_compare.png
+/sightline.mp4
+/sightline.png

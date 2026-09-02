@@ -77,7 +77,8 @@ def test_robust_task_keeps_nominal_task_separate_and_versioned():
   # the hand, which only the -Wrist tasks build.
   assert HEAVY_DR_PROFILE["name"] == "d455_v7_visible"
   assert HEAVY_DR_PROFILE["vision"]["scenery_dr"] is True
-  assert HEAVY_DR_PROFILE["vision"]["mask_dropout"] == (65.0, 330.0, 0.28, 0.50)
+  assert "mask_dropout" not in HEAVY_DR_PROFILE["vision"]
+  assert HEAVY_DR_PROFILE["vision"]["blind_when_held"] == 0.08
   assert HEAVY_DR_PROFILE["task"]["command_derate"] == 0.50
   assert HEAVY_DR_PROFILE["task"]["transport_progress_weight"] == 40.0
   assert HEAVY_DR_PROFILE["task"]["joint_vel_weight"] == -6.0e-3
@@ -93,50 +94,33 @@ def test_robust_task_keeps_nominal_task_separate_and_versioned():
   assert scene.delay_max_lag == 4
   assert scene.params["noise_cfg"].strength == 1.35
   assert scene.params["mask_jitter_px"] == 2
-  assert scene.params["mask_dropout"] == (65.0, 330.0, 0.28, 0.50)
+  assert scene.params["mask_dropout"] is None
+  assert scene.params["blind_when_held"] == 0.08
 
 
-def test_the_dropout_scale_spans_a_clear_camera_and_the_measured_one():
-  """0 must be the same path as "no dropout", not a spec that keeps everything.
+def test_the_only_modelled_target_loss_is_the_one_that_was_measured():
+  """Retiring ``mask_dropout`` is the point, not an oversight.
 
-  A spec of ``(0, 0, 1.0, 1.0)`` would compare every frame's blob against a
-  zero floor and draw a Bernoulli that always passes -- correct, but it makes
-  the distillation environment differ from the one that trained v4 by two
-  tensor allocations per step and a code path that has never been run at that
-  setting.  Returning ``None`` keeps it byte-identical to the profile that has
-  no dropout at all, which is the thing being reproduced.
+  It modelled the target vanishing as an open-loop draw calibrated from "the
+  arm blocks the line of sight 52% of frames".  Per-stage counting on the rig
+  then showed ``arm_mask`` removed 0% of the object's pixels and depth dropout
+  0%; the loss was one filter constant.  Training against the fiction cost
+  three campaigns: distillation gave 0.31, 0.42 and 0.10 placements against
+  2.06 without it.
+
+  What replaces it is closed loop and measured.  Once the jaws close the rig
+  reports the target in 8% of frames, because from a fixed viewpoint the thing
+  in the gripper is inside the arm -- and the policy chooses where to put its
+  hand, so it is a consequence it can learn to manage rather than a coin flip
+  it can only wait out.
   """
-  full = HEAVY_DR_PROFILE["vision"]["mask_dropout"]
-  assert _scaled_dropout(full, 0.0) is None
-  assert _scaled_dropout(None, 1.0) is None
-  assert _scaled_dropout(full, 1.0) == full
-  # Half is half the floor and half the way from certain detection to measured.
-  lo, hi, k_lo, k_hi = _scaled_dropout(full, 0.5)
-  assert (lo, hi) == (full[0] / 2, full[1] / 2)
-  assert k_lo == pytest.approx(1.0 - (1.0 - full[2]) / 2)
-  assert k_hi == pytest.approx(1.0 - (1.0 - full[3]) / 2)
-  # Monotone: more scale is never easier.
-  keeps = [_scaled_dropout(full, s)[2] for s in (0.25, 0.5, 0.75, 1.0)]
-  assert keeps == sorted(keeps, reverse=True)
-  # Over-driving the scale is clamped rather than extrapolated past the rig.
-  assert _scaled_dropout(full, 2.0) == full
-
-
-def test_the_hand_camera_is_not_the_scene_camera_with_a_new_name():
-  """The wrist sub-profile must differ where the physics differs.
-
-  Its floor is an order of magnitude smaller because the floor models the arm
-  crossing the line of sight, and a camera bolted to the hand cannot be
-  blocked by the arm it is bolted to.  Its keep probability is IDENTICAL
-  because that was measured as the segmenter losing an object whose line was
-  clear -- a property of the detector and the object, not of the viewpoint.
-  Its mount jitter is a machining tolerance, not a knocked tripod.
-  """
-  w = HEAVY_DR_PROFILE["vision"]["wrist"]
-  scene_floor = HEAVY_DR_PROFILE["vision"]["mask_dropout"][:2]
-  assert w["mask_dropout"][:2] < scene_floor
-  assert w["mask_dropout"][2:] == HEAVY_DR_PROFILE["vision"]["mask_dropout"][2:]
-  assert w["camera_position_m"] < HEAVY_DR_PROFILE["vision"]["camera_position_m"]
+  v = HEAVY_DR_PROFILE["vision"]
+  assert "mask_dropout" not in v
+  assert v["blind_when_held"] == 0.08
+  cfg = make_robust_env_cfg(play=True, vision=True)
+  scene = cfg.observations["camera"].terms["scene"]
+  assert scene.params["mask_dropout"] is None
+  assert scene.params["blind_when_held"] == 0.08
 
 
 def test_table_contact_is_audited_but_never_controls_the_policy():
@@ -194,7 +178,14 @@ def scene_dropout_reaches_the_term(cfg) -> bool:
   """The profile value has to arrive at the observation term, not just exist.
 
   A DR axis that is configured and never applied is the failure this file was
-  written to catch.
+  written to catch -- and it caught the opposite one too: ``mask_dropout``
+  stayed wired long after the plan retired it, and an overnight run trained
+  three vision stages against it.  So this now asserts what the profile says,
+  in both directions.
   """
   term = cfg.observations["camera"].terms["scene"]
-  return term.params.get("mask_dropout") is not None
+  v = HEAVY_DR_PROFILE["vision"]
+  if "mask_dropout" in v:
+    return term.params.get("mask_dropout") is not None
+  return (term.params.get("mask_dropout") is None
+          and term.params.get("blind_when_held") == v["blind_when_held"])

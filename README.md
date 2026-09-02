@@ -217,6 +217,69 @@ least three times and quote the spread; see the reproducibility note above.
 micromamba run -n mjlab python -m pytest tests -q
 ```
 
+## Running the policy on the arm
+
+The best run so far is `recordings/v4_stereo_try3` on 2026-09-01: it placed
+more objects in the bin than any other, and it ended not because the policy
+failed but because the log writer could not keep up. Its arguments, with the
+fixes that landed after it:
+
+```bash
+micromamba run -n mjlab python -m hardware.deploy.run \
+    --policy hardware/deploy/policies/d455_v4_final \
+    --camera d455 --mask depth --policy-device cpu \
+    --record recordings/<a fresh directory> \
+    --home-first --command-rate-scale 0.6 \
+    --depth-source stereo
+```
+
+**Before pressing enter.** Keep the physical emergency stop in hand, clear the
+workspace, and use a directory that does not exist yet -- `run.py` refuses real
+motion without one and refuses to overwrite one that has anything in it. The
+run asks for the word `move` on an interactive terminal and will not start
+without it.
+
+Then restore the table, because the scene is the largest variable and nothing
+in `run.json` records it. Two runs with byte-identical arguments gave very
+different results, one having two objects on the table and the other three:
+
+```bash
+micromamba run -n mjlab python -m hardware.deploy.scene \
+    --like recordings/v4_stereo_try3
+```
+
+It reads the table through the same segmenter the policy uses, prints which
+object to move and by how much, and exits 0 once the scene matches. It touches
+nothing: CAN is opened to read joint angles, because the segmenter subtracts
+the arm, and the drives are never enabled.
+
+**What each flag is doing, and what is deliberately absent.**
+
+| | |
+|---|---|
+| `--home-first` | drives to the training start pose first. Every episode the policy trained on began there; a run that starts wherever the last one stopped hands its GRU an opening it never saw, and three runs in a row went progressively lower because each began where the previous ended |
+| `--command-rate-scale 0.6` | scales the commanded joint rate. Occlusion scales with speed -- the arm blocked the camera's line to the object 52% of frames on a fast run against 16% on a slow one |
+| `--depth-source stereo` | Fast-FoundationStereo on TensorRT over the raw imagers, 15.3 ms. Optional, and not obviously better: 83.9% fill against the camera's 88.6%, agreeing to 4.4 mm. The best run used it; whether it is *why* is not established |
+| no `--min-grasp-height` | the guard now tests the measured pose rather than the commanded setpoint, but any floor near the table will still stop a run that is working. `-0.018` is the value the data supports if one is wanted: below the contact the design allows, above the -25 mm that batted an object off the table |
+| no `--min-table-clearance` | omitting it permits light fingertip contact, which the training task allows on purpose |
+
+**Since that run.** The recorder stored every camera frame about twice, which
+is what filled its queue and ended it; that is fixed, so the queue should now
+keep up with compression on. Leave `--no-record-compress` off unless it fills
+again: turning it on frees enough CPU to halve the observation latency, from
+the 43 ms the policy was trained for to about 20 ms, which is a control
+condition and not a logging one.
+
+**Afterwards.** A review page is written beside the recording on exit, strided
+to roughly one picture a second because at full rate it is half a gigabyte. To
+look at a grasp properly, re-render a window at every frame:
+
+```bash
+micromamba run -n mjlab python -m hardware.deploy.review recordings/<session> \
+    --stride 1 --window 25 30 --html detail.html
+```
+
+
 ## Lessons from the first hardware runs
 
 2026-09-01. Twenty recorded sessions, 12224 commands to a live arm, and one

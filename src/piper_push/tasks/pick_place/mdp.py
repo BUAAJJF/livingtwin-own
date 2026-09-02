@@ -1076,6 +1076,7 @@ class CameraScene:
     featureless_objects_only: bool = True,
     scenery_dr: bool = False,
     mask_dropout: "tuple[float, float, float, float] | None" = None,
+    blind_when_held: float | None = None,
   ) -> torch.Tensor:
     sensor = env.scene[sensor_name]
     depth = sensor.data.depth
@@ -1093,6 +1094,22 @@ class CameraScene:
     is_geom = types == int(mujoco.mjtObj.mjOBJ_GEOM)
     mask = ((ids.unsqueeze(-1) == target[:, None, None, :]).any(-1) & is_geom)
     mask = mask.float().unsqueeze(1)
+
+    # Once the jaws close on it, the rig cannot call it an object any more.
+    #
+    # Measured on recordings/v4_fixedseg_try6, which grasped and then froze:
+    # with the jaws closed the target was reported in 155 of 1894 frames, 8%,
+    # because from a fixed viewpoint the thing in the gripper is inside the arm
+    # and ``mask.arm_mask`` deletes 88% of its points.  The simulator shows it
+    # throughout, so a policy trained here has never had to carry something it
+    # cannot see, and on the arm that produced fifteen-second freezes.
+    #
+    # A survival probability rather than a hard blank, because the rig does
+    # still report it occasionally and a policy that has never seen that would
+    # not use it.
+    if blind_when_held is not None and float(blind_when_held) < 1.0:
+      keep = torch.rand(mask.shape[0], device=mask.device) < float(blind_when_held)
+      mask = mask * (~cmd.grasped | keep).float().view(-1, 1, 1, 1)
 
     cfg = noise_cfg if noise_cfg is not None else depth_noise.DepthNoiseCfg()
     if cfg.strength > 0.0:

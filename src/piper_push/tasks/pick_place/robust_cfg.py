@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
 
 from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import EventTermCfg
@@ -70,6 +71,18 @@ HEAVY_DR_PROFILE = {
     # managed is the opposite one, because the progress term that paid for the
     # trip is now zero and standing still must not become optimal.
     "joint_vel_weight": -6.0e-3,
+    # Overridable from the environment so two weightings can be trained side
+    # by side without editing a file a running job has already imported.
+    #
+    # The defaults are what v7 launched with, and the first hundred iterations
+    # say they are too small to change behaviour: sight_hand contributes -0.13
+    # of episode reward against place's +2.04 and premature_touch's -0.97, and
+    # it has been flat for eighty iterations while placements held at 5.0.
+    # Detouring behind the object costs action_rate and action_acc, which
+    # together are -1.35; not detouring costs -0.13.  The policy is right.
+    "sight_arm_weight": float(os.environ.get("SIGHT_ARM_W", -2.0)),
+    "sight_hand_weight": float(os.environ.get("SIGHT_HAND_W", -4.0)),
+    "wrist_weight": float(os.environ.get("WRIST_W", 0.8)),
   },
   "robot": {
     "kp_scale": (0.75, 1.25),
@@ -96,35 +109,21 @@ HEAVY_DR_PROFILE = {
     "texture_penalty": (1.0, 2.8),
     "mask_jitter_px": 2,
     "scenery_dr": True,
-    # Measured on the rig 2026-08-31: the target mask VANISHES for stretches
-    # when the arm reaches over the object.  Visibility was 25% with the arm
-    # moving fast and 87% moving slowly; hidden runs ran 15 control steps at
-    # the median and 188 at the p90.  Simulated visibility on the same scene
-    # is 99%, so a policy trained without this has never had to act blind.
-    # The minimum blob the rig's segmenter needs before it reports the target
-    # at all, in policy-image pixels, drawn per episode.  Below it the mask is
-    # empty -- which is what the rig does, and when, because the arm's own
-    # pose decides how much of the object survives.
-    # Calibrated, not tuned: the simulated mask is 234 px at the median on the
-    # 224x168 policy grid, and pure geometric occlusion leaves it empty only
-    # 0.7% of the time.  The rig ranged from 87% visible with the arm moving
-    # slowly to 25% moving fast, which on that distribution is a floor of
-    # 65 px and 330 px respectively.  Drawn per episode across that span.
-    # (min_px_lo, min_px_hi, keep_lo, keep_hi).
+    # mask_dropout is RETIRED.  It modelled the target vanishing as an
+    # open-loop coin flip calibrated from "the arm blocks the line of sight 52%
+    # of frames", and per-stage counting on the rig showed arm_mask removed 0%
+    # of the object's pixels and depth dropout 0%: the loss was one filter
+    # constant, `SegmenterCfg.width_range_m`, 160 mm against a 164 mm blob.
+    # Training against it cost three campaigns -- distillation gave 0.31, 0.42
+    # and 0.10 placements against 2.06 without it -- because DAgger regresses
+    # the student onto a teacher that can see what the student cannot.
     #
-    # The floor is the geometry the renderer already gets right: below this
-    # many pixels the rig's segmenter reports nothing at all.  65 px and 330 px
-    # are 89% and 32% visibility on the simulated mask's own distribution.
-    #
-    # The keep probability is everything the renderer cannot see, and it is
-    # measured rather than guessed.  Tracing the arm's sphere cover against the
-    # camera-to-object line on two recordings: the arm blocked the line 52% of
-    # the time on the fast run and 16% on the slow one, and WITH A CLEAR LINE
-    # the segmenter still found the object only 28% and 50% of the time.  That
-    # residual is depth dropping out on the object, mask.arm_mask deleting
-    # everything within 20 mm of the arm, and the component filters behind
-    # them -- none of which the simulator has.
-    "mask_dropout": (65.0, 330.0, 0.28, 0.50),
+    # What IS measured, and what replaces it: once the jaws close, the rig
+    # reports the target in 8% of frames (155 of 1894), because from a fixed
+    # viewpoint the thing in the gripper is inside the arm.  That is closed
+    # loop -- the policy chooses where to put its hand -- and the simulator
+    # models none of it.
+    "blind_when_held": 0.08,
     # The hand camera.  Its ranges are not the scene camera's and must not be
     # copied from them: it is a D405 at 120 mm, not a D455 at 1.2 m.
     #
@@ -220,6 +219,20 @@ def apply_heavy_dr(
       task["transport_progress_weight"])
   if "joint_vel_weight" in task and "joint_vel" in cfg.rewards:
     cfg.rewards["joint_vel"].weight = float(task["joint_vel_weight"])
+  # The visibility weights, and the curriculum entries that would otherwise
+  # overwrite them.  Those ramps are inert at this environment count -- the
+  # teacher log shows every curriculum term sitting at its final value from the
+  # first iteration -- so leaving them in place would silently restore the
+  # default the moment the manager ran.
+  for key, reward, curr in (("sight_arm_weight", "sight_arm", "sight_arm_weight"),
+                            ("sight_hand_weight", "sight_hand", "sight_hand_weight"),
+                            ("wrist_weight", "wrist_side_on", "wrist_decay")):
+    if key in task and reward in cfg.rewards:
+      w = float(task[key])
+      cfg.rewards[reward].weight = w
+      if curr in cfg.curriculum:
+        for stage in cfg.curriculum[curr].params["stages"]:
+          stage["weight"] = w
 
   cfg.actions["arm"].command_hooks = (_plant_cfg(),)
   cfg.actions["gripper"].command_hooks = (_plant_cfg(gripper=True),)
@@ -311,6 +324,7 @@ def apply_heavy_dr(
     term.params["scenery_dr"] = bool(v.get("scenery_dr", False))
     term.params["mask_dropout"] = _scaled_dropout(
       v.get("mask_dropout"), mask_dropout_scale)
+    term.params["blind_when_held"] = v.get("blind_when_held")
     if wrist:
       w = v["wrist"]
       wevent = cfg.events["wrist_camera_pose"]

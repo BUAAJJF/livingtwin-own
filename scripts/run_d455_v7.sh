@@ -149,7 +149,9 @@ occlusion() {
 if [ -n "${SELFCHECK:-}" ]; then
   say "SELFCHECK: nothing is launched"
   say "tag $TAG   gpu $GPU   deadline in $DEADLINE_H h"
-  say "base teacher $BASE"; [ -f "$BASE" ] || fail "base checkpoint missing"
+  say "base teacher $BASE"
+  [ "$BASE" = "none" ] || [ -f "$BASE" ] || fail "base checkpoint missing"
+  say "sight weights: arm ${SIGHT_ARM_W:--2.0}  hand ${SIGHT_HAND_W:--4.0}  wrist ${WRIST_W:-0.8}"
   for f in scripts/train.sh scripts/distill.py scripts/finetune.py \
            scripts/eval.sh scripts/eval_occlusion.py; do
     [ -f "$f" ] || fail "missing $f"
@@ -165,7 +167,34 @@ say "wrist_side_on, table_touch; transport_progress restored to 40"
 
 # --- 1. the state teacher, adapted from v5 ---------------------------------
 
-if ! stage_done teacher; then
+# TEACHER_CKPT skips the teacher entirely and distils from one already trained.
+# The teacher sees no images, so a change confined to the camera observation --
+# retiring mask_dropout, adding blind_when_held -- does not invalidate it, and
+# re-running three hours of state PPO to test a vision change would be three
+# hours spent proving nothing.
+if [ -n "${TEACHER_CKPT:-}" ]; then
+  [ -f "$TEACHER_CKPT" ] || fail "TEACHER_CKPT does not exist: $TEACHER_CKPT"
+  RT=$TEACHER_CKPT
+  say "using the teacher already trained: $RT"
+  printf '%s\n' "$RT" >"$OUT/teacher_checkpoint.txt"
+elif ! stage_done teacher; then
+  # BASE=none trains the state teacher from random initialisation.  It is not
+  # the default and the reason is on the record: a cold teacher under the full
+  # DR is what collapsed in v2, which is why every campaign since has learned
+  # the task without randomisation first and adapted afterwards.  It exists
+  # here because a bootstrapped policy carries an approach habit formed before
+  # the visibility terms existed, and whether that habit is what stops it
+  # learning to come from behind is a question only a cold run answers.
+  if [ "$BASE" = "none" ]; then
+    say "COLD START: no bootstrap, random initialisation under the full DR"
+    if ! TASK=Mjlab-Pick-Place-PiperX-Robust NUM_ENVS="$TEACHER_ENVS" \
+         ITERS="$TEACHER_ITERS" GPUS="[$GPU]" RUN_NAME="${TAG}_teacher" \
+         bash scripts/train.sh --agent.logger tensorboard \
+           >"$OUT/teacher.log" 2>&1; then
+      fail "teacher -- see $OUT/teacher.log"
+    fi
+    mark_done teacher
+  else
   [ -f "$BASE" ] || fail "base checkpoint missing: $BASE"
   start_name=$(basename "$BASE")
   boot="logs/rsl_rl/piperx_pick_place_robust/${TAG}_bootstrap"
@@ -183,17 +212,20 @@ if ! stage_done teacher; then
     fail "teacher -- see $OUT/teacher.log"
   fi
   mark_done teacher
+  fi
 fi
-TEACHER_RUN=$(run_dir_from_log "$OUT/teacher.log")
-assert_complete "$OUT/teacher.log"
-RT=$(latest_checkpoint "$TEACHER_RUN")
-printf '%s\n' "$RT" >"$OUT/teacher_checkpoint.txt"
-say "teacher $RT"
+if [ -z "${TEACHER_CKPT:-}" ]; then
+  TEACHER_RUN=$(run_dir_from_log "$OUT/teacher.log")
+  assert_complete "$OUT/teacher.log"
+  RT=$(latest_checkpoint "$TEACHER_RUN")
+  printf '%s\n' "$RT" >"$OUT/teacher_checkpoint.txt"
+  say "teacher $RT"
+fi
 
 # The one number that says whether the new penalties broke it.  A teacher that
 # stopped picking things up makes every later stage meaningless, and the log is
 # long enough that this is worth pulling to the top.
-say "teacher final: $(grep -a 'objects_placed' "$OUT/teacher.log" | tail -1 | sed 's/.*: //') objects placed"
+[ -f "$OUT/teacher.log" ] && say "teacher final: $(grep -a 'objects_placed' "$OUT/teacher.log" | tail -1 | sed 's/.*: //') objects placed" || true
 occlusion "$RT" Mjlab-Pick-Place-PiperX-Robust teacher || say "occlusion (teacher) failed"
 
 # --- 2. distillation -------------------------------------------------------
