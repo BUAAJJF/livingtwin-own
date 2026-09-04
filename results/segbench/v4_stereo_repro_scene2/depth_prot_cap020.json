@@ -1,38 +1,38 @@
 {
- "backend": "depth",
+ "backend": "depth_prot_cap020",
  "frames": 2893,
- "with_target": 1159,
- "with_target_pct": 40.1,
- "with_instance": 1581,
- "with_instance_pct": 54.6,
- "tall_enough": 909,
- "tall_enough_pct": 31.4,
- "target_switches": 58,
- "instances_mean": 0.83,
- "confirmed_mean": 0.75,
+ "with_target": 1414,
+ "with_target_pct": 48.9,
+ "with_instance": 1707,
+ "with_instance_pct": 59.0,
+ "tall_enough": 1132,
+ "tall_enough_pct": 39.1,
+ "target_switches": 51,
+ "instances_mean": 0.91,
+ "confirmed_mean": 0.83,
  "in_sector_pct": 100.0,
  "top_mm": {
-  "p5": 18.2,
-  "median": 32.6,
-  "p95": 87.5
+  "p5": 18.3,
+  "median": 33.1,
+  "p95": 85.8
  },
  "n_px": {
-  "p5": 203.6,
-  "median": 800.0,
+  "p5": 220.0,
+  "median": 830.0,
   "p95": 1864.0
  },
  "decimate": 2,
  "replay_ms": {
-  "median": 6.25,
-  "p95": 10.15
+  "median": 6.67,
+  "p95": 12.9
  },
  "model_ms": null,
  "prompt": null,
  "rejected": {
-  "height": 1940,
-  "area": 1410,
-  "footprint": 536,
-  "elongation": 3
+  "height": 1935,
+  "area": 1389,
+  "footprint": 544,
+  "elongation": 4
  },
  "missing_mask_frames": 0,
  "gt": {
@@ -40,10 +40,10 @@
   "labelled_empty": 24,
   "found_when_present": 16,
   "recall": 0.552,
-  "found_when_empty": 6,
-  "false_alarm": 0.25,
+  "found_when_empty": 9,
+  "false_alarm": 0.375,
   "recall_any_instance": 0.69,
-  "false_alarm_any_instance": 0.292,
+  "false_alarm_any_instance": 0.417,
   "missed_frames": [
    0,
    50,
@@ -61,7 +61,10 @@
   ],
   "false_alarm_frames": [
    600,
+   900,
+   1000,
    1600,
+   1650,
    2100,
    2200,
    2250,

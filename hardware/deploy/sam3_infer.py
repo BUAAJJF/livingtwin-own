@@ -109,6 +109,10 @@ def main() -> int:
                  help="DART's batched FP16 path with presence early-exit")
   p.add_argument("--inpaint", action="store_true",
                  help="fill the depth-warp holes in the grayscale first")
+  p.add_argument("--image-dir", type=pathlib.Path, default=None,
+                 help="read <frame>.jpg from here instead of the recording's "
+                      "grayscale -- e.g. the height field written by "
+                      "shaperender.py, which is shape with no appearance in it")
   p.add_argument("--limit", type=int, default=None)
   p.add_argument("--warmup", type=int, default=3)
   a = p.parse_args()
@@ -123,7 +127,18 @@ def main() -> int:
 
   predictor, torch = build(a)
 
-  warm, _ = frame_image(np.load(files[0]), a.inpaint)
+  def image_for(f):
+    """The image for one recorded frame, from wherever this run reads them."""
+    if a.image_dir is None:
+      return frame_image(np.load(f), a.inpaint)
+    from PIL import Image
+    q = a.image_dir / f"{os.path.basename(f).split('.')[0]}.jpg"
+    if not q.exists():
+      raise FileNotFoundError(f"no rendered image at {q}")
+    im = Image.open(q).convert("RGB")
+    return im, (im.size[1], im.size[0])
+
+  warm, _ = image_for(files[0])
   for _ in range(a.warmup):
     predictor.predict_image(warm, confidence_threshold=a.confidence,
                             nms_threshold=a.nms)
@@ -134,7 +149,7 @@ def main() -> int:
   t_start = time.perf_counter()
   for k, f in enumerate(files):
     key = os.path.basename(f).split(".")[0]
-    img, hw = frame_image(np.load(f), a.inpaint)
+    img, hw = image_for(f)
     t0 = time.perf_counter()
     r = predictor.predict_image(img, confidence_threshold=a.confidence,
                                 nms_threshold=a.nms)
@@ -165,6 +180,7 @@ def main() -> int:
     "session": str(a.session), "frames": len(files), "classes": list(a.classes),
     "imgsz": a.imgsz, "confidence": a.confidence, "nms": a.nms,
     "fast": bool(a.fast), "inpaint": bool(a.inpaint),
+    "image_dir": (None if a.image_dir is None else str(a.image_dir)),
     "device": a.device, "checkpoint": a.checkpoint,
     "ms": {"median": round(float(np.median(ms)), 1),
            "p95": round(float(np.percentile(ms, 95)), 1)},

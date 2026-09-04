@@ -1,37 +1,37 @@
 {
- "backend": "depth",
+ "backend": "depth_w22",
  "frames": 2893,
- "with_target": 1159,
- "with_target_pct": 40.1,
- "with_instance": 1581,
- "with_instance_pct": 54.6,
- "tall_enough": 909,
- "tall_enough_pct": 31.4,
- "target_switches": 58,
- "instances_mean": 0.83,
- "confirmed_mean": 0.75,
+ "with_target": 1179,
+ "with_target_pct": 40.8,
+ "with_instance": 1599,
+ "with_instance_pct": 55.3,
+ "tall_enough": 929,
+ "tall_enough_pct": 32.1,
+ "target_switches": 61,
+ "instances_mean": 0.86,
+ "confirmed_mean": 0.77,
  "in_sector_pct": 100.0,
  "top_mm": {
   "p5": 18.2,
   "median": 32.6,
-  "p95": 87.5
+  "p95": 88.1
  },
  "n_px": {
   "p5": 203.6,
-  "median": 800.0,
-  "p95": 1864.0
+  "median": 840.0,
+  "p95": 1880.4
  },
  "decimate": 2,
  "replay_ms": {
-  "median": 6.25,
-  "p95": 10.15
+  "median": 6.13,
+  "p95": 9.51
  },
  "model_ms": null,
  "prompt": null,
  "rejected": {
   "height": 1940,
   "area": 1410,
-  "footprint": 536,
+  "footprint": 460,
   "elongation": 3
  },
  "missing_mask_frames": 0,

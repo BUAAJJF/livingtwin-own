@@ -1,0 +1,73 @@
+{
+ "backend": "depth_prot_cap035",
+ "frames": 2893,
+ "with_target": 1430,
+ "with_target_pct": 49.4,
+ "with_instance": 1724,
+ "with_instance_pct": 59.6,
+ "tall_enough": 1179,
+ "tall_enough_pct": 40.8,
+ "target_switches": 52,
+ "instances_mean": 0.92,
+ "confirmed_mean": 0.83,
+ "in_sector_pct": 100.0,
+ "top_mm": {
+  "p5": 18.6,
+  "median": 34.8,
+  "p95": 95.9
+ },
+ "n_px": {
+  "p5": 248.0,
+  "median": 936.0,
+  "p95": 1868.0
+ },
+ "decimate": 2,
+ "replay_ms": {
+  "median": 6.46,
+  "p95": 8.76
+ },
+ "model_ms": null,
+ "prompt": null,
+ "rejected": {
+  "height": 1934,
+  "area": 1344,
+  "footprint": 541,
+  "elongation": 1
+ },
+ "missing_mask_frames": 0,
+ "gt": {
+  "labelled_with_object": 29,
+  "labelled_empty": 24,
+  "found_when_present": 17,
+  "recall": 0.586,
+  "found_when_empty": 9,
+  "false_alarm": 0.375,
+  "recall_any_instance": 0.724,
+  "false_alarm_any_instance": 0.417,
+  "missed_frames": [
+   0,
+   50,
+   100,
+   200,
+   250,
+   300,
+   350,
+   400,
+   1400,
+   1750,
+   1800,
+   1900
+  ],
+  "false_alarm_frames": [
+   600,
+   900,
+   1000,
+   1600,
+   1650,
+   2100,
+   2200,
+   2250,
+   2400
+  ]
+ }
+}

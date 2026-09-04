@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import glob
 import json
 import math
@@ -110,7 +111,7 @@ class PrecomputedDetector:
 
 @contextlib.contextmanager
 def precomputed_segmenter(rig, reproj, store: pathlib.Path, conf=None,
-                          bin_footprint=None):
+                          bin_footprint=None, cfg=None):
   """``mask.YoloSegmenter`` reading ``store`` instead of a network.
 
   ``YoloSegmenter.__init__`` loads its detector through ``mask.load_detector``,
@@ -123,11 +124,65 @@ def precomputed_segmenter(rig, reproj, store: pathlib.Path, conf=None,
   original = mask.load_detector
   mask.load_detector = lambda *a, **k: det
   try:
-    seg = mask.YoloSegmenter("<precomputed>", rig, reproj, conf=conf,
+    seg = mask.YoloSegmenter("<precomputed>", rig, reproj, cfg=cfg, conf=conf,
                              bin_footprint=bin_footprint)
   finally:
     mask.load_detector = original
   yield seg, det
+
+
+@contextlib.contextmanager
+def target_protection(radius_m: float, state: dict):
+  """``mask.arm_mask``, with a sphere around the tracked target exempted.
+
+  The arm exclusion exists so the robot does not become the largest object in
+  frame, and for that it only has to cover the robot.  It currently also covers
+  whatever the robot is reaching for, and the measurement says that is what
+  ends the target: on the frames where the depth backend lost its target with
+  the hand inside 80 mm, the object's points were still there in every case,
+  a median of one of them was inside the arm's own volume, and a median of 52
+  were inside the 20 mm margin around it.  Nothing was occluded.  The pipeline
+  deleted it.
+
+  Exempting a sphere around the *already confirmed* target does not weaken the
+  reason the exclusion exists -- an unconfirmed blob on the arm is still
+  removed -- and it is the difference between a mask channel that survives the
+  grasp and one that goes blank at the moment the policy needs it.
+
+  Patched here rather than in ``mask.py`` because this is a measurement and the
+  deployment path should not grow an experimental branch.
+  """
+  original = mask.arm_mask
+
+  def patched(pts, arm, clearance_m, within=None):
+    m = original(pts, arm, clearance_m, within=within)
+    # Stashed so a viewer can draw the difference.  What the exemption gives
+    # back is exactly ``original & sphere``, and that set cannot be recovered
+    # from the patched answer alone.
+    state["_original"] = m
+    state["_exempted"] = None
+    c = state.get("centre")
+    if c is None or radius_m <= 0:
+      return m
+    p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    near = np.linalg.norm(p - np.asarray(c, dtype=np.float64), axis=1) < radius_m
+    # Only up to the target's own height.  Without this the sphere also exempts
+    # the gripper standing over the object, and the gripper is the better
+    # candidate: measured on this session, the three false targets protection
+    # added were 106, 64 and 79 mm tall against a task object's 24-90, at a
+    # moment when the effort trace shows nothing was ever grasped.  The object
+    # is under the hand, so a ceiling separates them and a radius cannot.
+    ceil = state.get("ceiling")
+    if ceil is not None:
+      near &= p[:, 2] < float(ceil)
+    state["_exempted"] = m & near
+    return m & ~near
+
+  mask.arm_mask = patched
+  try:
+    yield
+  finally:
+    mask.arm_mask = original
 
 
 # --------------------------------------------------------------------------
@@ -148,27 +203,47 @@ def _session_setup(session: pathlib.Path):
 
 def replay(session: pathlib.Path, backend: str, store: pathlib.Path | None,
            conf: float | None, limit: int | None,
-           device: str = "cuda:0") -> dict:
+           device: str = "cuda:0", arm_clearance: float | None = None,
+           protect_target: float = 0.0,
+           release_effort: float | None = None,
+           protect_ceiling: float = 0.0,
+           no_arm_mask: bool = False,
+           confirm: int = 3, width_max: float | None = None) -> dict:
   """Segment and track every frame of ``session`` with one backend."""
   rig, reproj, meta, files = _session_setup(session)
   kin = proprio.Kinematics()
-  tracker = mask.TargetTracker()
+  # The confirmation window is the tracker's defence against depth-noise
+  # phantoms, which cannot repeat.  It is also a three-frame latency every
+  # time a track dies, and a track dies whenever one filter rejects the
+  # component for one frame -- so it converts a marginal filter into a
+  # sustained loss.  Both halves of that are worth measuring.
+  tracker = mask.TargetTracker(confirm=int(confirm))
   (rlo, rhi), (alo, ahi), _ = config.WORKSPACE_SECTOR
 
+  # The arm exclusion margin is the one geometric constant this tool is allowed
+  # to move, because it is the one measurement pointed at: the margin, not the
+  # arm's own volume, is what covers a target as the hand arrives.
+  over = {}
+  if arm_clearance is not None:
+    over["arm_clearance_m"] = float(arm_clearance)
+  if width_max is not None:
+    over["width_range_m"] = (mask.SegmenterCfg().width_range_m[0], float(width_max))
+  cfg = dataclasses.replace(mask.SegmenterCfg(), **over) if over else None
   if backend == "depth":
-    ctx = contextlib.nullcontext((mask.DepthSegmenter(rig, reproj), None))
+    ctx = contextlib.nullcontext((mask.DepthSegmenter(rig, reproj, cfg=cfg), None))
   elif backend == "yolo":
     # The incumbent appearance backend, run live rather than from a store.
     # It is here because it is what a new one has to beat, not only what the
     # depth backend does: ``--mask fused`` already exists and the question a
     # replacement has to answer is whether it is better than that.
     ctx = contextlib.nullcontext(
-      (mask.YoloSegmenter(str(store), rig, reproj, conf=conf,
+      (mask.YoloSegmenter(str(store), rig, reproj, cfg=cfg, conf=conf,
                           device=device), None))
   else:
-    ctx = precomputed_segmenter(rig, reproj, store, conf=conf)
+    ctx = precomputed_segmenter(rig, reproj, store, conf=conf, cfg=cfg)
   rows: list[dict] = []
-  with ctx as (seg, det):
+  protect: dict = {"centre": None}
+  with ctx as (seg, det), target_protection(protect_target, protect):
     for f in (files if limit is None else files[:limit]):
       key = os.path.basename(f).split(".")[0]
       m = meta.get(int(key))
@@ -181,11 +256,41 @@ def replay(session: pathlib.Path, backend: str, store: pathlib.Path | None,
       depth = z["depth"].astype(np.float32) / 10000.0
       if det is not None:
         det.seek(key)
+      # The target the tracker is holding going *into* this frame.  Reading its
+      # private centroid is deliberate: the public API only reports a label,
+      # and a label is meaningless before the frame has been segmented.
+      protect["centre"] = getattr(tracker, "_centroid", None)
+      protect["ceiling"] = (None if protect["centre"] is None or protect_ceiling <= 0
+                            else float(protect["centre"][2]) + protect_ceiling)
       t0 = time.perf_counter()
-      out = seg(depth, rgb=z["gray"], arm=kin.link_spheres())
+      # ``arm=None`` makes ``arm_mask`` return all-false, which is the whole
+      # of "turn the exclusion off".  It is worth testing rather than reasoning
+      # about: the exclusion exists so the robot is not the largest object in
+      # frame, but the robot is also 300 mm tall and 700 mm long, and the
+      # height and elongation gates already reject things like that.  What the
+      # exclusion uniquely removes may be less than it appears -- or the whole
+      # arm may fragment into object-shaped pieces, which is what shrinking the
+      # margin did.
+      out = seg(depth, rgb=z["gray"],
+                arm=(None if no_arm_mask else kin.link_spheres()))
       ms = (time.perf_counter() - t0) * 1e3
       label = tracker.update(out, kin.site_pos)
       hit = next((i for i in out.instances if i.label == label), None)
+
+      # The pick is over: tell the tracker so.  ``TargetTracker.clear`` has
+      # always existed for this -- "call this when it has been placed" -- and
+      # ``run.py`` has never called it.  Nothing had to, because the arm
+      # exclusion removed a held object anyway and the target expired on its
+      # own.  Exempting the target from that exclusion is what makes the
+      # release necessary, and the signal for it is already calibrated:
+      # ``gripper_effort.json`` measures 0.085 closing on nothing against
+      # 1.043 closing on an object.
+      if release_effort is not None:
+        eff = m.get("gripper_effort")
+        if eff is not None and abs(float(eff)) > release_effort:
+          tracker.clear()
+          protect["centre"] = None
+          protect["ceiling"] = None
 
       rejected: dict[str, int] = {}
       for why, _ in getattr(seg, "rejected", []):
@@ -198,11 +303,12 @@ def replay(session: pathlib.Path, backend: str, store: pathlib.Path | None,
         "fill": round(float((depth > 0).mean()), 4),
         "ms": round(ms, 2),
         "rejected": rejected,
+        "decimate": int(seg.decimate),
         "site_mm": [round(float(x) * 1000, 1) for x in kin.site_pos],
       }
       if hit is None:
-        row.update(gap_mm=None, top_mm=None, n_px=None, r=None, a_deg=None,
-                   in_sector=None, xy=None)
+        row.update(gap_mm=None, top_mm=None, n_px=None, n_px_full=None,
+                   r=None, a_deg=None, in_sector=None, xy=None)
       else:
         c = np.asarray(hit.centroid_base, dtype=np.float64)
         r = float(math.hypot(c[0], c[1]))
@@ -211,7 +317,15 @@ def replay(session: pathlib.Path, backend: str, store: pathlib.Path | None,
           gap_mm=round(float(np.linalg.norm(kin.site_pos - c)) * 1000, 1),
           top_mm=(None if not np.isfinite(hit.top_z)
                   else round(float(hit.top_z) * 1000, 1)),
-          n_px=int(hit.n_px), r=round(r, 4), a_deg=round(a, 1),
+          n_px=int(hit.n_px),
+          # Areas quoted on the full 848x480 sensor grid, always.  A backend's
+          # own ``n_px`` is on whatever grid it segments: ``DepthSegmenter``
+          # halves it and counts a 25 mm object as a quarter of the pixels
+          # ``YoloSegmenter`` does.  Comparing the two raw is a factor of four
+          # of nothing, and it is the kind of mistake that survives into a
+          # report because both numbers look like pixels.
+          n_px_full=int(hit.n_px) * seg.decimate ** 2,
+          r=round(r, 4), a_deg=round(a, 1),
           in_sector=bool(rlo <= r <= rhi and alo <= math.radians(a) <= ahi),
           xy=[round(float(c[0]), 4), round(float(c[1]), 4)],
         )
@@ -258,7 +372,7 @@ def summarise(run: dict) -> dict:
   n = len(rows)
   hit = [r for r in rows if r["n_px"] is not None]
   tops = [r["top_mm"] for r in hit if r["top_mm"] is not None]
-  pxs = [r["n_px"] for r in hit]
+  pxs = [r.get("n_px_full", r["n_px"]) for r in hit]
   # Tall enough to be a thing rather than a fragment of one.  Everything
   # taller than the ceiling was rejected upstream, so this is a floor test.
   tall = [r for r in hit if r["top_mm"] is not None
@@ -301,7 +415,9 @@ def summarise(run: dict) -> dict:
       100.0 * sum(bool(r["in_sector"]) for r in hit) / len(hit), 1)),
     "top_mm": {"p5": _pct(tops, 5), "median": _pct(tops, 50),
                "p95": _pct(tops, 95)},
+    # On the full sensor grid for every backend -- see ``n_px_full``.
     "n_px": {"p5": _pct(pxs, 5), "median": _pct(pxs, 50), "p95": _pct(pxs, 95)},
+    "decimate": (rows[0].get("decimate") if rows else None),
     # What the *replay* cost, which for a precomputed backend is disk and
     # decompression and the geometry -- not the model.  A store written by
     # ``sam3_infer.py`` carries the model's own timing in its ``_meta.json``
@@ -418,6 +534,27 @@ def main() -> int:
   p.add_argument("--name", default=None, help="what to call this run")
   p.add_argument("--conf", type=float, default=None)
   p.add_argument("--device", default="cuda:0")
+  p.add_argument("--arm-clearance", type=float, default=None,
+                 help="override SegmenterCfg.arm_clearance_m, in metres")
+  p.add_argument("--protect-target", type=float, default=0.0,
+                 metavar="RADIUS_M",
+                 help="exempt a sphere this big around the tracked "
+                      "target from the arm exclusion")
+  p.add_argument("--confirm", type=int, default=3,
+                 help="frames in the last five an instance must be seen "
+                      "before it may be chosen")
+  p.add_argument("--width-max", type=float, default=None,
+                 help="override SegmenterCfg.width_range_m ceiling, metres")
+  p.add_argument("--no-arm-mask", action="store_true",
+                 help="turn the arm exclusion off entirely")
+  p.add_argument("--protect-ceiling", type=float, default=0.0,
+                 metavar="M",
+                 help="cap the protected sphere this far above the target's "
+                      "own centroid, so it cannot exempt the gripper too")
+  p.add_argument("--release-effort", type=float, default=None,
+                 help="clear the target when |gripper_effort| exceeds this. "
+                      "gripper_effort.json measures 0.085 free against 1.043 "
+                      "held, so 0.7 separates them")
   p.add_argument("--limit", type=int, default=None,
                  help="stop after N frames -- for a smoke test only, the "
                       "numbers are not the session's")
@@ -460,7 +597,9 @@ def main() -> int:
       return 1
     name, backend, store = a.name or a.masks.name, "precomputed", a.masks
 
-  run = replay(a.session, backend, store, a.conf, a.limit, a.device)
+  run = replay(a.session, backend, store, a.conf, a.limit, a.device,
+               a.arm_clearance, a.protect_target, a.release_effort,
+               a.protect_ceiling, a.no_arm_mask, a.confirm, a.width_max)
   run["store_meta"] = _store_meta(store)
   print(_report(_write(a.session, name, run)))
   return 0

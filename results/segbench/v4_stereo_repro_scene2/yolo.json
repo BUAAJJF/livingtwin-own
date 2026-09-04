@@ -21,9 +21,10 @@
   "median": 5069.5,
   "p95": 5410.0
  },
+ "decimate": 1,
  "replay_ms": {
-  "median": 119.96,
-  "p95": 144.65
+  "median": 99.04,
+  "p95": 143.21
  },
  "model_ms": null,
  "prompt": null,

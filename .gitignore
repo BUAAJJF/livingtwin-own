@@ -100,3 +100,8 @@ results/*.html
 # READMEs and WHY.md beside them carry every number that was concluded from.
 results/d455_heavy_dr/**/*.log
 results/accept_compare/*.json
+# segbench frame renders: ~3000 JPEGs (190 MB) per pass of shaperender.py /
+# the relief variant.  Re-derivable from the recording; the JSON/JSONL beside
+# them carry every number.
+results/segbench/**/shape/
+results/segbench/**/relief/
