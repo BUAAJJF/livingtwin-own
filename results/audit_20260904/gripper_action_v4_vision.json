@@ -1,0 +1,73 @@
+{
+ "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+ "task": "Mjlab-Pick-Place-PiperX-Vision",
+ "steps": 600,
+ "num_envs": 128,
+ "raw_gripper_action": {
+  "min": -14.278437614440918,
+  "p1": -8.219721794128418,
+  "p10": -4.893668174743652,
+  "p50": 0.7555129528045654,
+  "p90": 5.598221302032471,
+  "max": 10.137776374816895
+ },
+ "frac_below_-1": 0.33911458333333333,
+ "frac_above_1": 0.4813671875,
+ "frac_below_-2": 0.2674609375,
+ "while_held": {
+  "frac_below_-1": 0.4566113624937154,
+  "p50": -0.49931737780570984
+ },
+ "while_free": {
+  "frac_below_-1": 0.32163637723431304,
+  "p50": 0.9419671893119812
+ },
+ "last_window": {
+  "p50": 0.525614321231842,
+  "frac_below_-1": 0.3415625,
+  "jaw_mm_p50": 29.442100524902344
+ },
+ "first_window": {
+  "p50": 0.9829516410827637,
+  "frac_below_-1": 0.3209375
+ },
+ "obs_actions_term_equals_raw": false,
+ "arm_action_abs_max": 14.278437614440918,
+ "provenance": {
+  "env_knobs": {
+   "TARGET_VISIBLE_FLOOR": null,
+   "TARGET_VISIBLE_CEIL": null,
+   "TARGET_GAP_SCALE": null,
+   "OBS_LATENCY_PROBS": null,
+   "SMOOTH_SCALE": null,
+   "SIGHT_RAMP": null,
+   "SIGHT_ARM_W": null,
+   "SIGHT_HAND_W": null,
+   "WRIST_W": null,
+   "HELD_PROXY_M": null,
+   "RESET_FULL_RANGE": null,
+   "PIPER_X_URDF": null
+  },
+  "sensor": {
+   "setting": "measured",
+   "camera": {
+    "noise_model": "DepthNoiseCfg",
+    "mask_jitter_px": 1,
+    "strength": 1.0,
+    "surface_fill": [
+     0.9744444444444444,
+     1.0
+    ],
+    "texture_penalty": [
+     1.0,
+     1.35
+    ]
+   },
+   "camera_pose": {
+    "mode": "startup",
+    "pos_jitter": 0.0,
+    "rot_jitter": 0.0
+   }
+  }
+ }
+}
