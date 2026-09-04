@@ -1,0 +1,41 @@
+{
+  "validity": {
+    "status": "superseded",
+    "audited": "2026-09-04",
+    "defects": {
+      "clean_sensor": "measured with the depth noise and mask jitter off (the play-mode default on a nominal task).  A student distilled under the fitted sensor collapses under a clean one (results/audit_20260904: 4/min -> 0.2 vs ~32/min with the sensor on), so this is out-of-distribution, not a baseline.  Default changed to --sensor measured on 2026-09-04."
+    },
+    "superseded_by": "results/audit_20260904/v4_vision_measured.json",
+    "note": "kept as written; do not quote.  See results/VALIDITY.md."
+  },
+  "placed_per_min": [
+    3.75,
+    1.40625,
+    0.46875,
+    0.234375,
+    0.234375,
+    0.234375,
+    0.0,
+    0.234375,
+    0.0,
+    0.46875,
+    0.0,
+    0.0
+  ],
+  "early_per_min": 1.0546875,
+  "late_per_min": 0.1171875,
+  "late_over_early": 0.1111111111111111,
+  "started_envs": 16,
+  "stopped_envs": 16,
+  "survivor_fraction": 0.0,
+  "survivor_placements_last": 0.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 26.501617394387722,
+  "jaw_mm_running": 26.37400757521391,
+  "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision",
+  "seed": 101,
+  "num_envs": 128,
+  "steps": 1200,
+  "reset_every": 0
+}

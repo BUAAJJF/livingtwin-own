@@ -1,0 +1,83 @@
+{
+  "validity": {
+    "status": "invalid",
+    "audited": "2026-09-04",
+    "defects": {
+      "no_gru_reset": "eval_endurance/eval_occlusion did not reset the GRU hidden state on episode boundaries before 2026-09-04 01:26; a recurrent student carried the last episode's state into the next.  Fixed in 4cf9800 (reset_recurrent)."
+    },
+    "superseded_by": "results/v8_occ_fixed_v8s_sam2.json",
+    "note": "kept as written; do not quote.  See results/VALIDITY.md."
+  },
+  "checkpoint": "checkpoints/v8/v8s_sam2.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Distill-Robust",
+  "num_envs": 128,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 5.15625,
+  "held_fraction": 0.0325,
+  "joint_speed_rad_s": {
+    "mean": 1.685315489768982,
+    "p95": 2.3784637451171875,
+    "p99": 2.7267415523529053,
+    "max": 3.8789074420928955,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.22034236788749695,
+  "all": {
+    "n": 38400,
+    "visible_mean": 0.6741215277777779,
+    "visible_median": 0.7333333333333333,
+    "blocked_rate": 0.057890625,
+    "occluded_by": {
+      "fingers": 0.031420138888888886,
+      "gripper_base": 0.033512152777777776,
+      "arm": 0.016019097222222223,
+      "other": 0.24492708333333332
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 37152,
+      "visible_mean": 0.6783250789549239,
+      "visible_median": 0.7333333333333333,
+      "blocked_rate": 0.05345607235142119,
+      "occluded_by": {
+        "fingers": 0.028299956933677865,
+        "gripper_base": 0.03165913006029285,
+        "arm": 0.01323033304622452,
+        "other": 0.24848550100488084
+      }
+    },
+    "holding": {
+      "n": 1248,
+      "visible_mean": 0.5489850427350428,
+      "visible_median": 0.6,
+      "blocked_rate": 0.18990384615384615,
+      "occluded_by": {
+        "fingers": 0.12430555555555556,
+        "gripper_base": 0.08867521367521368,
+        "arm": 0.09903846153846153,
+        "other": 0.1389957264957265
+      }
+    }
+  },
+  "engaged": {
+    "n": 28943,
+    "visible_mean": 0.674742309597024,
+    "visible_median": 0.7333333333333333,
+    "blocked_rate": 0.05928894724112912,
+    "occluded_by": {
+      "fingers": 0.035002130624560916,
+      "gripper_base": 0.03947068375773071,
+      "arm": 0.015999262919070816,
+      "other": 0.23478561310161353
+    }
+  },
+  "reach_m": {
+    "mean": 0.10472339391708374,
+    "engaged_fraction": 0.7862239583333334
+  }
+}

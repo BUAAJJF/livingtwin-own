@@ -1,0 +1,32 @@
+{
+  "placed_per_min": [
+    3.984375,
+    33.6328125,
+    32.4609375,
+    32.109375,
+    30.3515625,
+    27.1875,
+    27.890625,
+    27.3046875,
+    25.8984375,
+    25.78125,
+    25.6640625,
+    24.375
+  ],
+  "early_per_min": 26.62109375,
+  "late_per_min": 26.15234375,
+  "late_over_early": 0.9823917828319882,
+  "started_envs": 34,
+  "stopped_envs": 13,
+  "survivor_fraction": 0.6176470588235294,
+  "survivor_placements_last": 1.1904761904761905,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 0.2747147809714079,
+  "jaw_mm_running": 23.664068430662155,
+  "checkpoint": "checkpoints/v9/v9_wrist30_s1.5.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0
+}

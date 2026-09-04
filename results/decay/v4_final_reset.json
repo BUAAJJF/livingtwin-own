@@ -1,0 +1,42 @@
+{
+  "validity": {
+    "status": "invalid",
+    "audited": "2026-09-04",
+    "defects": {
+      "no_gru_reset": "eval_endurance/eval_occlusion did not reset the GRU hidden state on episode boundaries before 2026-09-04 01:26; a recurrent student carried the last episode's state into the next.  Fixed in 4cf9800 (reset_recurrent).",
+      "clean_sensor": "measured with the depth noise and mask jitter off (the play-mode default on a nominal task).  A student distilled under the fitted sensor collapses under a clean one (results/audit_20260904: 4/min -> 0.2 vs ~32/min with the sensor on), so this is out-of-distribution, not a baseline.  Default changed to --sensor measured on 2026-09-04."
+    },
+    "superseded_by": "results/audit_20260904/v4_vision_measured.json",
+    "note": "kept as written; do not quote.  See results/VALIDITY.md."
+  },
+  "placed_per_min": [
+    3.75,
+    1.25,
+    0.625,
+    1.875,
+    0.0,
+    0.625,
+    0.0,
+    1.25,
+    0.0,
+    1.25,
+    0.0,
+    0.0
+  ],
+  "early_per_min": 1.3541666666666667,
+  "late_per_min": 0.4166666666666667,
+  "late_over_early": 0.3076923076923077,
+  "started_envs": 6,
+  "stopped_envs": 6,
+  "survivor_fraction": 0.0,
+  "survivor_placements_last": 0.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 25.90313833206892,
+  "jaw_mm_running": 31.190743669867516,
+  "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision",
+  "seed": 101,
+  "num_envs": 48,
+  "steps": 1200,
+  "reset_every": 300
+}

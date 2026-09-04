@@ -1,0 +1,32 @@
+{
+  "placed_per_min": [
+    6.328125,
+    5.15625,
+    6.328125,
+    3.984375,
+    4.6875,
+    4.453125,
+    4.921875,
+    3.75,
+    2.109375,
+    2.109375,
+    4.21875,
+    2.578125
+  ],
+  "early_per_min": 5.15625,
+  "late_per_min": 3.28125,
+  "late_over_early": 0.6363636363636364,
+  "started_envs": 27,
+  "stopped_envs": 26,
+  "survivor_fraction": 0.03703703703703709,
+  "survivor_placements_last": 1.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 11.134008644148707,
+  "jaw_mm_running": 2.7240385534241796,
+  "checkpoint": "checkpoints/v8/v8s_depth.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Distill-Robust",
+  "seed": 101,
+  "num_envs": 128,
+  "steps": 1200,
+  "reset_every": 0
+}
