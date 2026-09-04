@@ -1,0 +1,58 @@
+{
+  "checkpoint": "checkpoints/v7_teachers/v5_baseline.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "num_envs": 256,
+  "steps": 600,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 32.28515625,
+  "held_fraction": 0.17815104166666668,
+  "joint_speed_rad_s": {
+    "mean": 1.9195764064788818,
+    "p95": 2.4266271591186523,
+    "p99": 2.738084554672241,
+    "max": 3.8900253772735596,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.3102818429470062,
+  "all": {
+    "n": 153600,
+    "visible_mean": 0.5728897569444444,
+    "visible_median": 0.6,
+    "blocked_rate": 0.16072916666666667,
+    "occluded_by": {
+      "fingers": 0.19222309027777779,
+      "gripper_base": 0.029335069444444445,
+      "arm": 0.00075390625,
+      "other": 0.20479817708333334
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 126236,
+      "visible_mean": 0.5682187859775869,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.18722076111410374,
+      "occluded_by": {
+        "fingers": 0.18118708873327208,
+        "gripper_base": 0.03424221299787699,
+        "arm": 0.0008734962028792632,
+        "other": 0.21547841608838472
+      }
+    },
+    "holding": {
+      "n": 27364,
+      "visible_mean": 0.5944379476684696,
+      "visible_median": 0.6,
+      "blocked_rate": 0.038517760561321446,
+      "occluded_by": {
+        "fingers": 0.2431345319885007,
+        "gripper_base": 0.0066973639331481755,
+        "arm": 0.00020221215221946108,
+        "other": 0.15552794425766214
+      }
+    }
+  }
+}

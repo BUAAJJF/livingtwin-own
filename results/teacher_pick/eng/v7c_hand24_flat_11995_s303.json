@@ -1,0 +1,74 @@
+{
+  "checkpoint": "checkpoints/v7c/v7c_hand24_flat_11995.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "num_envs": 256,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 23.984375,
+  "held_fraction": 0.14389322916666666,
+  "joint_speed_rad_s": {
+    "mean": 1.9014207124710083,
+    "p95": 2.4458072185516357,
+    "p99": 2.8098926544189453,
+    "max": 3.901193857192993,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.27172377705574036,
+  "all": {
+    "n": 76800,
+    "visible_mean": 0.6274340277777778,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.11153645833333334,
+    "occluded_by": {
+      "fingers": 0.08056163194444445,
+      "gripper_base": 0.031524305555555555,
+      "arm": 0.019952256944444444,
+      "other": 0.24052777777777778
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 65749,
+      "visible_mean": 0.6479419205361805,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.09277707645743662,
+      "occluded_by": {
+        "fingers": 0.05386038824418116,
+        "gripper_base": 0.023790475900774155,
+        "arm": 0.014411372543055153,
+        "other": 0.259995842775809
+      }
+    },
+    "holding": {
+      "n": 11051,
+      "visible_mean": 0.5054203239525835,
+      "visible_median": 0.5333333333333333,
+      "blocked_rate": 0.2231472264953398,
+      "occluded_by": {
+        "fingers": 0.23942327994449975,
+        "gripper_base": 0.07753747775465267,
+        "arm": 0.05291828793774319,
+        "other": 0.12470063041052092
+      }
+    }
+  },
+  "engaged": {
+    "n": 25909,
+    "visible_mean": 0.5723545228813668,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.17827781851866148,
+    "occluded_by": {
+      "fingers": 0.13628726182664969,
+      "gripper_base": 0.059822198206543414,
+      "arm": 0.03615217363335778,
+      "other": 0.1953838434520823
+    }
+  },
+  "reach_m": {
+    "mean": 0.1551329493522644,
+    "engaged_fraction": 0.48125
+  }
+}

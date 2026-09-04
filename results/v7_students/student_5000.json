@@ -1,0 +1,41 @@
+{
+  "validity": {
+    "status": "invalid",
+    "audited": "2026-09-04",
+    "defects": {
+      "no_gru_reset": "eval_endurance/eval_occlusion did not reset the GRU hidden state on episode boundaries before 2026-09-04 01:26; a recurrent student carried the last episode's state into the next.  Fixed in 4cf9800 (reset_recurrent)."
+    },
+    "superseded_by": null,
+    "note": "kept as written; do not quote.  See results/VALIDITY.md."
+  },
+  "placed_per_min": [
+    6.09375,
+    4.21875,
+    3.046875,
+    5.15625,
+    4.21875,
+    3.28125,
+    3.046875,
+    3.046875,
+    3.75,
+    2.8125,
+    2.578125,
+    1.875
+  ],
+  "early_per_min": 4.3359375,
+  "late_per_min": 2.8515625,
+  "late_over_early": 0.6576576576576577,
+  "started_envs": 26,
+  "stopped_envs": 21,
+  "survivor_fraction": 0.1923076923076923,
+  "survivor_placements_last": 1.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 0.20754840807057917,
+  "jaw_mm_running": 0.18479990831110626,
+  "checkpoint": "checkpoints/v7c/student_5000.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Distill-Robust",
+  "seed": 101,
+  "num_envs": 128,
+  "steps": 1200,
+  "reset_every": 0
+}

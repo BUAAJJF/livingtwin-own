@@ -1,0 +1,74 @@
+{
+  "checkpoint": "checkpoints/v7c/sight0_2085.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "num_envs": 256,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 27.1484375,
+  "held_fraction": 0.1887890625,
+  "joint_speed_rad_s": {
+    "mean": 1.8912286758422852,
+    "p95": 2.437481164932251,
+    "p99": 2.7497341632843018,
+    "max": 3.913033962249756,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.308700829744339,
+  "all": {
+    "n": 76800,
+    "visible_mean": 0.5755208333333334,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.1597265625,
+    "occluded_by": {
+      "fingers": 0.16852430555555556,
+      "gripper_base": 0.04250086805555556,
+      "arm": 0.006604166666666667,
+      "other": 0.20684982638888888
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 62301,
+      "visible_mean": 0.5759447413899188,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.181650374793342,
+      "occluded_by": {
+        "fingers": 0.14771619503164743,
+        "gripper_base": 0.049635372358924144,
+        "arm": 0.007517268315650364,
+        "other": 0.21918642290385923
+      }
+    },
+    "holding": {
+      "n": 14499,
+      "visible_mean": 0.5736993355863622,
+      "visible_median": 0.6,
+      "blocked_rate": 0.06552176012138768,
+      "occluded_by": {
+        "fingers": 0.25793503000206913,
+        "gripper_base": 0.01184449502264524,
+        "arm": 0.0026806446421592293,
+        "other": 0.15384049474676414
+      }
+    }
+  },
+  "engaged": {
+    "n": 37888,
+    "visible_mean": 0.567432080518018,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.18549408783783783,
+    "occluded_by": {
+      "fingers": 0.18081362612612611,
+      "gripper_base": 0.058299901463963966,
+      "arm": 0.011722269144144145,
+      "other": 0.18173212274774775
+    }
+  },
+  "reach_m": {
+    "mean": 0.10600732266902924,
+    "engaged_fraction": 0.6821223958333333
+  }
+}

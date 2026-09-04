@@ -1,0 +1,235 @@
+{
+  "per_session": [
+    {
+      "session": "v4_bias_try1",
+      "frames": 71,
+      "dt_s": 0.0201,
+      "closed_frames": 49,
+      "detect_rate_closed": 0.7551,
+      "detect_rate_open": 0.5,
+      "swaps": 5,
+      "swaps_while_held": 5
+    },
+    {
+      "session": "v4_bias_try2",
+      "frames": 177,
+      "dt_s": 0.0195,
+      "closed_frames": 160,
+      "detect_rate_closed": 0.5312,
+      "detect_rate_open": 0.4706,
+      "swaps": 5,
+      "swaps_while_held": 5
+    },
+    {
+      "session": "v4_fixedseg_try2",
+      "frames": 73,
+      "dt_s": 0.0201,
+      "closed_frames": 56,
+      "detect_rate_closed": 0.8571,
+      "detect_rate_open": 1.0,
+      "swaps": 0,
+      "swaps_while_held": 0
+    },
+    {
+      "session": "v4_fixedseg_try6",
+      "frames": 2850,
+      "dt_s": 0.0219,
+      "closed_frames": 2730,
+      "detect_rate_closed": 0.0615,
+      "detect_rate_open": 0.1417,
+      "swaps": 9,
+      "swaps_while_held": 8
+    },
+    {
+      "session": "v4_fixedseg_try7",
+      "frames": 84,
+      "dt_s": 0.0201,
+      "closed_frames": 68,
+      "detect_rate_closed": 0.9706,
+      "detect_rate_open": 0.5,
+      "swaps": 6,
+      "swaps_while_held": 6
+    },
+    {
+      "session": "v4_held_try1",
+      "frames": 1245,
+      "dt_s": 0.0199,
+      "closed_frames": 1022,
+      "detect_rate_closed": 0.5753,
+      "detect_rate_open": 0.7578,
+      "swaps": 28,
+      "swaps_while_held": 20
+    },
+    {
+      "session": "v4_held_try2",
+      "frames": 2559,
+      "dt_s": 0.0213,
+      "closed_frames": 2369,
+      "detect_rate_closed": 0.1925,
+      "detect_rate_open": 0.9105,
+      "swaps": 14,
+      "swaps_while_held": 12
+    },
+    {
+      "session": "v4_stereo_hold1",
+      "frames": 62,
+      "dt_s": 0.0202,
+      "closed_frames": 44,
+      "detect_rate_closed": 0.9318,
+      "detect_rate_open": 0.4444,
+      "swaps": 0,
+      "swaps_while_held": 0
+    },
+    {
+      "session": "v4_stereo_hold2",
+      "frames": 150,
+      "dt_s": 0.0199,
+      "closed_frames": 98,
+      "detect_rate_closed": 0.602,
+      "detect_rate_open": 0.4231,
+      "swaps": 2,
+      "swaps_while_held": 1
+    },
+    {
+      "session": "v4_stereo_repro1",
+      "frames": 289,
+      "dt_s": 0.0196,
+      "closed_frames": 229,
+      "detect_rate_closed": 0.4891,
+      "detect_rate_open": 0.8333,
+      "swaps": 14,
+      "swaps_while_held": 12
+    },
+    {
+      "session": "v4_stereo_repro2",
+      "frames": 1633,
+      "dt_s": 0.0213,
+      "closed_frames": 1538,
+      "detect_rate_closed": 0.2074,
+      "detect_rate_open": 0.8842,
+      "swaps": 18,
+      "swaps_while_held": 13
+    },
+    {
+      "session": "v4_stereo_repro4",
+      "frames": 274,
+      "dt_s": 0.0199,
+      "closed_frames": 192,
+      "detect_rate_closed": 0.4896,
+      "detect_rate_open": 0.8659,
+      "swaps": 10,
+      "swaps_while_held": 6
+    },
+    {
+      "session": "v4_stereo_repro5",
+      "frames": 807,
+      "dt_s": 0.0199,
+      "closed_frames": 657,
+      "detect_rate_closed": 0.5616,
+      "detect_rate_open": 0.9267,
+      "swaps": 68,
+      "swaps_while_held": 54
+    },
+    {
+      "session": "v4_stereo_repro_scene1",
+      "frames": 3378,
+      "dt_s": 0.02,
+      "closed_frames": 2225,
+      "detect_rate_closed": 0.4216,
+      "detect_rate_open": 0.1943,
+      "swaps": 35,
+      "swaps_while_held": 31
+    },
+    {
+      "session": "v4_stereo_repro_scene2",
+      "frames": 3700,
+      "dt_s": 0.0196,
+      "closed_frames": 2776,
+      "detect_rate_closed": 0.2586,
+      "detect_rate_open": 0.3939,
+      "swaps": 60,
+      "swaps_while_held": 55
+    },
+    {
+      "session": "v4_stereo_try1",
+      "frames": 1373,
+      "dt_s": 0.02,
+      "closed_frames": 886,
+      "detect_rate_closed": 0.3984,
+      "detect_rate_open": 0.1766,
+      "swaps": 35,
+      "swaps_while_held": 24
+    },
+    {
+      "session": "v4_stereo_try2",
+      "frames": 2072,
+      "dt_s": 0.0261,
+      "closed_frames": 1863,
+      "detect_rate_closed": 0.8615,
+      "detect_rate_open": 0.8038,
+      "swaps": 8,
+      "swaps_while_held": 5
+    },
+    {
+      "session": "v4_stereo_try3",
+      "frames": 2302,
+      "dt_s": 0.0201,
+      "closed_frames": 1377,
+      "detect_rate_closed": 0.3188,
+      "detect_rate_open": 0.1384,
+      "swaps": 21,
+      "swaps_while_held": 21
+    },
+    {
+      "session": "v4_stereo_try4",
+      "frames": 1528,
+      "dt_s": 0.0199,
+      "closed_frames": 1234,
+      "detect_rate_closed": 0.5924,
+      "detect_rate_open": 0.5544,
+      "swaps": 54,
+      "swaps_while_held": 48
+    },
+    {
+      "session": "v3_final_motion_try1",
+      "frames": 1383,
+      "dt_s": 0.0215,
+      "closed_frames": 173,
+      "detect_rate_closed": 0.9595,
+      "detect_rate_open": 0.0347,
+      "swaps": 0,
+      "swaps_while_held": 0
+    }
+  ],
+  "gap_runs": {
+    "open": {
+      "n": 69,
+      "mean": 62.492753623188406,
+      "max": 1168,
+      "p50": 14,
+      "p75": 38,
+      "p90": 104,
+      "p95": 229,
+      "p99": 859
+    },
+    "closed": {
+      "n": 174,
+      "mean": 71.0,
+      "max": 1463,
+      "p50": 40,
+      "p75": 58,
+      "p90": 85,
+      "p95": 174,
+      "p99": 1135
+    }
+  },
+  "totals": {
+    "frames": 26010,
+    "closed": 19746,
+    "closed_seen": 7392,
+    "open_seen": 1952,
+    "swaps": 392,
+    "swaps_held": 326,
+    "held_spans": 142
+  }
+}

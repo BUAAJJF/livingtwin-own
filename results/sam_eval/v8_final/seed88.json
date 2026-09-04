@@ -1,0 +1,187 @@
+{
+  "self_check": {
+    "ok": true,
+    "pixels": 248,
+    "median_distance_to_object_box_mm": 0.9,
+    "p90_mm": 12.2,
+    "centroid_offset_mm": 15.7,
+    "tolerance_mm": 8.0
+  },
+  "steps": 300,
+  "swaps": 0,
+  "lifecycle": false,
+  "sam": true,
+  "policy": "results/d455_heavy_dr/v8_remote/e36_15499.pt",
+  "seed": 88,
+  "by_phase": {
+    "approach": {
+      "depth": {
+        "n": 262,
+        "detected": 0.2480916030534351,
+        "iou_mean": 0.16772846102514286,
+        "iou_median": 0.0,
+        "wrong_target": 0.0,
+        "empty": 0.7519083969465649
+      },
+      "deploy": {
+        "n": 262,
+        "detected": 0.2480916030534351,
+        "iou_mean": 0.16772846102514286,
+        "iou_median": 0.0,
+        "wrong_target": 0.0,
+        "empty": 0.7519083969465649
+      },
+      "sam_raw": {
+        "n": 262,
+        "detected": 0.7862595419847328,
+        "iou_mean": 0.6498079937408913,
+        "iou_median": 0.8188775510204082,
+        "wrong_target": 0.007633587786259542,
+        "empty": 0.2137404580152672
+      },
+      "sam": {
+        "n": 262,
+        "detected": 0.7519083969465649,
+        "iou_mean": 0.6294661718471253,
+        "iou_median": 0.8068965517241379,
+        "wrong_target": 0.0,
+        "empty": 0.24809160305343514
+      },
+      "deploy+sam": {
+        "n": 262,
+        "detected": 0.7519083969465649,
+        "iou_mean": 0.6294661718471253,
+        "iou_median": 0.8068965517241379,
+        "wrong_target": 0.0,
+        "empty": 0.24809160305343514
+      }
+    },
+    "holding": {
+      "depth": {
+        "n": 38,
+        "detected": 0.0,
+        "iou_mean": 0.0,
+        "iou_median": 0.0,
+        "wrong_target": 0.0,
+        "empty": 1.0
+      },
+      "deploy": {
+        "n": 38,
+        "detected": 1.0,
+        "iou_mean": 0.39347213516811597,
+        "iou_median": 0.4392663043478261,
+        "wrong_target": 0.10526315789473684,
+        "empty": 0.0
+      },
+      "sam_raw": {
+        "n": 38,
+        "detected": 0.8947368421052632,
+        "iou_mean": 0.6270798002104092,
+        "iou_median": 0.7126984126984127,
+        "wrong_target": 0.0,
+        "empty": 0.10526315789473684
+      },
+      "sam": {
+        "n": 38,
+        "detected": 0.7631578947368421,
+        "iou_mean": 0.5657673510496628,
+        "iou_median": 0.7055555555555555,
+        "wrong_target": 0.0,
+        "empty": 0.23684210526315785
+      },
+      "deploy+sam": {
+        "n": 38,
+        "detected": 1.0,
+        "iou_mean": 0.39347213516811597,
+        "iou_median": 0.4392663043478261,
+        "wrong_target": 0.10526315789473684,
+        "empty": 0.0
+      }
+    }
+  },
+  "sam_report": {
+    "checkpoint": "/home/yunfan/Project/PiperPush/LivingTwin/hardware/deploy/sam2_assets/sam2.1_hiera_small.pt",
+    "model_cfg": "configs/sam2.1/sam2.1_hiera_s.yaml",
+    "vos_optimized": false,
+    "bf16": true,
+    "load_s": 0.27,
+    "image_size": 1024,
+    "memory_frames": 48,
+    "max_anchors": 3,
+    "timing": {
+      "preprocess_ms": {
+        "p50": 0.35943750117439777,
+        "p90": 0.46618700434919447,
+        "p99": 1.785869250306864,
+        "n": 246
+      },
+      "infer_ms": {
+        "p50": 25.388721987837926,
+        "p90": 27.205802005482838,
+        "p99": 28.031264786841348,
+        "n": 241
+      }
+    }
+  },
+  "sam_rejections": {
+    "area": 11,
+    "empty": 4,
+    "jumped": 3
+  },
+  "by_distance": {
+    "0-30": {
+      "depth": 0.03,
+      "deploy": 0.03,
+      "sam_raw": 0.93,
+      "sam": 0.87,
+      "deploy+sam": 0.87
+    },
+    "30-50": {
+      "depth": 0.2857142857142857,
+      "deploy": 0.2857142857142857,
+      "sam_raw": 0.7857142857142857,
+      "sam": 0.7857142857142857,
+      "deploy+sam": 0.7857142857142857
+    },
+    "50-80": {
+      "depth": 0.4375,
+      "deploy": 0.4375,
+      "sam_raw": 0.75,
+      "sam": 0.75,
+      "deploy+sam": 0.75
+    },
+    "80-150": {
+      "depth": 0.5106382978723404,
+      "deploy": 0.5106382978723404,
+      "sam_raw": 0.8085106382978723,
+      "sam": 0.7659574468085106,
+      "deploy+sam": 0.7659574468085106
+    },
+    "150-10000": {
+      "depth": 0.3176470588235294,
+      "deploy": 0.3176470588235294,
+      "sam_raw": 0.611764705882353,
+      "sam": 0.6,
+      "deploy+sam": 0.6
+    }
+  },
+  "rejects": {
+    "approach": {
+      "segmenter found 1, tracker withheld": 10,
+      "nothing survived to be gated": 179
+    },
+    "holding": {
+      "nothing survived to be gated": 38
+    }
+  },
+  "fallbacks": {
+    "deploy": {
+      "holdover": 60,
+      "rebuild": 38
+    },
+    "deploy+sam": {
+      "holdover": 0,
+      "rebuild": 38
+    }
+  }
+}
