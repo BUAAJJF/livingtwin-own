@@ -7,7 +7,7 @@
 # multi-gigabyte session tensors -- so that what lands here is exactly what
 # gets committed.
 set -Eeuo pipefail
-SUB=${1:-wm1_latency}
+SUB=${1:-d455_heavy_dr}
 cd "$(dirname "$0")/.."
 # --delete, because the server is the source of truth: a result quarantined
 # there must not survive here and quietly re-enter an analysis.  runs/ is

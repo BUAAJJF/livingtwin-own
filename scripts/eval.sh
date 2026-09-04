@@ -9,7 +9,7 @@
 #   NUM_ENVS    parallel environments      (default: 512)
 #   STEPS       control steps              (default: 2400)
 #   SEED        rollout seed               (default: 20260823)
-#   OUT         directory for the JSON     (default: results/novelty_validation/baseline)
+#   OUT         directory for the JSON     (default: results/eval/baseline)
 #
 # 512 x 2400 is the protocol every number in docs/results.md was measured
 # under: 409.6 arm-minutes, about 22k object instances.  Smaller samples read
@@ -29,7 +29,7 @@ GPU=${GPU:-0}
 NUM_ENVS=${NUM_ENVS:-512}
 STEPS=${STEPS:-2400}
 SEED=${SEED:-20260823}
-OUT=${OUT:-results/novelty_validation/baseline}
+OUT=${OUT:-results/eval/baseline}
 
 cd "$(dirname "$0")/.."
 

@@ -40,7 +40,7 @@ privileged state teacher (PPO)
 
 The state teacher sees object state and privileged physics. The deployed actor sees proprioception plus a 3-channel 224x168 policy image: scene depth, target mask, and masked target depth. Its visual encoder is a two-layer CNN with spatial softmax followed by a 256-wide GRU. The asymmetric critic remains privileged during PPO and is not deployed.
 
-There is also a separate research track for reward-free, decision-aware sim-to-real calibration/world models (`wm_*`, `perturb.py`, `latency.py`, `damping.py`, `hidden_plant.py`, `residual.py`, and RA/WM result folders). It is related, but it is not the immediate D455 robust-policy task. Do not conflate simulation-only WM/RA claims with the current hardware campaign.
+The reward-free, decision-aware sim-to-real calibration research track (WM0/WM1/RA-Sim/RA-HW) was moved to the branch `yf/wm-ra-research` on 2026-09-04 and is not on this branch. What remains here (`perturb.py`, `latency.py`, `damping.py`, `prior.py`, `hidden_plant.py`, `residual.py`) is shared simulator-mismatch infrastructure the hardware line imports. Do not conflate simulation-only WM/RA claims with the current hardware campaign; the README carries the true per-phase verdicts (all RED or BLOCKED after WM0).
 
 ## Code map
 

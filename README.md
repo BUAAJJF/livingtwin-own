@@ -1,4 +1,4 @@
-# PiPER-X tabletop tidying — vision policy, and sim-to-real calibration
+# PiPER-X tabletop tidying — vision policy on a D455 + PiPER-X
 
 An AgileX PiPER-X clears objects from a table into a bin, continuously: pick
 one up, put it in, the table refills. The deployed policy sees the scene
@@ -15,14 +15,12 @@ rsl_rl, so thousands of environments run in parallel.
 
 ---
 
-## Research Direction: Reward-Free Decision-Aware Sim-to-Real Calibration
+## What exists today
 
-### What exists today
-
-All of this is built, measured and reproducible in simulation. **It has now
-also run on hardware**: on 2026-09-01 a trained vision policy picked objects
-off the table and placed them in the bin on the PiPER-X, from the calibrated
-D455 alone. That is a first working run, not a solved problem -- the same day
+All of this is built, measured and reproducible in simulation. **It has also
+run on hardware**: on 2026-09-01 a trained vision policy picked objects off the
+table and placed them in the bin on the PiPER-X, from the calibrated D455
+alone. That is a first working run, not a solved problem -- the same day
 produced the list of things that are still wrong in
 [Lessons from the first hardware runs](#lessons-from-the-first-hardware-runs).
 
@@ -43,127 +41,45 @@ the simulator with no hardware attached. What was measured, what it changed,
 and what it invalidates:
 [`docs/depth_sensor_and_deployment.md`](docs/depth_sensor_and_deployment.md).
 
-Measured results and their caveats are in
-[`docs/results.md`](docs/results.md), and the audit that re-measured them —
-including **two findings in that file which it retracts** — is in
-[`docs/novelty_validation_phase_0_2.md`](docs/novelty_validation_phase_0_2.md).
-Two conclusions from that audit constrain everything below:
+Measured results and their caveats are in [`docs/results.md`](docs/results.md);
+the audit that re-measured them (and retracts two of its findings) is
+`docs/novelty_validation_phase_0_2.md` on the `yf/wm-ra-research` branch. Two
+conclusions from that audit constrain everything below:
 
 * **The simulator is not reproducible run to run.** Five identical commands
-  span 2.9%. Single rollouts do not support conclusions here, and every number
-  in the new work is a median over ≥3 independent processes with the spread
-  quoted.
+  span 2.9%. Single rollouts do not support conclusions here; every quoted
+  number should be a median over ≥3 independent processes with the spread.
 * **A recurrent policy exploits within-episode invariants**, but *not* by
   carrying facts about previous objects — that mechanism was tested three ways
-  and refuted. The remaining direction from that work is benchmark hygiene, not
-  a memory architecture, and it is **not** what is proposed here.
+  and refuted.
 
-### Working hypothesis
+## Research track (moved to `yf/wm-ra-research`)
 
-> Pixel- or state-level simulator matching may spend real interaction on
-> discrepancies that do not change what the deployed policy does. We instead
-> investigate **reward-free calibration of simulator parameters according to
-> their effect on the frozen policy's latent state, action, deployable
-> task-value estimate and predicted tail risk.**
+The reward-free, decision-aware sim-to-real calibration line (WM0 / WM1 / RA-Sim /
+RA-HW) no longer lives on this branch. Its documents, scripts, models, results and
+tests are on the branch `yf/wm-ra-research`, frozen at the same commit this branch
+was cut from. It stopped on 2026-08-27 under its own pre-registered rules; nothing
+below is a hardware result.
 
-We are *investigating* this; it is not an established result and we have not
-run a systematic literature search. The novelty claim, if one survives, is
-**not** any of: using a world model; simulator system identification;
-sim-to-real adaptation; one-hour adaptation; or collecting real data and
-returning to simulation. Each of those is well established.
+Status as the phase documents on that branch actually record it (an earlier
+version of this table quoted WM1-A as YELLOW with numbers the document itself
+later withdrew):
 
-The narrower combination we think may be new:
-
-1. **decision-aware** discrepancy under *partial visual observation*, rather
-   than state- or pixel-reconstruction error;
-2. requiring **no real-world reward, success label, demonstration, or ground
-   truth physical parameter**;
-3. calibrating a simulator **posterior by policy consequence**;
-4. posterior-guided simulator fine-tuning that keeps a **broad prior mixed in**,
-   so a few minutes of real data cannot collapse the distribution.
-
-### Proposed method
-
-```
-  π0  ──  pre-train in broad DR                                    (done)
-   │
-   ├──  freeze; collect 5–10 min of reward-free target-domain data
-   │
-   ├──  parameter-conditioned latent dynamics model predicts, given θ:
-   │       next policy latent · proprioceptive change
-   │       gripper servo error · deployable slip / safety risk
-   │
-   ├──  decision-aware discrepancy  →  posterior  q(θ | D)
-   │
-   ├──  p_adapt(θ) = α q(θ | D) + (1 − α) p_broad(θ)
-   │
-   ├──  fine-tune policy / adapter in the GPU simulator
-   │
-   └──  redeploy, ≤60 min wall clock end to end
-```
-
-Candidate discrepancy:
-
-```text
-d_pi = lambda_z * ||phi_pi(o_real_next) - phi_pi(o_sim_next)||^2
-     + lambda_a * ||pi(o_real_next)     - pi(o_sim_next)||^2
-     + lambda_v * |V_obs(o_real_next)   - V_obs(o_sim_next)|
-     + lambda_c * |C_obs(o_real_next)   - C_obs(o_sim_next)|
-```
-
-**A constraint that must not be glossed over.** The current critic reads
-privileged state — object pose, mass, table friction — so it **cannot** serve
-as `V_obs`, which has to be computable from what the robot can actually see.
-The first version therefore uses only the actor latent `phi_pi` and the action
-`pi`. Any `V_obs` or `C_obs` must be a separate observation-only head, trained
-and frozen in simulation, before it can appear in this term. Nothing here
-assumes the privileged critic is deployable.
-
-Scope: this calibrates **session-persistent** mismatch only — parameters fixed
-for a deployment run and unknown before it starts. It does not revisit the
-previous-object / two-timescale-memory idea, which the Phase 0–2 audit
-refuted.
-
-### Targets — not results
-
-None of these has been achieved. They are what the direction is aiming at.
-
-| target | value |
-|---|---|
-| real-world reward, labels, demos | none |
-| real interaction | 5–10 min |
-| total adaptation wall clock | ≤ 60 min |
-| recovery of the zero-shot → oracle-calibrated gap | 70–80% |
-| held-out object generalisation | retained |
-| reported metrics | throughput, success, post-grasp drop, p95 cycle time, safety events — all of them, not a mean reward |
-
-### Validation route
-
-| phase | question | status |
+| phase | verdict | where (on `yf/wm-ra-research`) |
 |---|---|---|
-| **WM0** | Is there a gap to recover, is it identifiable from reward-free data, and can simulation recover it given the answer? | **GREEN**, 6/6 — [`docs/sim2real_sweep_phase_wm0.md`](docs/sim2real_sweep_phase_wm0.md) |
-| **WM1-A** | One axis end to end: infer 60 ms of observation delay from reward-free history, adapt under the posterior, keep the source domain. | **YELLOW**, 5/6 — [`docs/wm1_latency_vertical_slice.md`](docs/wm1_latency_vertical_slice.md) |
-| WM1-B | the same loop on a plant-side axis (servo damping) and a perception-side one (camera pose) | gated on WM1-A |
-| WM2 | several axes at once, and a deployable risk head for tail-only mismatch | gated on WM1-B |
-| WM3 | hardware | not started |
+| WM0 | GREEN, 6/6 | `docs/sim2real_sweep_phase_wm0.md` |
+| WM1-A | **RED** after the 8-seed extension: G3 and G4 fail, recovery 1.02 -> 0.58 | `docs/wm1_latency_vertical_slice.md` |
+| WM1-B | **RED**: risk-aware score worse (C2 1.26 [1.07, 1.48]); a shuffled-label control beats the head | `docs/wm1_damping_tail_risk.md` |
+| RA-Sim-0 | **RED**: the learned residual is 1.28-1.50x the parametric fit | `docs/ra_sim0_results.md` |
+| RA-Sim-1 | **RED** (G1, G5) | `docs/ra_sim1_results.md` |
+| RA-HW-0 | **BLOCKED**: no CAN interface on the audit host, 19 items UNKNOWN | `results/ra_hw0/README.md` |
 
-**WM1-A in one line.** Sixty seconds of reward-free arm time identifies the
-domain (1.000 balanced accuracy over five candidates, against three controls at
-chance); posterior-guided fine-tuning recovers 102% of what fine-tuning on the
-correct parameter achieves while keeping 97% of the source domain; the safety
-criterion FAILS -- the trip rate does not reproduce across training seeds; and a three-millisecond ridge baseline with a far worse posterior
-recovers just as much. Simulation only — no hardware result, and none claimed.
-
-Phase WM0 exists to decide whether WM1 is worth building. Simulator mismatch
-is applied through `piper_push.perturb`, which is inert unless asked for:
-
-```bash
-python scripts/check_perturb.py --device cuda:0     # every axis reaches the sim
-python scripts/sweep_plan.py s1 > s1.jobs           # the plan, not typed by hand
-OUT=results/sim2real_sweep/s1 NUM_ENVS=256 STEPS=1200 \
-  scripts/run_sim2real_sweep.sh "0 1 2 3" s1.jobs
-python scripts/analyze_sweep.py --stage s1 --json
-```
+What stays here, because the hardware line imports it: `perturb.py` (opt-in session
+mismatch overlay, read by `env_cfg.py` and `hardware/deploy/run.py`), `latency.py`
+(the robust task's observation-delay draw), `damping.py` + `prior.py`, and
+`hidden_plant.py` + `residual.py` (optional flags of `accept_s1.py` / `finetune.py`,
+inert by default). Their docstrings still cite the phase documents by path; read
+them on the research branch.
 
 ---
 
@@ -365,14 +281,13 @@ src/piper_push/
 ├── robot.py, objects.py, shapes.py, camera.py   scene and randomisation
 ├── depth_noise.py                               the measured D405, in simulation
 ├── actions.py                                   rate-limited joint action + plant model
-├── perturb.py                                   opt-in session mismatch (WM0)
+├── perturb.py, latency.py, damping.py           opt-in simulator mismatch (shared with the research branch)
 ├── models.py, distill.py, checkpoints.py        policy, DAgger, export
 └── tasks/pick_place/                            env, MDP terms, PPO config
 scripts/
 ├── accept_s1.py, eval.sh                        the evaluation gate
 ├── check_cadence.py, check_perturb.py           in-sim plumbing checks
-├── sweep_plan.py, run_sim2real_sweep.sh         WM0 sweep
-├── analyze_sweep.py, analyze_novelty.py         tables and figures, from JSON only
+├── eval_endurance.py, eval_occlusion.py         within-episode decay and occlusion metrics
 ├── probe_hidden.py, trip_phase.py               diagnostics
 └── export_obs_spec.py, plot_depth_model.py      what the actor expects; the figure
 hardware/
