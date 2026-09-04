@@ -10,6 +10,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import mjlab.tasks  # noqa: F401  -- import mjlab before us: its entry-point
+# loader imports piper_push.tasks, and if piper_push is already half-imported
+# the task registration fails partway with a [WARN] and a registry that holds
+# the state task but not the vision ones.
 import pytest
 import torch
 
@@ -116,7 +120,6 @@ STATE = "Mjlab-Pick-Place-PiperX"
 
 
 def _cfgs(task):
-  import mjlab.tasks  # noqa: F401
   from mjlab.tasks.registry import load_env_cfg
   return load_env_cfg(task, play=True), load_env_cfg(task, play=False)
 
