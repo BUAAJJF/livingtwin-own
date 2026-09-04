@@ -27,7 +27,8 @@ from piper_push import evalcfg
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("--checkpoint", required=True)
-p.add_argument("--task", default="Mjlab-Pick-Place-PiperX-Robust")
+p.add_argument("--task", default="Mjlab-Pick-Place-PiperX-Robust-V1",
+               help="the checkpoints this probe was written for predate the bounded convention")
 p.add_argument("--num-envs", type=int, default=128)
 p.add_argument("--steps", type=int, default=600)
 p.add_argument("--seed", type=int, default=101)
@@ -53,12 +54,13 @@ env.reset()
 obs = wrapped.get_observations()
 if isinstance(obs, tuple):
   obs = obs[0]
-raw, seen, held, jaw, rate_share = [], [], [], [], []
+raw, seen, held, jaw, rate_share, all_dims = [], [], [], [], [], []
 prev = None
 for t in range(a.steps):
   with torch.inference_mode():
     act = policy(obs)
   raw.append(act[:, 6].cpu().numpy().copy())
+  all_dims.append(act.cpu().numpy().copy())
   if prev is not None:
     d2 = (act - prev).square()
     rate_share.append((d2[:, 6] / d2.sum(dim=1).clamp_min(1e-12)).cpu().numpy().copy())
@@ -73,6 +75,7 @@ for t in range(a.steps):
   held.append(cmd.grasped.cpu().numpy().copy())
   jaw.append(robot.data.joint_pos[:, 6].cpu().numpy().copy())
 raw, seen, held, jaw = map(np.stack, (raw, seen, held, jaw))
+A = np.stack(all_dims)
 q = lambda x: {k: float(np.percentile(x, v)) for k, v in
                (("min", 0), ("p1", 1), ("p10", 10), ("p50", 50), ("p90", 90), ("max", 100))}
 out = {
@@ -87,6 +90,9 @@ out = {
   "last_window": {"p50": float(np.median(raw[-100:])), "frac_below_-1": float((raw[-100:] < -1).mean()),
                   "jaw_mm_p50": float(np.median(jaw[-100:]) * 1000)},
   "first_window": {"p50": float(np.median(raw[:100])), "frac_below_-1": float((raw[:100] < -1).mean())},
+  "per_dim": {f"a{i}": {"p1": float(np.percentile(A[..., i], 1)), "p50": float(np.percentile(A[..., i], 50)),
+                        "p99": float(np.percentile(A[..., i], 99)), "frac_outside_unit": float((np.abs(A[..., i]) > 1).mean())}
+              for i in range(7)},
   "obs_actions_term_equals_raw_frac": float(np.isclose(seen, raw).mean()),
   "gripper_share_of_action_rate_l2": {"mean": float(np.mean(rate_share)), "p50": float(np.median(rate_share))},
   "provenance": evalcfg.provenance(sensor=evalcfg.sensor_provenance(cfg, a.sensor)),
