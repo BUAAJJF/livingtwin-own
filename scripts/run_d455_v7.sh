@@ -152,6 +152,9 @@ if [ -n "${SELFCHECK:-}" ]; then
   say "base teacher $BASE"
   [ "$BASE" = "none" ] || [ -f "$BASE" ] || fail "base checkpoint missing"
   say "sight weights: arm ${SIGHT_ARM_W:--2.0}  hand ${SIGHT_HAND_W:--4.0}  wrist ${WRIST_W:-0.8}"
+  say "  these SCALE their curriculum ramps, they do not replace them;"
+  say "  hand -4 means -0.6 -> -2.0 -> -4.0 over iterations 0 / 200 / 600"
+  say "fine-tune sight:  arm ${FT_SIGHT_ARM_W:-<same>}  hand ${FT_SIGHT_HAND_W:-<same>}  wrist ${FT_WRIST_W:-<same>}"
   for f in scripts/train.sh scripts/distill.py scripts/finetune.py \
            scripts/eval.sh scripts/eval_occlusion.py; do
     [ -f "$f" ] || fail "missing $f"
@@ -250,7 +253,28 @@ FINAL_TASK=Mjlab-Pick-Place-PiperX-Distill-Robust
 if stage_done finetune; then
   say "fine-tuning already done"
 elif fits "$FINETUNE_COST_H"; then
+  # Sight weights for THIS stage only, defaulting to the teacher's.
+  #
+  # They are worth separating because distillation cannot see them at all:
+  # its loss is behaviour cloning against the teacher's actions
+  # (rsl_rl/algorithms/distillation.py -- `behavior_loss = loss_fn(actions,
+  # batch.privileged_actions)`) with no reward term anywhere.  A sight penalty
+  # reaches the student only through what the teacher did, so turning it down
+  # for the distillation stage is a no-op and turning it up there is a trap.
+  #
+  # Where it CAN be added late is here.  PPO explores rather than imitates, so
+  # it is not limited by how many grasps a teacher demonstrated, and
+  # `finetune.py --critic-warmup 100` holds the actor still while the critic
+  # learns the changed reward.  Starting from a student that already grasps
+  # means the penalty perturbs a behaviour instead of preventing one from
+  # forming, which is what it did to the v7 teachers.
+  #
+  #   FT_SIGHT_HAND_W=-24 FT_SIGHT_ARM_W=0 SIGHT_HAND_W=0 ... run_d455_v7.sh
+  #     -> teacher and distillation with no sight at all, sight only in PPO
   run_stage finetune \
+    env SIGHT_ARM_W="${FT_SIGHT_ARM_W:-${SIGHT_ARM_W:--2.0}}" \
+        SIGHT_HAND_W="${FT_SIGHT_HAND_W:-${SIGHT_HAND_W:--4.0}}" \
+        WRIST_W="${FT_WRIST_W:-${WRIST_W:-0.8}}" \
     "$MM" run -n "$ENV_NAME" python -u scripts/finetune.py \
       --task Mjlab-Pick-Place-PiperX-Vision-Robust --student "$RD" --critic "$RT" \
       --num-envs "$VISION_ENVS" --iterations "$FINETUNE_ITERS" \
