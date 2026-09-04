@@ -25,6 +25,9 @@ DEV=${DEV:-cuda:0}
 SEEDS=${SEEDS:-"11 33 44 55 66"}
 MM=${MM:-micromamba}
 ENV_NAME=${ENV_NAME:-mjlab}
+# Students distilled before 2026-09-05 were trained under the unbounded action
+# convention and need TASK=Mjlab-Pick-Place-PiperX-Distill-Robust-V1; the
+# default id raises at the first step for them.
 TASK=${TASK:-Mjlab-Pick-Place-PiperX-Distill-Robust}
 # The sensor to evaluate under.  'measured' is the one the student trained
 # with (piper_push.evalcfg); 'clean' is the old default and says nothing about

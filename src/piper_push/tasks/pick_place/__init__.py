@@ -244,3 +244,57 @@ register_mjlab_task(
   rl_cfg=pick_place_distill_runner_cfg(experiment_name="piperx_cleanup_distill"),
   runner_cls=PickPlaceDistillationRunner,
 )
+
+
+# ---------------------------------------------------------------------------
+# The action convention before 2026-09-05: scale = PICK_ARM_SCALE about the
+# home pose, a Gaussian head with nothing bounding it.  Every checkpoint from
+# before that date (v3-v9 teachers, v4-v9 students, the deployed d455_v4_final)
+# was trained under it and can only be evaluated under it; the default ids
+# above now raise at the first step if such a policy is loaded into them.
+# ---------------------------------------------------------------------------
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-V1",
+  env_cfg=make_pick_place_env_cfg(bounded_actions=False),
+  play_env_cfg=make_pick_place_env_cfg(play=True, bounded_actions=False),
+  rl_cfg=pick_place_ppo_runner_cfg(bounded=False),
+  runner_cls=MjlabOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-V1",
+  env_cfg=make_robust_env_cfg(bounded_actions=False),
+  play_env_cfg=make_robust_env_cfg(play=True, bounded_actions=False),
+  rl_cfg=pick_place_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_robust", bounded=False),
+  runner_cls=MjlabOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-V1",
+  env_cfg=make_pick_place_env_cfg(vision=True, bounded_actions=False),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, bounded_actions=False),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(bounded=False),
+  runner_cls=MjlabOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-V1",
+  env_cfg=make_robust_env_cfg(vision=True, bounded_actions=False),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True, bounded_actions=False),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust", bounded=False),
+  runner_cls=MjlabOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-V1",
+  env_cfg=make_pick_place_env_cfg(vision=True, bounded_actions=False),
+  play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, bounded_actions=False),
+  rl_cfg=pick_place_distill_runner_cfg(bounded=False),
+  runner_cls=PickPlaceDistillationRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-Robust-V1",
+  env_cfg=make_robust_env_cfg(vision=True, bounded_actions=False),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True, bounded_actions=False),
+  rl_cfg=pick_place_distill_runner_cfg(
+    experiment_name="piperx_pick_place_distill_robust", bounded=False),
+  runner_cls=PickPlaceDistillationRunner,
+)

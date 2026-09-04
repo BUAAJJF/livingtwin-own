@@ -30,6 +30,8 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
+from piper_push import robot as piper
+
 p = argparse.ArgumentParser()
 p.add_argument("--task", default="Mjlab-Pick-Place-PiperX-Vision")
 p.add_argument("--device", default="cuda:0")
@@ -70,6 +72,14 @@ spec = {
   },
   "joint_names": list(robot.joint_names),
   "default_joint_pos": robot.data.default_joint_pos[0].tolist(),
+  # The mapping from the policy's seven numbers to joint targets, as the
+  # policy was trained with it.  hardware.deploy.robot.ActionMapper reads this
+  # back; a spec without it (every export before 2026-09-05) is the v1
+  # convention, which the mapper reconstructs from PICK_ARM_SCALE and the
+  # default joint positions above.
+  "action_spec": piper.action_spec(
+    "bounded" if cfg.actions["arm"].bounded else "v1",
+    dict(zip(robot.joint_names, robot.data.default_joint_pos[0].tolist()))),
   "control_hz": 1.0 / (env.cfg.sim.mujoco.timestep * env.cfg.decimation),
 }
 

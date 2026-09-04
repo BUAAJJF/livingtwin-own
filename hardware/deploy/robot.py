@@ -122,12 +122,19 @@ class ActionMapper:
     self.arm_idx = [names.index(j) for j in ARM_JOINTS]
     self.grip_idx = names.index(GRIPPER_JOINT)
 
-    self.scale = np.array(
-      [sim_robot.PICK_ARM_SCALE[j] for j in ARM_JOINTS] + [sim_robot.GRIPPER_SCALE]
-    )
-    self.offset = np.array(
-      [default[i] for i in self.arm_idx] + [sim_robot.GRIPPER_OFFSET]
-    )
+    # The convention the policy was trained under, from the spec written next
+    # to it.  Exports before 2026-09-05 carry no "action_spec": that is the v1
+    # convention (PICK_ARM_SCALE about the default pose, nothing bounding a).
+    # Exports since carry the bounded one (a = +-1 is the safe clip, tanh head);
+    # driving either with the other's constants is driving a different robot.
+    aspec = spec.get("action_spec")
+    if aspec is None:
+      aspec = sim_robot.action_spec("v1", dict(zip(names, default.tolist())))
+    if list(aspec["joints"]) != list(ARM_JOINTS) + [GRIPPER_JOINT]:
+      raise ValueError(f"action_spec joints {aspec['joints']} are not {list(ARM_JOINTS) + [GRIPPER_JOINT]}")
+    self.convention = str(aspec["convention"])
+    self.scale = np.asarray(aspec["scale"], dtype=np.float64)
+    self.offset = np.asarray(aspec["offset"], dtype=np.float64)
     lo, hi = [], []
     for j in ARM_JOINTS:
       a, b = sim_robot.SAFE_TARGET_CLIP[j]

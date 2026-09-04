@@ -556,3 +556,49 @@ PICK_ARM_SCALE: dict[str, float] = {
 GRIPPER_SCALE = GRIPPER_OPEN_M / 2.0
 GRIPPER_OFFSET = GRIPPER_OPEN_M / 2.0
 GRIPPER_CLIP: dict[str, tuple[float, float]] = {"gripper_joint1": (0.0, GRIPPER_OPEN_M)}
+
+# The bounded convention (2026-09-05): a = +-1 IS the safe target clip.  The
+# policy head is a tanh-squashed Gaussian (piper_push.squashed), so a never
+# leaves (-1, 1), and there is no target the policy can name that the clip
+# would have to cut.  PICK_ARM_SCALE above is the convention every checkpoint
+# before that date was trained under; results/audit_20260904 measured those
+# policies using |a| of 3-5 on the arm and up to 28 on the gripper, because
+# PICK_ARM_SCALE spans a quarter of the clip and nothing bounded a.  The
+# `-V1` task ids keep it for evaluating them.
+BOUNDED_ARM_SCALE: dict[str, float] = {
+    j: (hi - lo) / 2.0 for j, (lo, hi) in SAFE_TARGET_CLIP.items()
+}
+BOUNDED_ARM_OFFSET: dict[str, float] = {
+    j: (hi + lo) / 2.0 for j, (lo, hi) in SAFE_TARGET_CLIP.items()
+}
+ARM_JOINT_ORDER = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+
+
+def action_spec(convention: str, default_joint_pos: dict[str, float] | None = None) -> dict:
+    """The action convention as a serialisable record.
+
+    Written into ``obs_spec.json`` next to an exported policy and read back by
+    ``hardware.deploy.robot.ActionMapper``, so the arm is driven with the
+    mapping the policy was trained under and not with whichever constants are
+    current.  ``convention`` is ``"bounded"`` or ``"v1"``; the latter needs
+    the default joint positions its offset is taken from.
+    """
+    if convention == "bounded":
+        scale = [BOUNDED_ARM_SCALE[j] for j in ARM_JOINT_ORDER]
+        offset = [BOUNDED_ARM_OFFSET[j] for j in ARM_JOINT_ORDER]
+    elif convention == "v1":
+        if default_joint_pos is None:
+            raise ValueError("the v1 convention's offset is the default joint position")
+        scale = [PICK_ARM_SCALE[j] for j in ARM_JOINT_ORDER]
+        offset = [float(default_joint_pos[j]) for j in ARM_JOINT_ORDER]
+    else:
+        raise ValueError(f"unknown action convention {convention!r}")
+    return {
+        "convention": convention,
+        "squashed": convention == "bounded",
+        "joints": list(ARM_JOINT_ORDER) + ["gripper_joint1"],
+        "scale": scale + [GRIPPER_SCALE],
+        "offset": offset + [GRIPPER_OFFSET],
+        "clip_lo": [SAFE_TARGET_CLIP[j][0] for j in ARM_JOINT_ORDER] + [GRIPPER_CLIP["gripper_joint1"][0]],
+        "clip_hi": [SAFE_TARGET_CLIP[j][1] for j in ARM_JOINT_ORDER] + [GRIPPER_CLIP["gripper_joint1"][1]],
+    }

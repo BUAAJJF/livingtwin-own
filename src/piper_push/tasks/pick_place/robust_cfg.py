@@ -526,8 +526,10 @@ def make_robust_env_cfg(
   vision: bool = False,
   wrist: bool = False,
   mask_dropout_scale: float = 1.0,
+  bounded_actions: bool = True,
 ):
-  cfg = make_pick_place_env_cfg(play=play, vision=vision, wrist=wrist)
+  cfg = make_pick_place_env_cfg(play=play, vision=vision, wrist=wrist,
+                                bounded_actions=bounded_actions)
   apply_heavy_dr(
     cfg, vision=vision, wrist=wrist, mask_dropout_scale=mask_dropout_scale)
   return cfg

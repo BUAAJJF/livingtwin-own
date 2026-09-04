@@ -145,8 +145,15 @@ def make_pick_place_env_cfg(
   vision: bool = False,
   wrist: bool = False,
   num_objects: int = 1,
+  bounded_actions: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
+
+  ``bounded_actions`` (the default since 2026-09-05) makes a = +-1 the safe
+  target clip on every arm joint and pairs with the tanh head in
+  ``rl_cfg``; ``False`` is the original convention (scale = PICK_ARM_SCALE
+  about the home pose, nothing bounding a) that the ``-V1`` task ids keep for
+  the checkpoints trained under it.
 
   ``shape_variety`` scales the object randomisation about its centre: 0 is a
   single fixed cube, 1 the full verified distribution.  The smoke test runs at
@@ -280,9 +287,11 @@ def make_pick_place_env_cfg(
     "arm": RateLimitedJointPositionActionCfg(
       entity_name="robot",
       actuator_names=piper.ARM_JOINT_EXPR,
-      scale=piper.PICK_ARM_SCALE,
+      scale=piper.BOUNDED_ARM_SCALE if bounded_actions else piper.PICK_ARM_SCALE,
+      offset=piper.BOUNDED_ARM_OFFSET if bounded_actions else 0.0,
       clip=piper.SAFE_TARGET_CLIP,
-      use_default_offset=True,
+      use_default_offset=not bounded_actions,
+      bounded=bounded_actions,
       velocity_limit=piper.COMMAND_RATE_LIMIT_RAD_S,
     ),
     # Its own term because the gripper wants the full [0, 0.05] travel from
@@ -294,6 +303,7 @@ def make_pick_place_env_cfg(
       offset=piper.GRIPPER_OFFSET,
       clip=piper.GRIPPER_CLIP,
       use_default_offset=False,
+      bounded=bounded_actions,
       velocity_limit={"gripper_joint1": piper.GRIPPER_RATE_LIMIT_M_S},
     ),
   }

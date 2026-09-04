@@ -31,6 +31,11 @@ a scan of every evaluation JSON under results/ on 2026-09-04: 701 files, 19 affe
 | `results/v8_students_v8s_sam2-0.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_sam2.json` |
 | `results/v8_students_v8s_sam2-300.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_sam2.json` |
 
+Re-measuring anything listed here: every checkpoint on this page predates the
+bounded action convention of 2026-09-05, so it has to be run on the matching
+`-V1` task id (`Mjlab-Pick-Place-PiperX-Vision-Robust-V1`, `...-Distill-Robust-V1`,
+...); the default ids refuse it at the first step.
+
 Defects:
 
 * **noop_load** -- runner.load(load_cfg={'actor': True}) on a -Distill* task loads nothing (rsl_rl Distillation.load ignores the key): the numbers are a randomly initialised student.  Fixed in d94d944 (piper_push.evalcfg.load_weights).

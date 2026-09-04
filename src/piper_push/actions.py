@@ -171,6 +171,13 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
 
     velocity_limit: dict[str, float] | None = None
 
+    bounded: bool = False
+    """The task's convention is that ``a`` lies in [-1, 1] (a tanh head).  A
+    policy trained under the old unbounded convention produces |a| of 3-28 on
+    its first step; rather than drive a different robot silently, the term
+    raises.  Checked on every call for the first 200 control steps and every
+    100th after, because the check is a device sync."""
+
     slew_scale: float = 1.0
     """Multiplies ``velocity_limit``.  1.0 is the trained command path; below
     that is a tighter slew ceiling, which is the trivial control every other
@@ -268,6 +275,8 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._max_step = limits * self._dt * float(cfg.slew_scale)
         self._default = self._entity.data.default_joint_pos[:, self._target_ids].clone()
         self._previous_target = self._default.clone()
+        self._bounded = bool(cfg.bounded)
+        self._bounded_calls = 0
         self._ramp_from = self._default.clone()
 
         # -- evaluation-time shaping, all inert unless configured -------------
@@ -397,6 +406,15 @@ class RateLimitedJointPositionAction(JointPositionAction):
         return self._max_step
 
     def process_actions(self, actions: torch.Tensor) -> None:
+        if self._bounded:
+            self._bounded_calls += 1
+            if self._bounded_calls <= 200 or self._bounded_calls % 100 == 0:
+                worst = actions.detach().abs().max()
+                if bool(worst > 1.0 + 1e-3):
+                    raise ValueError(
+                        f"action {float(worst):.2f} outside [-1, 1] on a bounded task: "
+                        "this policy was trained under the pre-2026-09-05 unbounded "
+                        "convention; evaluate it on the matching '-V1' task id.")
         super().process_actions(actions)
         target = self._processed_actions
 

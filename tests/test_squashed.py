@@ -1,0 +1,106 @@
+"""The tanh-squashed Gaussian head: bounded output, exact density, sane entropy.
+
+The reference density is torch's own ``TransformedDistribution(Normal,
+TanhTransform)``; the head has to agree with it to float precision, because
+the PPO ratio is a difference of two of these and a bias there is a bias in
+every update.
+"""
+
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+from torch.distributions import Normal, TanhTransform, TransformedDistribution
+
+from piper_push.squashed import SquashedGaussianDistribution, log1m_tanh2
+
+
+def _head(std=0.6, dim=7):
+  d = SquashedGaussianDistribution(dim, init_std=std)
+  mu = torch.linspace(-3.0, 3.0, dim).unsqueeze(0).repeat(5, 1)
+  mu = mu + 0.1 * torch.arange(5.0).unsqueeze(1)
+  d.update(mu)
+  return d, mu
+
+
+def test_samples_and_deterministic_output_stay_inside_the_unit_box():
+  d, mu = _head()
+  torch.manual_seed(0)
+  s = torch.stack([d.sample() for _ in range(200)])
+  assert s.abs().max() < 1.0
+  assert torch.allclose(d.deterministic_output(mu), torch.tanh(mu))
+  assert torch.allclose(d.mean, torch.tanh(mu))
+
+
+def test_log_prob_matches_torch_transformed_distribution():
+  d, mu = _head()
+  ref = TransformedDistribution(Normal(mu, d.std), [TanhTransform(cache_size=1)])
+  torch.manual_seed(1)
+  a = torch.tanh(Normal(mu, d.std).sample())
+  got = d.log_prob(a)
+  want = ref.log_prob(a).sum(-1)
+  assert torch.allclose(got, want, atol=1e-4, rtol=1e-4), (got - want).abs().max()
+
+
+def test_log1m_tanh2_is_the_stable_form():
+  u = torch.tensor([-20.0, -5.0, -1.0, 0.0, 0.5, 3.0, 20.0])
+  naive = torch.log1p(-torch.tanh(u) ** 2)
+  ok = u.abs() < 8  # the naive form underflows to -inf beyond that
+  assert torch.allclose(log1m_tanh2(u)[ok], naive[ok], atol=1e-3)
+  assert torch.isfinite(log1m_tanh2(u)).all()
+
+
+def test_log_prob_is_finite_at_the_clamp_and_has_a_gradient():
+  d = SquashedGaussianDistribution(3, init_std=0.6)
+  mu = torch.zeros(2, 3, requires_grad=True)
+  d.update(mu)
+  a = torch.tensor([[0.0, 0.999999, -1.0], [1.0, -0.5, 0.3]])
+  lp = d.log_prob(a)
+  assert torch.isfinite(lp).all()
+  lp.sum().backward()
+  assert torch.isfinite(mu.grad).all()
+
+
+def test_entropy_falls_as_the_mean_saturates():
+  """The change-of-variables term is what pulls a saturating mean back: the
+  entropy bonus must get worse, not stay flat, as |mu| grows."""
+  d = SquashedGaussianDistribution(1, init_std=0.6)
+  ents = []
+  for m in (0.0, 1.0, 2.0, 4.0):
+    d.update(torch.full((1, 1), m))
+    ents.append(d.entropy.detach().item())
+  assert all(a > b for a, b in zip(ents, ents[1:])), ents
+  d.update(torch.full((1, 1), 4.0, requires_grad=True))
+  (g,) = torch.autograd.grad(d.entropy.sum(), d._normal.mean)
+  assert g.item() < 0.0
+
+
+def test_kl_is_taken_in_u_space_and_is_zero_for_equal_params():
+  d, mu = _head()
+  p = d.params
+  assert torch.allclose(d.kl_divergence(p, p), torch.zeros(5))
+  q = (mu + 1.0, d.std)
+  assert (d.kl_divergence(p, q) > 0).all()
+
+
+def test_export_module_is_a_tanh():
+  d, mu = _head()
+  m = d.as_deterministic_output_module()
+  assert isinstance(m, nn.Module)
+  assert torch.allclose(m(mu), torch.tanh(mu))
+  scripted = torch.jit.script(m)
+  assert torch.allclose(scripted(mu), torch.tanh(mu))
+
+
+def test_rsl_rl_model_uses_the_head_through_its_class_name():
+  from rsl_rl.models import MLPModel
+  from tensordict import TensorDict
+  obs = TensorDict({"x": torch.randn(4, 6)}, batch_size=[4])
+  m = MLPModel(obs, {"actor": ["x"]}, "actor", 7, hidden_dims=(16,),
+               distribution_cfg={"class_name": "piper_push.squashed:SquashedGaussianDistribution",
+                                 "init_std": 0.6, "std_type": "scalar"})
+  a = m(obs, stochastic_output=True)
+  assert a.shape == (4, 7) and a.abs().max() < 1.0
+  assert torch.isfinite(m.get_output_log_prob(a)).all()
+  assert torch.isfinite(m.output_entropy).all()
+  assert m(obs).abs().max() < 1.0

@@ -10,6 +10,8 @@ set -Eeuo pipefail
 OUT=${OUT:-results/d455_heavy_dr/v9_fullreset}
 DEV=${DEV:-cuda:0}
 ENVS=${ENVS:-256}
+# The v9 teachers predate the bounded action convention (2026-09-05).
+TASK=${TASK:-Mjlab-Pick-Place-PiperX-Robust-V1}
 MM=${MM:-micromamba}
 export MUJOCO_GL=disable PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export LD_LIBRARY_PATH=/home/yunfan/micromamba/envs/mjlab/lib:${LD_LIBRARY_PATH:-}
@@ -19,10 +21,10 @@ for ck in "$@"; do
   name=$(basename "${ck%.pt}")
   for mode in narrow full; do
     if [ "$mode" = full ]; then export RESET_FULL_RANGE=1; else unset RESET_FULL_RANGE; fi
-    $MM run -n mjlab python scripts/eval_endurance.py --checkpoint "$ck" \
+    $MM run -n mjlab python scripts/eval_endurance.py --checkpoint "$ck" --task "$TASK" \
       --num-envs "$ENVS" --steps 1200 --device "$DEV" --seed 101 \
       --out "$OUT/${name}_end_$mode.json" >/dev/null 2>&1 || true
-    $MM run -n mjlab python scripts/eval_occlusion.py --checkpoint "$ck" \
+    $MM run -n mjlab python scripts/eval_occlusion.py --checkpoint "$ck" --task "$TASK" \
       --num-envs "$ENVS" --steps 300 --device "$DEV" --seed 101 \
       --out "$OUT/${name}_occ_$mode.json" >/dev/null 2>&1 || true
   done

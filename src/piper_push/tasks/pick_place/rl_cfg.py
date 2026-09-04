@@ -17,9 +17,26 @@ from piper_push.distill import (
 )
 
 
+# The action head.  Since 2026-09-05 the policy emits a = tanh(u) in (-1, 1)
+# and the action term makes +-1 the safe clip (piper_push.squashed explains
+# why the unbounded head had to go).  ``bounded=False`` is the original
+# Gaussian head, kept for the ``-V1`` task ids and the checkpoints trained
+# under it.
+SQUASHED = "piper_push.squashed:SquashedGaussianDistribution"
+
+
+def _distribution_cfg(bounded: bool) -> dict:
+  return {
+    "class_name": SQUASHED if bounded else "GaussianDistribution",
+    "init_std": 0.6,
+    "std_type": "scalar",
+  }
+
+
 def pick_place_ppo_runner_cfg(
   experiment_name: str = "piperx_pick_place",
   max_iterations: int = 3000,
+  bounded: bool = True,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
@@ -27,7 +44,7 @@ def pick_place_ppo_runner_cfg(
       activation="elu",
       obs_normalization=True,
       distribution_cfg={
-        "class_name": "GaussianDistribution",
+        "class_name": _distribution_cfg(bounded)["class_name"],
         # Six joint targets scaled by 0.3-0.5 rad plus a gripper scaled by
         # 25 mm.  std=1.0 would explore +-0.5 rad per step, which the command
         # rate limiter would simply throw away.
@@ -98,6 +115,7 @@ def pick_place_vision_ppo_runner_cfg(
   experiment_name: str = "piperx_pick_place_vision",
   max_iterations: int = 6000,
   wrist: bool = False,
+  bounded: bool = True,
 ) -> RslRlOnPolicyRunnerCfg:
   """The same task through the camera.
 
@@ -111,7 +129,7 @@ def pick_place_vision_ppo_runner_cfg(
   The critic is unchanged and still privileged. It never has to run on the
   robot, so there is no reason to make it work through a camera.
   """
-  cfg = pick_place_ppo_runner_cfg(experiment_name, max_iterations)
+  cfg = pick_place_ppo_runner_cfg(experiment_name, max_iterations, bounded=bounded)
   cfg.actor = RslRlModelCfg(
     hidden_dims=(256, 256, 128),
     activation="elu",
@@ -121,11 +139,7 @@ def pick_place_vision_ppo_runner_cfg(
     rnn_type="gru",
     rnn_hidden_dim=256,
     rnn_num_layers=1,
-    distribution_cfg={
-      "class_name": "GaussianDistribution",
-      "init_std": 0.6,
-      "std_type": "scalar",
-    },
+    distribution_cfg=_distribution_cfg(bounded),
   )
   cfg.obs_groups = {
     # One entry per camera, and the model builds one convolutional encoder per
@@ -148,6 +162,7 @@ def pick_place_distill_runner_cfg(
   experiment_name: str = "piperx_pick_place_distill",
   max_iterations: int = 3000,
   wrist: bool = False,
+  bounded: bool = True,
 ) -> RslRlDistillationRunnerCfg:
   """Bootstrap the vision policy off the state policy.
 
@@ -162,8 +177,8 @@ def pick_place_distill_runner_cfg(
   because it is loaded from that actor's weights with ``strict=True``.  Change
   one and this has to change with it.
   """
-  ppo = pick_place_ppo_runner_cfg()
-  vision = pick_place_vision_ppo_runner_cfg(wrist=wrist)
+  ppo = pick_place_ppo_runner_cfg(bounded=bounded)
+  vision = pick_place_vision_ppo_runner_cfg(wrist=wrist, bounded=bounded)
   return RslRlDistillationRunnerCfg(
     student=vision.actor,
     teacher=ppo.actor,

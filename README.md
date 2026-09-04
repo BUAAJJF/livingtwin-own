@@ -85,11 +85,26 @@ them on the research branch.
 
 ## Task
 
+> **Action convention (2026-09-05).** The policy head is a tanh-squashed
+> Gaussian (`piper_push.squashed`) and the action term makes a = ±1 the safe
+> target clip (`piper_push.robot.BOUNDED_ARM_SCALE/OFFSET`).  Before that,
+> nothing bounded a and the arm scales spanned a quarter of the clip: the
+> teachers ran the gripper at −28 and joint 4 at −3.5 (`results/audit_20260904/
+> gripper_action_*.json`), the smoothness penalties spent a third of their
+> weight on a channel the jaw cannot distinguish, and the distillation loss
+> regressed on it.  Every checkpoint from before that date -- v3–v9 teachers
+> and students, the deployed `d455_v4_final` -- was trained under the old
+> convention and evaluates only on the `-V1` task ids
+> (`Mjlab-Pick-Place-PiperX{,-Robust,-Vision,-Vision-Robust,-Distill,-Distill-Robust}-V1`);
+> the default ids raise at the first step if such a policy is loaded.  Exported
+> specs carry an `action_spec` block and the deploy mapper follows it, so v4
+> keeps driving the arm it was trained on.
+
 | | |
 |---|---|
 | Actor observation | proprioception (joint positions and velocities, end-effector pose, gripper opening, pad contacts, gripper servo error, last action) + the 3-channel depth image |
 | Critic observation | the above, uncorrupted, plus object pose/velocity/shape and privileged physics — training only |
-| Action | 6 joint position targets + gripper, rate-limited to 0.62 × the safety-shell trip speed and interpolated across physics substeps |
+| Action | 6 joint position targets + gripper, from a tanh-squashed Gaussian head: a = ±1 is the safe target clip on every joint and 0–50 mm on the jaw. Rate-limited to 0.62 × the safety-shell trip speed and interpolated across physics substeps |
 | Objects | five shape classes, 25–45 mm wide, 24–90 mm tall, 50–400 g, friction 0.4–1.0, redrawn **per object** |
 | Episode | fixed length; success never ends it, so throughput is rewarded directly |
 
