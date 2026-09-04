@@ -1,0 +1,86 @@
+{
+  "placed_per_min": [
+    18.515625,
+    34.6875,
+    37.96875,
+    35.859375,
+    35.15625,
+    32.109375,
+    32.34375,
+    32.109375,
+    34.21875,
+    28.828125,
+    30.0,
+    31.640625
+  ],
+  "early_per_min": 32.3828125,
+  "late_per_min": 31.5234375,
+  "late_over_early": 0.9734620024125452,
+  "started_envs": 79,
+  "stopped_envs": 16,
+  "survivor_fraction": 0.7974683544303798,
+  "survivor_placements_last": 1.380952380952381,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 39.03489001095295,
+  "jaw_mm_running": 30.221293680369854,
+  "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision",
+  "seed": 101,
+  "num_envs": 128,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 1,
+        "strength": 1.0,
+        "surface_fill": [
+          0.9744444444444444,
+          1.0
+        ],
+        "texture_penalty": [
+          1.0,
+          1.35
+        ]
+      },
+      "camera_pose": {
+        "mode": "startup",
+        "pos_jitter": 0.0,
+        "rot_jitter": 0.0
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Vision",
+      "--num-envs",
+      "128",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/audit_20260904/v4_vision_measured.json"
+    ]
+  }
+}

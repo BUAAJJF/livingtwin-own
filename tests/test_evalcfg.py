@@ -176,3 +176,12 @@ def test_an_unknown_setting_is_rejected():
   play, _ = _cfgs(VISION)
   with pytest.raises(ValueError):
     evalcfg.apply_sensor(play, VISION, "real")
+
+
+def test_provenance_carries_the_sensor_block_and_the_knobs():
+  play, _ = _cfgs(ROBUST)
+  sp = evalcfg.apply_sensor(play, ROBUST, "measured")
+  prov = evalcfg.provenance(sensor=sp, argv=["x"])
+  assert prov["sensor"] is sp and prov["sensor"]["camera"]["strength"] > 1.0
+  assert set(prov["env_knobs"]) == set(evalcfg.ENV_KNOBS)
+  assert prov["argv"] == ["x"]

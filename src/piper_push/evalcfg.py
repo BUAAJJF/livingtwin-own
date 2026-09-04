@@ -216,10 +216,14 @@ def add_sensor_arg(parser, default: str = "clean") -> None:
          "one is clean.  Only 'measured' says anything about the robot.")
 
 
-def provenance(env_cfg=None, sensor: str | None = None, **extra) -> dict[str, Any]:
-  """The domain block every evaluation JSON should carry."""
+def provenance(sensor: dict[str, Any] | None = None, **extra) -> dict[str, Any]:
+  """The domain block every evaluation JSON should carry.
+
+  ``sensor`` is what :func:`apply_sensor` returned; ``extra`` is anything
+  else worth stamping (argv, which state dict was loaded, ...).
+  """
   out: dict[str, Any] = {"env_knobs": env_knobs()}
-  if env_cfg is not None:
-    out["sensor"] = sensor_provenance(env_cfg, sensor)
+  if sensor is not None:
+    out["sensor"] = sensor
   out.update(extra)
   return out

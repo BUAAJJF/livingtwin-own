@@ -1,0 +1,86 @@
+{
+  "placed_per_min": [
+    3.984375,
+    2.109375,
+    0.703125,
+    0.0,
+    0.234375,
+    0.234375,
+    0.46875,
+    0.0,
+    0.46875,
+    0.0,
+    0.0,
+    0.234375
+  ],
+  "early_per_min": 1.2109375,
+  "late_per_min": 0.1953125,
+  "late_over_early": 0.16129032258064516,
+  "started_envs": 17,
+  "stopped_envs": 17,
+  "survivor_fraction": 0.0,
+  "survivor_placements_last": 0.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 33.125750720500946,
+  "jaw_mm_running": 27.183108031749725,
+  "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision",
+  "seed": 101,
+  "num_envs": 128,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "clean",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 0.0,
+        "surface_fill": [
+          0.9744444444444444,
+          1.0
+        ],
+        "texture_penalty": [
+          1.0,
+          1.35
+        ]
+      },
+      "camera_pose": {
+        "mode": "startup",
+        "pos_jitter": 0.0,
+        "rot_jitter": 0.0
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Vision",
+      "--num-envs",
+      "128",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--sensor",
+      "clean",
+      "--out",
+      "results/audit_20260904/v4_vision_clean.json"
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "placed_per_min": [
+    8.125,
+    15.625000000000002,
+    17.5,
+    13.125,
+    11.25,
+    11.25,
+    11.875,
+    10.625,
+    15.625000000000002,
+    7.5,
+    15.625000000000002,
+    10.625
+  ],
+  "early_per_min": 12.8125,
+  "late_per_min": 11.979166666666666,
+  "late_over_early": 0.9349593495934959,
+  "started_envs": 13,
+  "stopped_envs": 9,
+  "survivor_fraction": 0.3076923076923077,
+  "survivor_placements_last": 1.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 48.88322949409485,
+  "jaw_mm_running": 38.499485701322556,
+  "checkpoint": "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Distill-Robust",
+  "seed": 101,
+  "num_envs": 48,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "task",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 2,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "hardware/deploy/policies/d455_v4_final/checkpoint.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Distill-Robust",
+      "--num-envs",
+      "48",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--sensor",
+      "task",
+      "--out",
+      "results/audit_20260904/v4_distill_robust_fixedload_sensor-task.json"
+    ]
+  }
+}
