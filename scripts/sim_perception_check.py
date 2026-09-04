@@ -79,8 +79,8 @@ def load_teacher(path, task, env, device):
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
   runner = (load_runner_cls(task) or MjlabOnPolicyRunner)(
     wrapped, asdict(agent), None, device)
-  runner.load(path, load_cfg={"actor": True}, strict=True, map_location=device)
-  return wrapped, runner.get_inference_policy(device=device)
+  from piper_push import evalcfg
+  return wrapped, evalcfg.load_policy(runner, path, device)
 
 
 def iou(a, b) -> float:

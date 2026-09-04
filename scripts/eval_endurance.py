@@ -104,6 +104,8 @@ def main() -> int:
   p.add_argument("--seed", type=int, default=101)
   p.add_argument("--gate", type=float, default=None,
                  help="exit 1 if late/early is below this")
+  from piper_push import evalcfg
+  evalcfg.add_sensor_arg(p)
   p.add_argument("--out", default=None)
   a = p.parse_args()
 
@@ -117,6 +119,7 @@ def main() -> int:
   torch.manual_seed(a.seed)
   cfg = load_env_cfg(a.task, play=True)
   cfg.scene.num_envs = a.num_envs
+  sensor_prov = evalcfg.apply_sensor(cfg, a.task, a.sensor)
   env = ManagerBasedRlEnv(cfg=cfg, device=a.device, render_mode=None)
   agent = load_rl_cfg(a.task)
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
@@ -158,7 +161,9 @@ def main() -> int:
   out = summarise(np.stack(per_window), jaw_end, a.window, env.step_dt)
   out.update({"checkpoint": a.checkpoint, "task": a.task, "seed": a.seed,
               "num_envs": a.num_envs, "steps": a.steps,
-              "reset_every": a.reset_every})
+              "reset_every": a.reset_every,
+              "provenance": evalcfg.provenance(argv=sys.argv,
+                                               sensor=sensor_prov)})
   print(f"{a.checkpoint}   {a.num_envs} envs x {a.steps} steps  "
         f"reset_every={a.reset_every}")
   print("placed/min " + " ".join(f"{x:6.1f}" for x in out["placed_per_min"]))

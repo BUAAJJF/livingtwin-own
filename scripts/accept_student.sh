@@ -26,6 +26,27 @@ SEEDS=${SEEDS:-"11 33 44 55 66"}
 MM=${MM:-micromamba}
 ENV_NAME=${ENV_NAME:-mjlab}
 TASK=${TASK:-Mjlab-Pick-Place-PiperX-Distill-Robust}
+# The sensor to evaluate under.  'measured' is the one the student trained
+# with (piper_push.evalcfg); 'clean' is the old default and says nothing about
+# the robot.
+SENSOR=${SENSOR:-measured}
+# The domain the student was distilled under.  robust_cfg reads its knobs
+# (TARGET_VISIBLE_*, TARGET_GAP_SCALE, OBS_LATENCY_PROBS, SMOOTH_SCALE, ...)
+# from the environment at import time and nothing in the checkpoint records
+# them, so a run script that distils under one setting has to leave them in
+# a domain.env next to the checkpoint -- scripts/run_v8.sh does -- and this
+# script has to export them, or the student is measured in the wrong domain
+# (v8s_sam2 was, for two days).  Anything already exported wins.
+DOMAIN_ENV=${DOMAIN_ENV:-$(dirname "$ST")/domain.env}
+if [ -f "$DOMAIN_ENV" ]; then
+  while IFS='=' read -r k v; do
+    case "$k" in ''|'#'*) continue ;; esac
+    if [ -z "${!k:-}" ]; then export "$k=$v"; fi
+  done <"$DOMAIN_ENV"
+  echo "domain: $(grep -v '^#' "$DOMAIN_ENV" | tr '\n' ' ')  (from $DOMAIN_ENV)"
+else
+  echo "domain: no $DOMAIN_ENV; evaluating under the defaults of $TASK"
+fi
 export MUJOCO_GL=disable PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p "$OUT"
 say() { printf '\n===== %s\n' "$*"; }
@@ -33,18 +54,19 @@ say() { printf '\n===== %s\n' "$*"; }
 say "1. endurance (no reset, which is what the arm does)"
 $MM run -n "$ENV_NAME" python scripts/eval_endurance.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps ${STEPS:-1200} --device "$DEV" --seed 101 \
+  --sensor "$SENSOR" \
   --out "$OUT/endurance.json" 2>&1 | grep -aE "^placed/min|^early |^of |^survivors|^final jaw"
 # The control.  If resetting inside the training horizon restores the rate,
 # the decay is the policy leaving its distribution rather than the task
 # getting harder -- that distinction cost a session to establish once.
 $MM run -n "$ENV_NAME" python scripts/eval_endurance.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps ${STEPS:-1200} --reset-every 300 --device "$DEV" \
-  --seed 101 --out "$OUT/endurance_reset.json" 2>&1 | grep -aE "^early "
+  --seed 101 --sensor "$SENSOR" --out "$OUT/endurance_reset.json" 2>&1 | grep -aE "^early "
 
 say "2. occlusion while engaged (300 steps: before any collapse)"
 $MM run -n "$ENV_NAME" python scripts/eval_occlusion.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps 300 --device "$DEV" --seed 101 \
-  --out "$OUT/occlusion.json" >/dev/null 2>&1 || true
+  --sensor "$SENSOR" --out "$OUT/occlusion.json" >/dev/null 2>&1 || true
 $MM run -n "$ENV_NAME" python -c "
 import json; d=json.load(open('$OUT/occlusion.json')); e=d['engaged']
 print('engaged blocked %.1f%%  visible %.3f  engaged frames %.0f%%  placed/min %.1f'

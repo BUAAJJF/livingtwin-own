@@ -42,7 +42,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
-from piper_push import hidden_plant, perturb, residual
+from piper_push import evalcfg, hidden_plant, perturb, residual
 from piper_push.robot import JOINT_TRIP_RAD_S
 
 # The three aspect classes the shape curriculum spans.  Cut at the ratio of the
@@ -235,13 +235,12 @@ def main() -> int:
                         "from the base and drops the floor 0.75 m below it, "
                         "which is the one thing about the real scene the "
                         "simulator's infinite plane cannot represent.")
-    p.add_argument("--sensor", default="clean", choices=("clean", "measured"),
-                   help="depth realism to EVALUATE under.  'clean' is the "
-                        "protocol every number in docs/results.md was measured "
-                        "with and stays the default, so old and new runs "
-                        "remain comparable.  'measured' turns on the fitted "
-                        "D405 model from piper_push.depth_noise, which is the "
-                        "only setting that says anything about the robot.")
+    # 'clean' is the protocol every number in docs/results.md was measured
+    # with and stays the default.  Until 2026-09-04 'measured' replaced the
+    # task's noise model with the NOMINAL one at strength 1.0, which on a
+    # -Robust task is a downgrade, and 'clean' left a -Robust task's sensor
+    # on; both are now what their names say (piper_push.evalcfg).
+    evalcfg.add_sensor_arg(p)
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=None,
                    help="seeds the whole rollout.  Note that this makes a run "
@@ -290,17 +289,10 @@ def main() -> int:
     a = p.parse_args()
 
     env_cfg = load_env_cfg(a.task, play=True)
-    if a.sensor == "measured":
-        # ``play`` turns the sensor model off so that two recordings of the
-        # same policy can be compared; an evaluation that is asking what the
-        # robot will do has to turn it back on.
-        import dataclasses as _dc
-
-        from piper_push import camera as _camera
-        term = env_cfg.observations["camera"].terms["scene"]
-        term.params["noise_cfg"] = _dc.replace(_camera.DEPTH_NOISE,
-                                               strength=1.0)
-        term.params["mask_jitter_px"] = _camera.MASK_JITTER_PX
+    # ``play`` turns the sensor model off so that two recordings of the same
+    # policy can be compared; an evaluation that is asking what the robot
+    # will do has to turn it back on -- to the sensor the task trains with.
+    sensor_prov = evalcfg.apply_sensor(env_cfg, a.task, a.sensor)
     agent_cfg = load_rl_cfg(a.task)
     env_cfg.scene.num_envs = a.num_envs
     if a.seed is not None:
@@ -350,8 +342,9 @@ def main() -> int:
 
     runner_cls = load_runner_cls(a.task) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device=a.device)
-    runner.load(a.checkpoint, load_cfg={"actor": True}, strict=True,
-                map_location=a.device)
+    # Straight into the evaluated network, then read back: ``runner.load``
+    # with ``load_cfg={"actor": True}`` loads nothing on a -Distill* task.
+    loaded = evalcfg.load_weights(runner, a.checkpoint, a.device)
     policy = runner.get_inference_policy(device=a.device)
 
     u = env.unwrapped
@@ -901,6 +894,9 @@ def main() -> int:
             "hidden_target": applied_hidden,
             "residual": applied_residual,
             "provenance": _provenance(a.checkpoint),
+            # The domain the task id does not carry: the import-time knobs
+            # and the sensor actually run, plus which state dict was loaded.
+            "domain": evalcfg.provenance(sensor=sensor_prov, weights=loaded),
         }
         Path(a.json).parent.mkdir(parents=True, exist_ok=True)
         Path(a.json).write_text(json.dumps(out, indent=1))

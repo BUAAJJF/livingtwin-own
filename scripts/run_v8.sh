@@ -159,14 +159,34 @@ DISTILL_RUN=$(run_dir_from_log "$OUT/distill.log")
 RD=$(latest_checkpoint "$DISTILL_RUN")
 printf '%s\n' "$RD" >"$OUT/distill_checkpoint.txt"
 say "student $RD"
+# The domain the student was distilled under, next to the checkpoint and in
+# $OUT.  Nothing else records it: these are import-time environment variables
+# of robust_cfg, not task ids, and scripts/accept_student.sh reads this file
+# back so the student is measured where it was trained.
+for d in "$OUT" "$(dirname "$RD")"; do
+  cat >"$d/domain.env" <<EOF_DOMAIN
+# written by scripts/run_v8.sh $(date -Iseconds); exported by accept_student.sh
+SIGHT_RAMP=0
+TARGET_VISIBLE_FLOOR=$VIS_FLOOR
+TARGET_VISIBLE_CEIL=$VIS_CEIL
+TARGET_GAP_SCALE=$GAP_SCALE
+EOF_DOMAIN
+done
 
 # --- 4. the same two questions, asked of the student -----------------------
-$MM run -n "$ENV_NAME" python -u scripts/eval_endurance.py \
+# In the domain it was distilled into, under the sensor it was distilled
+# with; the teacher's numbers above were taken under the defaults and are not
+# the same ruler.
+env SIGHT_RAMP=0 TARGET_VISIBLE_FLOOR="$VIS_FLOOR" \
+    TARGET_VISIBLE_CEIL="$VIS_CEIL" TARGET_GAP_SCALE="$GAP_SCALE" \
+  $MM run -n "$ENV_NAME" python -u scripts/eval_endurance.py \
   --checkpoint "$RD" --task Mjlab-Pick-Place-PiperX-Distill-Robust \
-  --num-envs 128 --steps "$GATE_STEPS" --device "cuda:$GPU" \
+  --num-envs 128 --steps "$GATE_STEPS" --device "cuda:$GPU" --sensor measured \
   --out "$OUT/endurance_student.json" 2>&1 | tee -a "$OUT/endurance.log" || true
-$MM run -n "$ENV_NAME" python -u scripts/eval_occlusion.py \
+env SIGHT_RAMP=0 TARGET_VISIBLE_FLOOR="$VIS_FLOOR" \
+    TARGET_VISIBLE_CEIL="$VIS_CEIL" TARGET_GAP_SCALE="$GAP_SCALE" \
+  $MM run -n "$ENV_NAME" python -u scripts/eval_occlusion.py \
   --checkpoint "$RD" --task Mjlab-Pick-Place-PiperX-Distill-Robust \
-  --num-envs 128 --steps 300 --device "cuda:$GPU" --seed 101 \
+  --num-envs 128 --steps 300 --device "cuda:$GPU" --seed 101 --sensor measured \
   --out "$OUT/occlusion_student.json" >>"$OUT/occlusion.log" 2>&1 || true
 say "v8 done: teacher $RT   student $RD"

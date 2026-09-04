@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import sys
 from dataclasses import asdict
 
 import numpy as np
@@ -57,6 +58,7 @@ from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 from piper_push import camera as sim_camera
+from piper_push import evalcfg
 
 VISIBLE, FINGERS, GRIPPER_BASE, ARM, OTHER = range(5)
 GROUP_NAMES = ("visible", "fingers", "gripper_base", "arm", "other")
@@ -214,21 +216,16 @@ def ray_hits_spheres(origin, targets, centres, radii):
 def load_policy(runner, ckpt, device):
   """Teachers and distilled students are saved differently; take either.
 
-  A PPO checkpoint carries ``model_state_dict`` and is loaded actor-only, so
-  that a state teacher's critic -- which reads observation groups the vision
-  task does not have -- is not dragged in.  A distillation checkpoint carries
-  ``student_state_dict`` and ``teacher_state_dict`` instead, and its runner
-  wants the whole thing, exactly as ``scripts/distill.py --resume`` does.
-  Passing the actor-only form for a student silently loads nothing and the
-  page renders an untrained network, which looks like a policy that failed.
+  A PPO checkpoint carries ``actor_state_dict``; a distillation checkpoint
+  carries ``student_state_dict``.  Whichever it is, the weights go straight
+  into the network the runner evaluates and are read back and compared, so
+  that a mismatch between checkpoint kind and runner kind is an error and
+  not an untrained network.  The old branch -- ``runner.load(ckpt,
+  load_cfg={"actor": True})`` -- loads NOTHING on a ``-Distill*`` task,
+  because rsl_rl's ``Distillation.load`` does not know the key ``actor``;
+  ``results/decay/v4_final.json`` (twelve windows of 0.0) is that branch.
   """
-  raw = torch.load(ckpt, map_location="cpu", weights_only=False)
-  if "student_state_dict" in raw:
-    runner.load(ckpt, map_location=device)
-  else:
-    runner.load(ckpt, load_cfg={"actor": True}, strict=True,
-                map_location=device)
-  return runner.get_inference_policy(device=device)
+  return evalcfg.load_policy(runner, ckpt, device)
 
 
 def reset_recurrent(policy, dones) -> None:
@@ -269,12 +266,14 @@ def main() -> int:
                  help="visible fraction below which a frame is called blocked. "
                       "Not a fitted number, and reported alongside the raw "
                       "fractions so a reader can pick a different one")
+  evalcfg.add_sensor_arg(p)
   p.add_argument("--out", default=None)
   a = p.parse_args()
 
   torch.manual_seed(a.seed)
   cfg = load_env_cfg(a.task, play=True)
   cfg.scene.num_envs = a.num_envs
+  sensor_prov = evalcfg.apply_sensor(cfg, a.task, a.sensor)
   # The state task has no camera, and occlusion cannot be seen without one.
   if not any(getattr(s, "name", "") == sim_camera.CAMERA_NAME
              for s in (cfg.scene.sensors or ())):
@@ -374,6 +373,8 @@ def main() -> int:
     "engaged": block(~held & (reach < 0.15)),
     "reach_m": {"mean": float(reach.mean()),
                 "engaged_fraction": float((reach < 0.15).mean())},
+    "seed": a.seed,
+    "provenance": evalcfg.provenance(argv=sys.argv, sensor=sensor_prov),
   }
   print(json.dumps(out, indent=2))
   print()

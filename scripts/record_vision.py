@@ -47,27 +47,25 @@ p.add_argument("--view-aim", default="0.22,-0.04,0.14")
 p.add_argument("--view-fovy", type=float, default=36.0)
 p.add_argument("--episode-s", type=float, default=None)
 p.add_argument("--fps", type=int, default=50)
-p.add_argument("--sensor", choices=("clean", "real"), default="clean",
-               help="'clean' is the rendered depth, which is what ``play`` "
-                    "gives and what makes two recordings comparable.  'real' "
-                    "puts the fitted D405 model back on, which is what the "
-                    "policy trains against and what the robot will hand it.")
+p.add_argument("--sensor", choices=("clean", "real", "measured", "task"),
+               default="clean",
+               help="'clean' is the rendered depth, which makes two recordings "
+                    "comparable.  'real' (alias 'measured') puts the sensor the "
+                    "task TRAINS with back on -- the fitted D455 model on a "
+                    "nominal task, the robust profile on a -Robust one -- "
+                    "which is what the robot will hand the policy.")
 p.add_argument("--device", default="cuda:0")
 a = p.parse_args()
 
 env_cfg = load_env_cfg(a.task, play=True)
-if a.sensor == "real":
-    import dataclasses as _dc
+# ``play`` switches the sensor model off so that two recordings of the same
+# policy differ only by the policy.  'real' puts it back, for the times the
+# question is what the camera does rather than what the policy does.
+from piper_push import evalcfg  # noqa: E402
 
-    from piper_push import camera as _camera
-
-    # ``play`` switches the sensor model off so that two recordings of the same
-    # policy differ only by the policy.  This puts it back, for the times the
-    # question is what the camera does rather than what the policy does.
-    _term = env_cfg.observations["camera"].terms["scene"]
-    _term.params = dict(_term.params)
-    _term.params["noise_cfg"] = _dc.replace(_camera.DEPTH_NOISE, strength=1.0)
-    _term.params["mask_jitter_px"] = _camera.MASK_JITTER_PX
+_term = env_cfg.observations["camera"].terms["scene"]
+_term.params = dict(_term.params)
+evalcfg.apply_sensor(env_cfg, a.task, "measured" if a.sensor == "real" else a.sensor)
 agent_cfg = load_rl_cfg(a.task)
 env_cfg.scene.num_envs = 1
 if a.episode_s is not None:
@@ -107,8 +105,7 @@ env_cfg.scene.sensors = tuple(env_cfg.scene.sensors or ()) + (
 env = ManagerBasedRlEnv(cfg=env_cfg, device=a.device, render_mode=None)
 env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 runner = (load_runner_cls(a.task) or MjlabOnPolicyRunner)(env, asdict(agent_cfg), device=a.device)
-runner.load(a.checkpoint, load_cfg={"actor": True}, strict=True, map_location=a.device)
-policy = runner.get_inference_policy(device=a.device)
+policy = evalcfg.load_policy(runner, a.checkpoint, a.device)
 recurrent = bool(getattr(policy, "is_recurrent", False))
 if recurrent:
     policy.reset()

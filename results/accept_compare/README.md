@@ -1,11 +1,25 @@
 # v4 against v8, on one ruler
 
 Every number here is `scripts/accept_s1.py`, 256 envs x 2400 steps, seed
-20260904, `--sensor measured`.  That matters: the same v4 checkpoint reads
-4.4/min on `scripts/eval_endurance.py` and 29.95/min here, because accept_s1
-runs the deployment's blind-step handling (`--hold-shim`) and this one does
-not.  Cross-protocol comparison is how "v4 places nothing" was nearly
-reported.
+20260904, `--sensor measured`.
+
+> **Correction (2026-09-04).** An earlier version of this paragraph said the
+> same v4 checkpoint read 4.4/min on `scripts/eval_endurance.py` and 29.95/min
+> here "because accept_s1 runs the deployment's blind-step handling
+> (`--hold-shim`)".  There is no such flag anywhere in the repository.  The
+> two confirmed causes of the gap are: (1) `eval_endurance.py` and
+> `eval_occlusion.py` did not reset the GRU hidden state on episode
+> boundaries until 2026-09-04 01:26, while `accept_s1.py` always did; and
+> (2) `eval_occlusion.load_policy` called `runner.load(load_cfg={"actor":
+> True})`, which on a `-Distill*` task loads *nothing* (rsl_rl's
+> `Distillation.load` does not know the key), so `results/decay/v4_final*.json`
+> measured a randomly initialised student.  Both are fixed
+> (`piper_push.evalcfg`).  A third difference -- `--sensor measured` here
+> replaced the task's noise model with the *nominal* one at strength 1.0, so
+> every `robust` row below ran robust dynamics under a downgraded sensor --
+> is also fixed, and means the `robust` rows are not the robust domain; they
+> have to be re-measured before being quoted.  The v4 row under the fixed
+> `eval_endurance.py` has not been re-run yet.
 
 | policy | domain | verdict | success | drops | throughput |
 |---|---|---|---|---|---|
