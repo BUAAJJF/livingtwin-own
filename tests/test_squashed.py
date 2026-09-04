@@ -64,7 +64,8 @@ def test_log_prob_is_finite_at_the_clamp_and_has_a_gradient():
 def test_entropy_falls_as_the_mean_saturates():
   """The change-of-variables term is what pulls a saturating mean back: the
   entropy bonus must get worse, not stay flat, as |mu| grows."""
-  d = SquashedGaussianDistribution(1, init_std=0.6)
+  torch.manual_seed(0)
+  d = SquashedGaussianDistribution(1, init_std=0.6, entropy_samples=256)
   ents = []
   for m in (0.0, 1.0, 2.0, 4.0):
     d.update(torch.full((1, 1), m))
@@ -73,6 +74,28 @@ def test_entropy_falls_as_the_mean_saturates():
   d.update(torch.full((1, 1), 4.0, requires_grad=True))
   (g,) = torch.autograd.grad(d.entropy.sum(), d._normal.mean)
   assert g.item() < 0.0
+
+
+def test_entropy_is_bounded_by_the_box_and_stops_paying_for_noise():
+  """A bounded variable cannot hold more than log 2 nats per dimension.  The
+  mean-evaluated proxy reported 12 nats for seven dimensions at sigma ~ 2 and
+  PPO's entropy bonus inflated sigma to get there; the sampled estimate must
+  stay under the bound and stop rising once the samples are bang-bang."""
+  import math
+  torch.manual_seed(0)
+  ents = {}
+  for std in (0.1, 0.6, 2.0, 5.0):
+    d = SquashedGaussianDistribution(7, init_std=std, entropy_samples=512)
+    d.update(torch.zeros(1, 7))
+    ents[std] = d.entropy.detach().item()
+  assert all(e < 7 * math.log(2.0) + 0.1 for e in ents.values()), ents
+  assert ents[0.6] > ents[0.1]
+  assert ents[5.0] < ents[2.0], ents  # more noise in u is LESS entropy in a
+  # And sigma gets a gradient from it, so the bonus can push sigma down.
+  d = SquashedGaussianDistribution(7, init_std=3.0, entropy_samples=64)
+  d.update(torch.zeros(1, 7))
+  (g,) = torch.autograd.grad(d.entropy.sum(), d.std_param)
+  assert (g < 0).all(), g
 
 
 def test_kl_is_taken_in_u_space_and_is_zero_for_equal_params():

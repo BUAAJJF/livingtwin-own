@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
+from piper_push import robot as piper
+
 from piper_push.distill import (
   RslRlDistillationAlgorithmCfg,
   RslRlDistillationRunnerCfg,
@@ -24,11 +26,27 @@ from piper_push.distill import (
 # under it.
 SQUASHED = "piper_push.squashed:SquashedGaussianDistribution"
 
+# The old head explored with sigma 0.6 on PICK_ARM_SCALE; the same sigma on
+# the bounded scale (the half-span of the safe clip) is 2-4x the joint-space
+# noise and halved the learning speed in a 200-iteration comparison.  So the
+# bounded head starts with the sigma that gives the SAME joint-space noise
+# per joint, and 0.6 on the gripper, whose scale did not change.
+BOUNDED_INIT_STD: tuple[float, ...] = tuple(
+  0.6 * piper.PICK_ARM_SCALE[j] / piper.BOUNDED_ARM_SCALE[j]
+  for j in piper.ARM_JOINT_ORDER
+) + (0.6,)
+
+
+def bounded_init_std(scale: float = 1.0) -> list[float]:
+  """``BOUNDED_INIT_STD`` scaled: what a stage that wants ``init_std = s``
+  under the old convention asks for under this one (``s / 0.6``)."""
+  return [float(v * scale) for v in BOUNDED_INIT_STD]
+
 
 def _distribution_cfg(bounded: bool) -> dict:
   return {
     "class_name": SQUASHED if bounded else "GaussianDistribution",
-    "init_std": 0.6,
+    "init_std": list(BOUNDED_INIT_STD) if bounded else 0.6,
     "std_type": "scalar",
   }
 
@@ -45,11 +63,11 @@ def pick_place_ppo_runner_cfg(
       obs_normalization=True,
       distribution_cfg={
         "class_name": _distribution_cfg(bounded)["class_name"],
+        "init_std": _distribution_cfg(bounded)["init_std"],
         # Six joint targets scaled by 0.3-0.5 rad plus a gripper scaled by
         # 25 mm.  std=1.0 would explore +-0.5 rad per step, which the command
         # rate limiter would simply throw away.
-        "init_std": 0.6,
-        "std_type": "scalar",
+                "std_type": "scalar",
       },
     ),
     critic=RslRlModelCfg(

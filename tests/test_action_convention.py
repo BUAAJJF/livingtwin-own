@@ -108,3 +108,16 @@ def test_deploy_mapper_reads_the_convention_from_the_spec():
   bad = dict(legacy, action_spec=dict(piper.action_spec("bounded"), joints=["x"] * 7))
   with pytest.raises(ValueError, match="action_spec joints"):
     robot.ActionMapper(bad)
+
+
+def test_bounded_initial_sigma_matches_the_old_joint_space_noise():
+  from piper_push.tasks.pick_place.rl_cfg import BOUNDED_INIT_STD, bounded_init_std
+  for j, s in zip(piper.ARM_JOINT_ORDER, BOUNDED_INIT_STD):
+    assert s * piper.BOUNDED_ARM_SCALE[j] == pytest.approx(0.6 * piper.PICK_ARM_SCALE[j])
+  assert BOUNDED_INIT_STD[6] == pytest.approx(0.6)
+  assert bounded_init_std(0.15 / 0.6)[6] == pytest.approx(0.15)
+  from piper_push.squashed import SquashedGaussianDistribution
+  d = SquashedGaussianDistribution(7, init_std=list(BOUNDED_INIT_STD))
+  assert torch.allclose(d.std_param, torch.tensor(BOUNDED_INIT_STD))
+  with pytest.raises(ValueError):
+    SquashedGaussianDistribution(7, init_std=[0.1, 0.2])

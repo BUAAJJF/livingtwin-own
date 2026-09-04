@@ -214,16 +214,25 @@ def main() -> int:
     # it is doing.  Exploration has to restart somewhere, but not there.
     if a.init_std is not None:
       actor = runner.alg.get_policy()
+      # Under the bounded convention the std lives in tanh-input space and is
+      # per joint; --init-std is read as the old convention's number and
+      # scaled the same way the initial sigma was (rl_cfg.bounded_init_std).
+      from piper_push.squashed import SquashedGaussianDistribution
+      from piper_push.tasks.pick_place.rl_cfg import bounded_init_std
+      if isinstance(actor.distribution, SquashedGaussianDistribution):
+        target = torch.tensor(bounded_init_std(a.init_std / 0.6))
+      else:
+        target = torch.tensor(float(a.init_std))
       with torch.no_grad():
         if hasattr(actor.distribution, "std_param"):
-          actor.distribution.std_param.fill_(a.init_std)
+          actor.distribution.std_param.copy_(target.to(actor.distribution.std_param))
         elif hasattr(actor.distribution, "log_std_param"):
-          actor.distribution.log_std_param.fill_(float(torch.log(torch.tensor(a.init_std))))
+          actor.distribution.log_std_param.copy_(torch.log(target).to(actor.distribution.log_std_param))
         else:
           raise RuntimeError(
             f"{type(actor.distribution).__name__} exposes no std parameter to set"
           )
-      print(f"[INFO] action std reset to {a.init_std}")
+      print(f"[INFO] action std reset to {target.tolist()}")
 
   # Counted as a target, not a budget.  rsl_rl's learn() runs N iterations
   # *from where it is*, so a run resumed at 1600 and asked for 3000 stops at
