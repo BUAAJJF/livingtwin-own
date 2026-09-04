@@ -266,7 +266,7 @@ def main() -> int:
                  help="visible fraction below which a frame is called blocked. "
                       "Not a fitted number, and reported alongside the raw "
                       "fractions so a reader can pick a different one")
-  evalcfg.add_sensor_arg(p)
+  evalcfg.add_sensor_arg(p, default="measured")
   p.add_argument("--out", default=None)
   a = p.parse_args()
 

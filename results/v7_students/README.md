@@ -1,5 +1,7 @@
 # Why every v7 student grasps once and stops
 
+> **Validity (2026-09-04).** Every JSON in this directory was measured by `eval_endurance.py` before it reset the GRU on episode boundaries; all five are marked `invalid` in place and need re-measuring (`results/VALIDITY.md`).
+
 The question from the start of the session -- "夹取了一次之后就卡住" -- has an
 answer, and it is not in the student.
 

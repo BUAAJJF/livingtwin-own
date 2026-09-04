@@ -1,5 +1,7 @@
 # v4 against v8, on one ruler
 
+> **Validity (2026-09-04).** `v4_robust.json`, `v8s_depth.json` and `v8s_sam2.json` are marked `superseded` in place (sensor downgrade, see the correction below and `results/VALIDITY.md`).
+
 Every number here is `scripts/accept_s1.py`, 256 envs x 2400 steps, seed
 20260904, `--sensor measured`.
 

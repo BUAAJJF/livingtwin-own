@@ -105,7 +105,7 @@ def main() -> int:
   p.add_argument("--gate", type=float, default=None,
                  help="exit 1 if late/early is below this")
   from piper_push import evalcfg
-  evalcfg.add_sensor_arg(p)
+  evalcfg.add_sensor_arg(p, default="measured")
   p.add_argument("--out", default=None)
   a = p.parse_args()
 

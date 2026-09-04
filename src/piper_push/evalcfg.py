@@ -207,8 +207,10 @@ def apply_sensor(env_cfg, task: str, setting: str) -> dict[str, Any]:
 def add_sensor_arg(parser, default: str = "clean") -> None:
   parser.add_argument(
     "--sensor", default=default, choices=SENSOR_CHOICES,
-    help="depth realism to EVALUATE under.  'clean' (default): no depth noise "
-         "and no mask jitter, on every task.  'measured': the sensor the task "
+    help="depth realism to EVALUATE under.  'clean': no depth noise and no "
+         "mask jitter, on every task -- a student distilled under the fitted "
+         "sensor collapses here (results/audit_20260904), so it is a control, "
+         "not a baseline.  'measured': the sensor the task "
          "trains with -- the fitted D455 at strength 1.0 on a nominal task, "
          "the robust profile (strength 1.35, wider surface-fill and texture "
          "penalties) on a -Robust task.  'task': whatever the play config "

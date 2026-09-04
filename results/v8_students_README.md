@@ -1,5 +1,7 @@
 # What the observation model is worth: the v8 A/B
 
+> **Validity (2026-09-04).** The `v8_students_*` and `v8_occ_*` JSONs this file quotes were measured without the GRU reset on episode boundaries and are marked `invalid`; the `*_fixed_*` files replace them.  The accept_compare robust rows ran under a downgraded sensor.  The `v8s_sam2` numbers were also taken outside the visible-fraction domain it was distilled in.  See `results/VALIDITY.md`; nothing below is re-measured yet.
+
 Both students distilled from the same teacher (`v8_remote/model_15499`,
 late/early 0.81), 2500 iterations, `episode_length_s = 36`, 512 envs, seed 42.
 **Only the observation model differs.**  Evaluated on
