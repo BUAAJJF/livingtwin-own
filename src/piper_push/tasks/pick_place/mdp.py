@@ -40,6 +40,7 @@ from mjlab.utils.lab_api.math import (
 )
 
 from piper_push import depth_noise, layout, objects, shapes
+from piper_push import target_process as tproc
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -859,6 +860,11 @@ class CameraScene:
     self._scenery = None
     self._scenery_depth = None
     self._cutoff = 1.5
+    # Visibility of the target as a process in time.  Built lazily because the
+    # config arrives through __call__, like every other parameter here.
+    self._target_proc: tproc.TargetProcess | None = None
+    self._rays = None
+
 
   def _build(self, sensor_name: str, shape, device, noise_cfg, mask_jitter):
     from piper_push import camera as camera_mod
@@ -919,9 +925,48 @@ class CameraScene:
                             device=device),
             torch.as_tensor(protected.reshape(height, width), device=device))
 
+  def _held_proxy(self, env, cmd, depth, mask, radius):
+    """Replace the held object's silhouette with the deployment's rebuild.
+
+    Built the same way ``run.py`` builds it: unproject every policy pixel with
+    valid depth into the base frame and keep the ones near the grasp site.  No
+    pixel is invented, and the fingers are included exactly as they are on the
+    robot.
+    """
+    from piper_push import camera as camera_mod
+    sensor = env.scene[camera_mod.CAMERA_NAME]
+    cam_idx = sensor.camera_idx
+    d = depth[:, 0]                                        # (B, H, W)
+    if self._rays is None or self._rays.shape[-3:-1] != d.shape[-2:]:
+      h, w = d.shape[-2:]
+      f = 0.5 * h / math.tan(math.radians(camera_mod.FOVY_DEG) / 2.0)
+      vv, uu = torch.meshgrid(torch.arange(h, device=d.device),
+                              torch.arange(w, device=d.device), indexing="ij")
+      self._rays = torch.stack(
+        [(uu - w / 2.0) / f, -(vv - h / 2.0) / f,
+         -torch.ones_like(uu, dtype=torch.float32)], dim=-1)
+    cpos = env.sim.model.cam_pos[:, cam_idx].to(torch.float32)
+    cq = env.sim.model.cam_quat[:, cam_idx].to(torch.float32)
+    w_, xyz = cq[:, :1], cq[:, 1:]
+    def rot(v):
+      t = 2.0 * torch.cross(xyz.view(-1, 1, 1, 3).expand_as(v), v, dim=-1)
+      return v + w_.view(-1, 1, 1, 1) * t + torch.cross(
+        xyz.view(-1, 1, 1, 3).expand_as(v), t, dim=-1)
+    pts = cpos.view(-1, 1, 1, 3) + rot(
+      self._rays.unsqueeze(0).expand(d.shape[0], -1, -1, -1)) * d.unsqueeze(-1)
+    site = (cmd._site_pos_w() - env.scene.env_origins).view(-1, 1, 1, 3)
+    near = ((pts - site).norm(dim=-1) < radius) & (d > 0)
+    return torch.where(cmd.grasped.view(-1, 1, 1, 1),
+                       near.unsqueeze(1).float(), mask)
+
   def reset(self, env_ids=None) -> None:
     if self._corr is not None:
       self._corr.reset(env_ids)
+    if self._target_proc is not None:
+      # Per episode, not per step: how well a session sees its target is a
+      # property of that session, and redrawing it every step would be the IID
+      # model this replaces, one level up.
+      self._target_proc.reset(env_ids)
     self._draw_scenery(env_ids)
     if self._min_px is not None and self._dropout_spec is not None:
       self._draw_dropout(self._dropout_spec, env_ids)
@@ -1076,7 +1121,8 @@ class CameraScene:
     featureless_objects_only: bool = True,
     scenery_dr: bool = False,
     mask_dropout: "tuple[float, float, float, float] | None" = None,
-    blind_when_held: float | None = None,
+    target_process: dict | None = None,
+    held_proxy_radius: float | None = None,
   ) -> torch.Tensor:
     sensor = env.scene[sensor_name]
     depth = sensor.data.depth
@@ -1095,21 +1141,47 @@ class CameraScene:
     mask = ((ids.unsqueeze(-1) == target[:, None, None, :]).any(-1) & is_geom)
     mask = mask.float().unsqueeze(1)
 
-    # Once the jaws close on it, the rig cannot call it an object any more.
+    # Once the jaws close on it, the rig cannot call it an object any more --
+    # and it loses it for SECONDS, not for single frames.
     #
-    # Measured on recordings/v4_fixedseg_try6, which grasped and then froze:
-    # with the jaws closed the target was reported in 155 of 1894 frames, 8%,
-    # because from a fixed viewpoint the thing in the gripper is inside the arm
-    # and ``mask.arm_mask`` deletes 88% of its points.  The simulator shows it
-    # throughout, so a policy trained here has never had to carry something it
-    # cannot see, and on the arm that produced fifteen-second freezes.
+    # Measured across 20 sessions' control logs by
+    # scripts/measure_target_gaps.py: with the jaws closed the target is
+    # present in 37.4% of control steps, and the no-target runs have median 40
+    # steps, p90 85 and a maximum of 1463 (29 s).  The model this replaces was
+    # an independent per-frame coin flip at 0.08, whose runs have median 9 and
+    # effectively no tail -- a different signal entirely for a recurrent
+    # policy, and fitted to the single worst session besides.
     #
-    # A survival probability rather than a hard blank, because the rig does
-    # still report it occasionally and a policy that has never seen that would
-    # not use it.
-    if blind_when_held is not None and float(blind_when_held) < 1.0:
-      keep = torch.rand(mask.shape[0], device=mask.device) < float(blind_when_held)
-      mask = mask * (~cmd.grasped | keep).float().view(-1, 1, 1, 1)
+    # ``piper_push.target_process`` carries the state; see it for the fit and
+    # for what is deliberately not modelled.
+    if target_process is not None:
+      pcfg = (target_process if isinstance(target_process, tproc.TargetProcessCfg)
+              else tproc.TargetProcessCfg(**dict(target_process)))
+      if pcfg.enabled:
+        if self._target_proc is None:
+          self._target_proc = tproc.TargetProcess(
+            pcfg, mask.shape[0], mask.device)
+        visible = self._target_proc.step(cmd.grasped)
+        mask = mask * visible.float().view(-1, 1, 1, 1)
+
+    # What the mask LOOKS like while carrying, as opposed to when it is there.
+    #
+    # The deployment cannot show the object's silhouette during a carry -- the
+    # segmenter will not call the thing in the gripper an object and the arm
+    # mask deletes it -- so it rebuilds the mask geometrically: policy pixels
+    # whose unprojected point is within a radius of the grasp site.  That is
+    # not the silhouette.  Measured against the renderer's ground truth in
+    # simulation, at 60 mm the rebuilt mask is 52.6% target and 95.5% recall,
+    # and 92% of the wrong half is the robot's own fingers.  A policy trained
+    # on a pure silhouette and deployed against that is being shown a picture
+    # of its hand and told it is the object.
+    #
+    # 40 mm scores better -- 66.5% precision, 54.9% IoU against 60 mm's 51.3%
+    # -- and the deployment default should probably move; that is a separate
+    # decision.  Here the point is that training sees the same construction
+    # deployment does, whatever radius it is set to.
+    if held_proxy_radius and float(held_proxy_radius) > 0.0:
+      mask = self._held_proxy(env, cmd, depth, mask, float(held_proxy_radius))
 
     cfg = noise_cfg if noise_cfg is not None else depth_noise.DepthNoiseCfg()
     if cfg.strength > 0.0:
@@ -1708,12 +1780,27 @@ def reset_arm_valid_posture(
   min_ee_height: float = 0.05,
   min_link_height: float = 0.03,
   attempts: int = 6,
+  full_range: bool = False,
 ) -> None:
   """Start from a varied posture, but never from inside the table.
 
   Rejection sampling rather than a narrow range: the push task learned that a
   policy trained around one posture cannot recover from any other, and that a
   wide range without this check puts a fifth of episodes underground.
+
+  ``full_range`` samples uniformly between the soft joint limits instead of
+  ``default +- position_range``, and it exists because the narrow version was
+  measured not to cover where the policy goes.  With the scalar 0.7 rad,
+  ``student_5000`` spends 34% of its first hundred steps and **63% by step
+  1100** in postures outside the box it is ever initialised from, and the worst
+  offender is the wrist: J6 is reset over +-40.1 deg against a soft limit of
+  +-108, so 67.9 deg of its travel is never an opening -- while
+  ``wrist_side_on`` actively rewards driving it there.  A policy cannot learn
+  to recover from a posture it never starts in, and on the arm there is no
+  reset at all, which is what ``--home-first`` is compensating for.
+
+  Uniform between the limits, not the clamp of a wide delta: clamping piles
+  probability onto the boundary and calls it coverage.
   """
   robot: Entity = env.scene[asset_cfg.name]
   joint_ids = asset_cfg.joint_ids
@@ -1725,10 +1812,14 @@ def reset_arm_valid_posture(
   origins = env.scene.env_origins[env_ids]
 
   for _ in range(attempts):
-    candidate = default + sample_uniform(
-      *position_range, default.shape, device=env.device
-    )
-    candidate = torch.max(torch.min(candidate, limits[..., 1]), limits[..., 0])
+    if full_range:
+      u = sample_uniform(0.0, 1.0, default.shape, device=env.device)
+      candidate = limits[..., 0] + u * (limits[..., 1] - limits[..., 0])
+    else:
+      candidate = default + sample_uniform(
+        *position_range, default.shape, device=env.device
+      )
+      candidate = torch.max(torch.min(candidate, limits[..., 1]), limits[..., 0])
     chosen = torch.where(accepted.unsqueeze(-1), chosen, candidate)
     robot.write_joint_state_to_sim(chosen, zero, joint_ids=joint_ids, env_ids=env_ids)
     env.sim.forward()

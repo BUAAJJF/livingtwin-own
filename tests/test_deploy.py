@@ -1666,7 +1666,7 @@ def test_the_tracker_still_believes_in_a_briefly_lost_target():
 def test_an_occluded_target_reuses_the_last_known_mask():
   import inspect
 
-  from hardware.deploy import run
+  from hardware.deploy import run, target_mask
 
   # The camera is bolted to the world and the object is not moving, so when
   # the arm stands in front of the target the last mask the segmenter produced
@@ -1674,14 +1674,18 @@ def test_an_occluded_target_reuses_the_last_known_mask():
   # on the arm and is what this replaces: an empty mask cannot be told apart
   # from "there is no target", and the policy drove 137 steps and drifted
   # 285 mm away from the object it was reaching for.
+  #
+  # The behaviour itself now lives in ``target_mask.TargetMask`` and is tested
+  # against a truth in ``tests/test_target_mask.py``; it moved out of this file
+  # because the simulation checker had grown a second copy of it.  What is
+  # asserted here is the wiring: that ``Perception`` still routes the mask
+  # through it and still drives on the substituted answer.
   src = inspect.getsource(run.Perception)
-  assert "_last_target" in src
-  assert "self._last_target = target.copy()" in src, "must cache on a real target"
+  assert "self._target_mask(" in src, "the mask must go through TargetMask"
   assert "self.tracker.has_target" in src, "must be gated on the tracker"
-  assert "self._last_target = None" in src, "must clear when the tracker gives up"
-
-  loop = inspect.getsource(run.main) if hasattr(run, "main") else inspect.getsource(run)
-  assert "held_over" in loop, "the loop must drive on the held-over mask, not on has_target"
+  assert "held_over" in src, \
+    "the loop must drive on the held-over mask, not on has_target"
+  assert hasattr(target_mask.TargetMask, "__call__")
 
 
 def test_an_occluded_target_empties_the_mask_in_simulation_too():
@@ -2126,3 +2130,44 @@ def test_every_name_main_uses_is_defined_before_it_runs():
   assert not defined_after, (
     f"defined after the __main__ guard and therefore unavailable to main(): "
     f"{sorted(defined_after)}")
+
+
+def test_stale_guard_uses_camera_capture_time_not_perception_publish_time():
+  from types import SimpleNamespace
+
+  from hardware.deploy import run
+
+  frame = SimpleNamespace(stamp=100.0)
+  assert run._observation_age(frame, now=100.125) == pytest.approx(0.125)
+  assert np.isinf(run._observation_age(None, now=100.125))
+
+
+def test_control_uses_actual_mask_availability_instead_of_depth_label():
+  import inspect
+
+  from hardware.deploy import run
+
+  perception = inspect.getsource(run.Perception._run)
+  control = inspect.getsource(run.main)
+  assert "target_available = bool(np.asarray(target).any())" in perception
+  assert "if not target_available or held_over:" in control
+
+
+def test_a_perception_thread_failure_is_raised_in_the_control_thread():
+  import threading
+
+  from hardware.deploy import run
+
+  perception = run.Perception.__new__(run.Perception)
+  perception._lock = threading.Lock()
+  perception._error = None
+  perception._out = None
+  perception._stopping = threading.Event()
+
+  def fail():
+    raise ValueError("GPU inference failed")
+  perception._run = fail
+  perception.run()
+  assert perception._stopping.is_set()
+  with pytest.raises(RuntimeError, match="perception thread failed"):
+    perception.latest()

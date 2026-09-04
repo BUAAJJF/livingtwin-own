@@ -429,6 +429,40 @@ class DepthSegmenter:
       pts, in_box, self.rig.table_z, self.cfg.plane_fit_points)
     return height
 
+  def arm_image_mask(self, depth: np.ndarray, arm, site,
+                     spare_m: float = 0.12) -> np.ndarray:
+    """Which sensor pixels are the ARM, for a tracker's drift watchdog.
+
+    The same geometry the segmenter subtracts, on the same decimated grid,
+    expanded back to the sensor's -- so a watchdog built on it cannot see
+    anything the deployment does not.
+
+    ``spare_m`` drops every sphere within that distance of the grasp site, and
+    without it this is not merely noisy, it is inverted.  The cover puts a
+    50 mm sphere on ``gripper_base`` and 31 mm on each finger, so an object
+    being grasped is inside "the arm" by construction: scored against the
+    renderer, a watchdog fed the unspared mask rejected correct masks at IoU
+    0.86 and 0.91 for arm fractions of 0.88 and 0.94, and drove SAM's usable
+    detection from 98% down to 51%.  The drift it exists to catch is a mask
+    that has crawled onto the forearm, which is a long way from the fingers,
+    so sparing the hand costs it nothing.
+    """
+    centres, radii = arm
+    keep = (np.linalg.norm(centres - np.asarray(site, dtype=np.float64), axis=1)
+            > float(spare_m))
+    d = self.reproj.source(depth)
+    h, w = d.shape
+    pts = self.reproj.points_base(d, self.rig)
+    flat = np.zeros(h * w, bool)
+    if pts.size and keep.any():
+      hit = arm_mask(pts, (centres[keep], radii[keep]),
+                     self.cfg.arm_clearance_m,
+                     within=np.ones(len(pts), bool))
+      flat[self.reproj.last_src] = hit
+    m = flat.reshape(h, w)
+    n = self.decimate
+    return m if n == 1 else np.repeat(np.repeat(m, n, 0), n, 1)
+
   def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
                arm=None) -> Segmentation:
     """Args:
@@ -794,6 +828,40 @@ class YoloSegmenter:
     backend is earning its place: if it is zero, the depth segmenter would have
     found everything."""
 
+  def arm_image_mask(self, depth: np.ndarray, arm, site,
+                     spare_m: float = 0.12) -> np.ndarray:
+    """Which sensor pixels are the ARM, for a tracker's drift watchdog.
+
+    The same geometry the segmenter subtracts, on the same decimated grid,
+    expanded back to the sensor's -- so a watchdog built on it cannot see
+    anything the deployment does not.
+
+    ``spare_m`` drops every sphere within that distance of the grasp site, and
+    without it this is not merely noisy, it is inverted.  The cover puts a
+    50 mm sphere on ``gripper_base`` and 31 mm on each finger, so an object
+    being grasped is inside "the arm" by construction: scored against the
+    renderer, a watchdog fed the unspared mask rejected correct masks at IoU
+    0.86 and 0.91 for arm fractions of 0.88 and 0.94, and drove SAM's usable
+    detection from 98% down to 51%.  The drift it exists to catch is a mask
+    that has crawled onto the forearm, which is a long way from the fingers,
+    so sparing the hand costs it nothing.
+    """
+    centres, radii = arm
+    keep = (np.linalg.norm(centres - np.asarray(site, dtype=np.float64), axis=1)
+            > float(spare_m))
+    d = self.reproj.source(depth)
+    h, w = d.shape
+    pts = self.reproj.points_base(d, self.rig)
+    flat = np.zeros(h * w, bool)
+    if pts.size and keep.any():
+      hit = arm_mask(pts, (centres[keep], radii[keep]),
+                     self.cfg.arm_clearance_m,
+                     within=np.ones(len(pts), bool))
+      flat[self.reproj.last_src] = hit
+    m = flat.reshape(h, w)
+    n = self.decimate
+    return m if n == 1 else np.repeat(np.repeat(m, n, 0), n, 1)
+
   def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
                arm=None) -> Segmentation:
     """Args:
@@ -978,6 +1046,40 @@ class FusedSegmenter:
     self.n_from_yolo = 0
     """How many of the last frame's instances only the colour model found.  The
     honest measure of whether this is worth its forward pass."""
+
+  def arm_image_mask(self, depth: np.ndarray, arm, site,
+                     spare_m: float = 0.12) -> np.ndarray:
+    """Which sensor pixels are the ARM, for a tracker's drift watchdog.
+
+    The same geometry the segmenter subtracts, on the same decimated grid,
+    expanded back to the sensor's -- so a watchdog built on it cannot see
+    anything the deployment does not.
+
+    ``spare_m`` drops every sphere within that distance of the grasp site, and
+    without it this is not merely noisy, it is inverted.  The cover puts a
+    50 mm sphere on ``gripper_base`` and 31 mm on each finger, so an object
+    being grasped is inside "the arm" by construction: scored against the
+    renderer, a watchdog fed the unspared mask rejected correct masks at IoU
+    0.86 and 0.91 for arm fractions of 0.88 and 0.94, and drove SAM's usable
+    detection from 98% down to 51%.  The drift it exists to catch is a mask
+    that has crawled onto the forearm, which is a long way from the fingers,
+    so sparing the hand costs it nothing.
+    """
+    centres, radii = arm
+    keep = (np.linalg.norm(centres - np.asarray(site, dtype=np.float64), axis=1)
+            > float(spare_m))
+    d = self.reproj.source(depth)
+    h, w = d.shape
+    pts = self.reproj.points_base(d, self.rig)
+    flat = np.zeros(h * w, bool)
+    if pts.size and keep.any():
+      hit = arm_mask(pts, (centres[keep], radii[keep]),
+                     self.cfg.arm_clearance_m,
+                     within=np.ones(len(pts), bool))
+      flat[self.reproj.last_src] = hit
+    m = flat.reshape(h, w)
+    n = self.decimate
+    return m if n == 1 else np.repeat(np.repeat(m, n, 0), n, 1)
 
   def __call__(self, depth: np.ndarray, rgb: np.ndarray | None = None,
                arm=None) -> Segmentation:

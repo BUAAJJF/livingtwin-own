@@ -401,6 +401,17 @@ class ProprioBuilder:
       self._contact = False
     return self._contact
 
+  @property
+  def contact_latched(self) -> bool:
+    """The latched contact bit, for anything outside the observation.
+
+    The perception thread needs it to know a carry has started, and reading
+    the raw effort there instead would give it a different answer from the one
+    the policy is being fed -- the whole point of the hysteresis is that a
+    threshold on the instantaneous current is not a contact.
+    """
+    return bool(self._contact)
+
   def reset(self) -> None:
     """Forget the contact latch.  Called wherever the policy is reset."""
     self._above = self._below = 0

@@ -58,6 +58,13 @@ def main() -> int:
                       "'clean' turns it "
                       "off entirely and is the control that says how much of "
                       "the difference the model is responsible for")
+  p.add_argument("--episode-length-s", type=float, default=None,
+                 help="override the task's episode length.  The arm never "
+                      "resets, and the teachers were found to stop working "
+                      "part way through an episode three times longer than "
+                      "the 12 s they were trained on -- a horizon the student "
+                      "must therefore also be rolled out over, or it inherits "
+                      "the blind spot instead of the behaviour.")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
   a = p.parse_args()
@@ -70,6 +77,9 @@ def main() -> int:
   env_cfg = load_env_cfg(a.task)
   agent_cfg = load_rl_cfg(a.task)
   env_cfg.scene.num_envs = a.num_envs
+  if a.episode_length_s is not None:
+    env_cfg.episode_length_s = float(a.episode_length_s)
+    print(f"[INFO] episode length: {env_cfg.episode_length_s} s")
   env_cfg.seed = a.seed
   agent_cfg.seed = a.seed
   if a.cadence is not None:

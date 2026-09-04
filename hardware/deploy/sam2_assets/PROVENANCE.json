@@ -1,0 +1,11 @@
+{
+  "why": "The audit ran SAM2.1 out of /tmp, which the handoff says is not a durable dependency. This pins what was actually used.",
+  "upstream": "https://github.com/facebookresearch/sam2",
+  "revision": "2b90b9f5ceec907a1c18123530e92e794ad901a4",
+  "revision_subject": "remove `.pin_memory()` in `obj_pos` of `SAM2Base` to resolve and error in MPS (#495)",
+  "checkpoint": "sam2.1_hiera_small.pt",
+  "checkpoint_sha256": "6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38",
+  "checkpoint_bytes": 184416285,
+  "installed_with": "pip install --no-deps --no-build-isolation (SAM2_BUILD_CUDA=0)",
+  "source_of_record": "TwinSight results/twin/audit/SAM21_INTEGRATION_HANDOFF.md"
+}

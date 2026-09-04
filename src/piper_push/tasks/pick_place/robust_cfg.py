@@ -25,6 +25,75 @@ from .env_cfg import make_pick_place_env_cfg
 
 
 # Serialized by tests/reporting: changing a range changes the experiment.
+_VIS_FLOOR = float(os.environ.get("TARGET_VISIBLE_FLOOR", 0.0))
+"""Raises the worst sessions out of the drawn range; 0 keeps all of them."""
+
+_VIS_CEIL = os.environ.get("TARGET_VISIBLE_CEIL")
+_VIS_CEIL = float(_VIS_CEIL) if _VIS_CEIL is not None else None
+"""Replaces the top of the drawn range, so a floor above the measured ceiling
+describes a domain instead of colliding with one.
+
+``TARGET_VISIBLE_FLOOR`` alone could only raise the bottom of the *depth
+segmenter's* measured spread, whose top is 0.85/0.90.  Asking for a floor of
+0.95 there produces ``(0.95, 0.85)`` -- still a usable interval, because the
+draw is ``lo + rand * (hi - lo)``, but a reversed one that nobody wrote down
+and that silently caps the domain below what was asked for.
+
+Both ends are needed now because there is a second perception stack to match.
+Measured over seven seeds with ``scripts/sim_perception_check.py --sam``,
+SAM2.1 carrying the target reports it in 97.7% of approach frames and 100%
+while held, against the depth stack's 47%/0%.  Those are different domains,
+not different points in one, and which of them to distil into is a deployment
+decision -- so it is a pair of numbers on the command line rather than an
+edit."""
+
+
+def _vis_range(lo: float, hi: float) -> tuple[float, float]:
+  """The per-episode marginal range, after the two environment overrides.
+
+  Ordered, so ``lo <= hi`` however the two knobs are set; the draw works either
+  way but a reversed pair is a config nobody can read."""
+  lo = max(lo, _VIS_FLOOR)
+  hi = hi if _VIS_CEIL is None else _VIS_CEIL
+  return (min(lo, hi), max(lo, hi))
+
+_GAP_SCALE = float(os.environ.get("TARGET_GAP_SCALE", 1.0))
+"""Scales the measured blackout lengths; 1.0 is the rig."""
+
+_OBS_LATENCY = os.environ.get("OBS_LATENCY_PROBS")
+"""Comma-separated probabilities over 0..N control steps of observation lag.
+
+The profile's default is a mean of 43 ms, fitted to the depth-only loop, whose
+replay measures **18.5 ms median / 23.5 ms p95** on an idle card.  Adding
+SAM2.1 to the same loop measures **76.5 / 94.2 ms** -- so the median under SAM
+is the 80 ms bin the default gives 5% of its mass to, and the p95 is off the
+end of the support entirely.
+
+That is a new sim-to-real gap created by fixing an old one, and it is exactly
+the kind this campaign exists to stop shipping: a student distilled against the
+default prior and deployed behind SAM would meet a latency it has seen 5% of
+the time, all of the time.  Set this when the perception stack changes, from
+the replay, not from taste."""
+
+_SMOOTH = float(os.environ.get("SMOOTH_SCALE", 1.0))
+"""Multiplies every term that charges for how the arm moves rather than where.
+
+``action_rate``, ``action_acc``, ``joint_vel``, ``joint_acc``,
+``joint_torques`` and ``mech_power`` -- the whole family, together, because
+scaling one of them just moves the roughness into the others.  The two with a
+curriculum are scaled THROUGH it, so a ramp that starts at a third of its final
+weight still does.
+
+1.0 is every result on record.  The measured step-to-step action change is
+0.210 for `strong_teacher`, 0.244 for the -24 sight teachers and 0.311 for
+`v5_baseline`, so this is the axis that separates them almost as cleanly as the
+sight reward does -- and unlike the sight reward it costs nothing in
+visibility.  A dose above 1 is an experiment, not a fit: v6 collapsed a policy
+by over-weighting a single term."""
+
+_SIGHT_RAMP = os.environ.get("SIGHT_RAMP", "1") not in ("0", "false", "False")
+"""Whether the sight weights scale their curriculum (default) or flatten it."""
+
 HEAVY_DR_PROFILE = {
   "name": "d455_v7_visible",
   "timing": {
@@ -123,7 +192,35 @@ HEAVY_DR_PROFILE = {
     # viewpoint the thing in the gripper is inside the arm.  That is closed
     # loop -- the policy chooses where to put its hand -- and the simulator
     # models none of it.
-    "blind_when_held": 0.08,
+    # Replaces blind_when_held.  That was an IID per-frame keep at 0.08,
+    # fitted to the single worst recorded session; the rig loses the target in
+    # runs with a median of 40 control steps and a tail to 29 seconds, and the
+    # aggregate marginal is 0.374 rather than 0.08.  Ranges are the measured
+    # session-to-session spread -- see piper_push.target_process and
+    # scripts/measure_target_gaps.py.  None here disables it entirely.
+    "target_process": {
+      # TARGET_VISIBLE_FLOOR raises the bottom of the measured session spread
+      # without touching the gap structure -- the other half of the diagnostic
+      # that TARGET_GAP_SCALE started.  Gap length turned out not to be the
+      # binding difficulty (gaps at 0.35x learned the same as gaps at 1.0x),
+      # which leaves the marginal.  If raising it recovers v4-like learning
+      # then the student's problem is how OFTEN the rig sees its target, and
+      # that is a segmenter to fix rather than a domain to train through.
+      "visible_held": _vis_range(0.10, 0.85),
+      "visible_approach": _vis_range(0.15, 0.90),
+      # TARGET_GAP_SCALE shortens the blackouts without touching the marginal,
+      # which is the one knob that separates "the target is often missing"
+      # from "the target is missing for a long time".  The measured process is
+      # 1.0; a smaller value is a milder domain and a diagnostic, not a fit.
+      "mean_gap_held": (20.0 * _GAP_SCALE, 120.0 * _GAP_SCALE),
+      "mean_gap_approach": (15.0 * _GAP_SCALE, 110.0 * _GAP_SCALE),
+      "confirm_frames": 3,
+      "enabled": True,
+    },
+    # The deployment's geometric rebuild of the held object, so training sees
+    # the same construction.  0 keeps the renderer's exact silhouette, which
+    # is what every policy so far was trained on and what no robot can supply.
+    "held_proxy_radius": float(os.environ.get("HELD_PROXY_M", 0.0)),
     # The hand camera.  Its ranges are not the scene camera's and must not be
     # copied from them: it is a D405 at 120 mm, not a D455 at 1.2 m.
     #
@@ -219,20 +316,84 @@ def apply_heavy_dr(
       task["transport_progress_weight"])
   if "joint_vel_weight" in task and "joint_vel" in cfg.rewards:
     cfg.rewards["joint_vel"].weight = float(task["joint_vel_weight"])
-  # The visibility weights, and the curriculum entries that would otherwise
-  # overwrite them.  Those ramps are inert at this environment count -- the
-  # teacher log shows every curriculum term sitting at its final value from the
-  # first iteration -- so leaving them in place would silently restore the
-  # default the moment the manager ran.
-  for key, reward, curr in (("sight_arm_weight", "sight_arm", "sight_arm_weight"),
-                            ("sight_hand_weight", "sight_hand", "sight_hand_weight"),
-                            ("wrist_weight", "wrist_side_on", "wrist_decay")):
-    if key in task and reward in cfg.rewards:
-      w = float(task[key])
+  # SIGHT_RAMP=0 restores the flat schedule, for running it deliberately as a
+  # control against a ramped run at the same final weight.  Default is on.
+  # The visibility weights, SCALED THROUGH their curriculum rather than
+  # flattened onto it.
+  #
+  # This flattened them until 2026-09-02, on a note claiming the ramps were
+  # inert -- "every curriculum term sitting at its final value from the first
+  # iteration".  That was backwards, and measuring it says so: stepping the
+  # robust env to step 120 reads ``action_rate`` at -0.02 and ``table_touch``
+  # at -0.3, which are those ramps' FIRST stages, correctly applied.  The only
+  # terms sitting at their final value were the three flattened here.
+  #
+  # Every v7 teacher therefore trained with the full sight penalty from
+  # iteration 0, where the design ramps it in over 600 -- charged for
+  # approaching an object before it had learned to grasp one.  Whether that
+  # ramp produces a BETTER teacher is untested; what is measured is only that
+  # the schedule ran differently from the one the config declares and from
+  # every other shaped term in the same run.
+  #
+  # The strong teacher does what it was asked: 4.7% of approach samples
+  # blocked against v5's 23.9%.  It is also slower (2.17 objects a rollout
+  # against 4.22) -- which is wanted, smooth motion is the point -- and its
+  # student reaches 0.126 of its own teacher at iteration 750 where v4's
+  # reached 0.204.  That residual gap is real and its cause is NOT isolated:
+  # four candidate mechanisms have been measured and refuted, including the
+  # obvious one that the student sees fewer grasps.  It does not; the
+  # distillation loss is behaviour cloning and the teacher labels every
+  # timestep the student visits, however rarely it would grasp.
+  #
+  # ``ref`` is the stage the profile's number refers to, and it is not the
+  # same end for every term: the two sight penalties grow (-0.6, -2.0, -4.0)
+  # so the profile quotes the last, while ``wrist_decay`` is a bonus that
+  # fades (0.8, 0.5, 0.30) and quotes the first.  Scaling the whole schedule
+  # by ``w / stages[ref]`` keeps the shape either way, and w = 0 turns the
+  # term off cleanly at every stage.
+  for key, reward, curr, ref in (
+      ("sight_arm_weight", "sight_arm", "sight_arm_weight", -1),
+      ("sight_hand_weight", "sight_hand", "sight_hand_weight", -1),
+      ("wrist_weight", "wrist_side_on", "wrist_decay", 0)):
+    if key not in task or reward not in cfg.rewards:
+      continue
+    w = float(task[key])
+    if curr in cfg.curriculum and _SIGHT_RAMP:
+      stages = cfg.curriculum[curr].params["stages"]
+      base = float(stages[ref]["weight"])
+      scale = w / base if base else 0.0
+      for stage in stages:
+        stage["weight"] = float(stage["weight"]) * scale
+      # The manager sets this on its first run anyway; matching stage 0 keeps
+      # a config dump from reading as though the ramp were not there.
+      cfg.rewards[reward].weight = float(stages[0]["weight"])
+    else:
+      # SIGHT_RAMP=0 lands here on purpose: the flat schedule every v7 teacher
+      # accidentally trained under, kept reachable so it can be run as a
+      # CONTROL rather than only as a past mistake.  A ramped run and a flat
+      # one at the same final weight differ in one thing; without that pair,
+      # a ramped run that works is confounded with whatever else changed
+      # alongside it.
       cfg.rewards[reward].weight = w
       if curr in cfg.curriculum:
         for stage in cfg.curriculum[curr].params["stages"]:
           stage["weight"] = w
+
+  if _SMOOTH != 1.0:
+    # The two with a curriculum: scale every stage, so the ramp keeps its
+    # shape.  Same treatment the sight weights get, and for the same reason --
+    # setting only ``cfg.rewards[...].weight`` is silently undone on the
+    # manager's first step.
+    for reward, curr in (("action_rate", "action_rate_weight"),
+                         ("action_acc", "action_acc_weight")):
+      if reward in cfg.rewards:
+        cfg.rewards[reward].weight = float(cfg.rewards[reward].weight) * _SMOOTH
+      if curr in cfg.curriculum:
+        for stage in cfg.curriculum[curr].params["stages"]:
+          stage["weight"] = float(stage["weight"]) * _SMOOTH
+    for reward in ("joint_vel", "joint_acc", "joint_torques", "mech_power"):
+      if reward in cfg.rewards:
+        cfg.rewards[reward].weight = float(cfg.rewards[reward].weight) * _SMOOTH
 
   cfg.actions["arm"].command_hooks = (_plant_cfg(),)
   cfg.actions["gripper"].command_hooks = (_plant_cfg(gripper=True),)
@@ -324,7 +485,8 @@ def apply_heavy_dr(
     term.params["scenery_dr"] = bool(v.get("scenery_dr", False))
     term.params["mask_dropout"] = _scaled_dropout(
       v.get("mask_dropout"), mask_dropout_scale)
-    term.params["blind_when_held"] = v.get("blind_when_held")
+    term.params["target_process"] = v.get("target_process")
+    term.params["held_proxy_radius"] = v.get("held_proxy_radius")
     if wrist:
       w = v["wrist"]
       wevent = cfg.events["wrist_camera_pose"]
@@ -345,10 +507,15 @@ def apply_heavy_dr(
       wterm.params["mask_dropout"] = _scaled_dropout(
         w.get("mask_dropout"), mask_dropout_scale)
 
-    apply_latency_prior(
-      cfg, LatencyPrior(HEAVY_DR_PROFILE["timing"]["observation_latency_probs"]),
-      seed=20260827,
-    )
+    probs = HEAVY_DR_PROFILE["timing"]["observation_latency_probs"]
+    if _OBS_LATENCY:
+      probs = tuple(float(x) for x in _OBS_LATENCY.split(","))
+      total = sum(probs)
+      if total <= 0:
+        raise ValueError(f"OBS_LATENCY_PROBS sums to {total}")
+      probs = tuple(x / total for x in probs)
+      HEAVY_DR_PROFILE["timing"]["observation_latency_probs"] = probs
+    apply_latency_prior(cfg, LatencyPrior(probs), seed=20260827)
 
   return HEAVY_DR_PROFILE
 

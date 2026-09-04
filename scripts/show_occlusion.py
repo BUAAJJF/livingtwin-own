@@ -6,10 +6,15 @@ whether the object is still in the picture the deployment segments, and the
 only viewpoint that can answer it is the one bolted to the world.
 
 So this renders the scene camera, marks the target's own pixels, and prints the
-raycast visibility beside them, for several checkpoints on the same seed and
-the same object placements.  Side by side, the difference between a policy that
-reaches across the view and one that comes from behind is visible in a glance
-and does not need a metric to believe.
+visibility beside them, for several checkpoints on the same seed and the same
+object placements.  Side by side, the difference between a policy that reaches
+across the view and one that comes from behind is visible in a glance and does
+not need a metric to believe.
+
+The number and the picture now come from the same buffer -- the segmentation
+this panel already renders -- because when they came from different places they
+disagreed, and it was the number that was wrong.  See ``eval_occlusion``.
+``scripts/sight_viewer.py`` writes a draggable per-frame version of this.
 
     python scripts/show_occlusion.py \
         --checkpoint before=checkpoints/v7_teachers/v5_baseline.pt \
@@ -38,11 +43,13 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 from piper_push import camera as sim_camera
 
-# Same tracer as scripts/eval_occlusion.py and as the rig measurement.  Sharing
-# it matters more than the few lines it saves: a picture that disagreed with
-# the number would send someone looking for a policy problem that was a
-# measurement problem.
-from eval_occlusion import COLLISION_GROUP, ray_hits_spheres, sample_box, sphere_cover  # noqa: E402
+# Same measurement as scripts/eval_occlusion.py.  Sharing it matters more than
+# the few lines it saves, and this file is why: the picture below disagreed
+# with the sphere tracer both scripts used to share, and the picture was right.
+# Reading the segmentation the panel already renders makes it impossible for
+# the caption and the image to come apart again.
+from eval_occlusion import (VISIBLE, geom_group_map, load_policy,  # noqa: E402
+                            sample_box, sample_status)
 
 
 # ---------------------------------------------------------------------------
@@ -232,12 +239,6 @@ def _spectator_panel(env, cmd, R, cam_w, obj_w, visible, radius,
   return img
 
 
-def _rotate(quat, vec):
-  w, xyz = quat[..., :1], quat[..., 1:]
-  t = 2.0 * torch.cross(xyz, vec, dim=-1)
-  return vec + w * t + torch.cross(xyz, t, dim=-1)
-
-
 def rollout(label, ckpt, task, steps, num_envs, device, seed,
             spectator=True, radius=0.07):
   """Render one policy, and measure it with the same rays the report uses."""
@@ -262,19 +263,14 @@ def rollout(label, ckpt, task, steps, num_envs, device, seed,
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
   runner = (load_runner_cls(task) or MjlabOnPolicyRunner)(
     wrapped, asdict(agent), None, device)
-  runner.load(ckpt, load_cfg={"actor": True}, strict=True, map_location=device)
-  policy = runner.get_inference_policy(device=device)
+  policy = load_policy(runner, ckpt, device)
 
   robot = env.scene["robot"]
   cmd = env.command_manager.get_term("pick")
   sensor = env.scene[sim_camera.CAMERA_NAME]
   model = env.sim.mj_model if hasattr(env.sim, "mj_model") else robot.spec.compile()
-  local_np, radii_np, geoms_np = sphere_cover(model)
-  local = torch.tensor(local_np, dtype=torch.float32, device=device)
-  radii = torch.tensor(radii_np, dtype=torch.float32, device=device)
-  geoms = torch.tensor(geoms_np, dtype=torch.long, device=device)
-  offsets = torch.tensor(sample_box(None), dtype=torch.float32, device=device)
-  cam = torch.tensor(sim_camera.CAMERA_POS, dtype=torch.float32, device=device)
+  gmap = geom_group_map(model, device)
+  offsets = torch.tensor(sample_box(), dtype=torch.float32, device=device)
   rgeoms = robot_geom_ids(model)
 
   env.reset()
@@ -288,12 +284,9 @@ def rollout(label, ckpt, task, steps, num_envs, device, seed,
       action = policy(obs)
     obs, _, _, _ = wrapped.step(action)
 
-    gx = robot.data.geom_pos_w[:, geoms] - env.scene.env_origins.unsqueeze(1)
-    gq = robot.data.geom_quat_w[:, geoms]
-    centres = gx + _rotate(gq, local.unsqueeze(0).expand(gx.shape[0], -1, -1))
-    pts = (cmd._object_pos_local().unsqueeze(1)
-           + offsets.unsqueeze(0) * cmd.object_half_size.unsqueeze(1))
-    visible = (~ray_hits_spheres(cam, pts, centres, radii)).float().mean(dim=-1)
+    status = sample_status(sensor, cmd, env.sim.model, sensor.camera_idx,
+                           gmap, offsets)
+    visible = (status == VISIBLE).float().mean(dim=-1)
     vis_trace.append(float(visible[0]))
 
     depth = sensor.data.depth
@@ -310,25 +303,36 @@ def rollout(label, ckpt, task, steps, num_envs, device, seed,
     img[d <= 0] = (25, 25, 25)
     # The target, in the one colour nothing else in the picture uses.
     img[mask] = (60, 240, 60)
+    # Up to the spectator's size BEFORE anything is written on it.  The policy
+    # view is 224 px wide; a caption that fits the picture does not fit that,
+    # and the first version silently ran its own label off the edge -- the
+    # visible percentage and the HOLDING flag, the two numbers the panel
+    # exists to report, were the part that fell off.  NEAREST because the mask
+    # is a label, and interpolating it invents half-target pixels.
+    img = cv2.resize(img, (SPEC_W, SPEC_H), interpolation=cv2.INTER_NEAREST)
     held = bool(cmd.grasped[0])
     bar = int(round(220 * float(visible[0])))
     cv2.rectangle(img, (8, img.shape[0] - 18), (8 + 220, img.shape[0] - 8),
                   (70, 70, 70), -1)
     cv2.rectangle(img, (8, img.shape[0] - 18), (8 + bar, img.shape[0] - 8),
                   (60, 240, 60) if visible[0] > 0.35 else (60, 60, 240), -1)
-    cv2.putText(img, f"{label}  camera view   visible "
-                     f"{100 * float(visible[0]):3.0f}%"
-                     f"{'  HOLDING' if held else ''}",
-                (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(img, f"{label}   camera view", (8, 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (255, 255, 255), 1)
+    cv2.putText(img, f"visible {100 * float(visible[0]):3.0f}%"
+                     f"{'   HOLDING' if held else ''}",
+                (8, img.shape[0] - 26), cv2.FONT_HERSHEY_SIMPLEX, 0.46,
+                (60, 240, 60) if visible[0] > 0.35 else (90, 90, 255), 1)
 
     if spectator:
       obj_w = (cmd._object_pos_local()[0].cpu().numpy()
                + env.scene.env_origins[0].cpu().numpy())
       cam_w = np.asarray(sim_camera.CAMERA_POS) + env.scene.env_origins[0].cpu().numpy()
-      img = np.hstack([img, cv2.resize(
-        _spectator_panel(env, cmd, spec_R, cam_w, obj_w, float(visible[0]),
-                         radius, robot_geoms=rgeoms),
-        (img.shape[1], img.shape[0]))])
+      # The spectator is rendered at SPEC_W x SPEC_H and now stays there.  It
+      # used to be resized down to the policy view's 224 px, which threw away
+      # half of the only panel drawn for a human to read.
+      img = np.hstack([img, _spectator_panel(
+        env, cmd, spec_R, cam_w, obj_w, float(visible[0]), radius,
+        robot_geoms=rgeoms)])
     frames.append(img)
 
   env.close()
@@ -372,10 +376,18 @@ def main() -> int:
           f"below 0.35 in {100 * (vis < 0.35).mean():.0f}% of steps")
 
   h = min(f[0].shape[0] for _, f, _ in runs)
+  # A visible seam between policies.  Without it the four panels abut and a
+  # reader has to count captions to work out where one policy ends -- easy to
+  # misread, and the whole point of the sheet is a comparison at a glance.
+  gap = np.full((h, 3, 3), 200, np.uint8)
   strips = []
   for k in range(min(len(f) for _, f, _ in runs)):
-    strips.append(np.hstack([cv2.resize(fr[k], (int(fr[k].shape[1] * h / fr[k].shape[0]), h))
-                             for _, fr, _ in runs]))
+    cols = [cv2.resize(fr[k], (int(fr[k].shape[1] * h / fr[k].shape[0]), h))
+            for _, fr, _ in runs]
+    row = [cols[0]]
+    for c in cols[1:]:
+      row += [gap, c]
+    strips.append(np.hstack(row))
 
   out = pathlib.Path(a.out)
   wrote = False
@@ -393,10 +405,22 @@ def main() -> int:
 
   # Always a sheet as well: a still survives ssh, a screenshot and a slide.
   step = max(1, len(strips) // 8)
-  sheet = np.vstack(strips[::step][:8])
+  rows = strips[::step][:8]
+  hgap = np.full((3, rows[0].shape[1], 3), 200, np.uint8)
+  sheet = np.vstack([r for row in rows for r in (row, hgap)][:-1])
   sheet_path = out.with_suffix(".png")
   cv2.imwrite(str(sheet_path), sheet)
   print(f"wrote {sheet_path}")
+
+  # Repeated at the end because the per-run line is printed before the next
+  # rollout's model summary, which is a hundred lines long -- by the time the
+  # second policy finishes the first policy's number has scrolled away, and
+  # comparing them is the only reason to run this.
+  print()
+  print(f"{'policy':<20} {'visible median':>15} {'below 0.35':>11}")
+  for label, _, vis in runs:
+    print(f"{label:<20} {np.median(vis):>15.2f} "
+          f"{100 * (vis < 0.35).mean():>10.0f}%")
   return 0
 
 

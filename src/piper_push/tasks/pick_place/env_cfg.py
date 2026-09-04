@@ -11,6 +11,8 @@ Every number that describes what the robot can do comes from the S0 audit
 
 from __future__ import annotations
 
+import os
+
 import copy
 import dataclasses
 import math
@@ -353,6 +355,12 @@ def make_pick_place_env_cfg(
         # posture cannot recover from any other, and a wide range without the
         # check puts a fifth of episodes underground.
         "position_range": (-0.7, 0.7),
+        # RESET_FULL_RANGE=1 replaces that delta with the whole soft-limit
+        # box.  Off by default: every result on record was measured on the
+        # narrow one, and the wide one is a different task -- the arm has to
+        # recover from postures the old policies never saw.
+        "full_range": os.environ.get("RESET_FULL_RANGE", "0")
+                      not in ("0", "false", "False"),
         "asset_cfg": arm(),
         "ee_cfg": ee(),
         "link_cfg": ghost_links(),

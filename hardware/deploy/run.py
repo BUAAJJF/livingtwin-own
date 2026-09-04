@@ -59,7 +59,8 @@ import time                                                # noqa: E402
 
 import numpy as np                                         # noqa: E402
 
-from . import config, mask, obs, proprio, rectify, robot  # noqa: E402
+from . import config, lifecycle, mask, obs, proprio, rectify, robot  # noqa: E402
+from . import target_mask                                  # noqa: E402
 from piper_push import robot as sim_robot                  # noqa: E402
 
 
@@ -179,6 +180,35 @@ def _frame_index(frame) -> "int | None":
 
 def _frame_stamp(frame) -> "float | None":
   return None if frame is None else float(frame.stamp)
+
+def _observation_age(frame, now: float | None = None) -> float:
+  """Age since camera capture, including every perception stage.
+
+  The old guard measured from the time perception *finished*.  A 500 ms GPU
+  stall therefore produced a freshly published, 500 ms-old observation that
+  was allowed to move the arm.  The frame timestamp is the only timestamp that
+  bounds what the policy is actually seeing.
+  """
+  stamp = _frame_stamp(frame)
+  if stamp is None:
+    return float("inf")
+  return float((time.time() if now is None else now) - stamp)
+
+def _timing_stats(values) -> dict | None:
+  """JSON-safe distribution used by both live-loop and perception reports."""
+  a = np.asarray(values, dtype=np.float64)
+  if not a.size:
+    return None
+  return {
+    "mean": float(a.mean()),
+    "p50": float(np.percentile(a, 50)),
+    "p90": float(np.percentile(a, 90)),
+    "p95": float(np.percentile(a, 95)),
+    "p99": float(np.percentile(a, 99)),
+    "max": float(a.max()),
+    "n": int(a.size),
+  }
+
 
 
 def _wrap_control(arm, a):
@@ -303,6 +333,8 @@ class Rates:
     self.blind = 0
     self.guard_holds = 0
     self._t = []
+    self._observation_age_ms = []
+    self._publish_age_ms = []
 
   def note(self, ms: float, budget_ms: float) -> None:
     self.steps += 1
@@ -310,6 +342,29 @@ class Rates:
     self._t.append(ms)
     if ms > budget_ms:
       self.overruns += 1
+
+
+  def note_observation(self, observation_age_s: float,
+                       publish_age_s: float) -> None:
+    self._observation_age_ms.append(max(0.0, observation_age_s * 1000.0))
+    self._publish_age_ms.append(max(0.0, publish_age_s * 1000.0))
+
+  def report(self) -> dict:
+    compute = _timing_stats(self._t)
+    return {
+      "steps": self.steps,
+      "overruns": self.overruns,
+      "stale": self.stale,
+      "no_target": self.no_target,
+      "blind": self.blind,
+      "guard_holds": self.guard_holds,
+      "median_ms": None if compute is None else compute["p50"],
+      "p95_ms": None if compute is None else compute["p95"],
+      "worst_ms": self.worst_ms,
+      "control_compute_ms": compute,
+      "observation_age_ms": _timing_stats(self._observation_age_ms),
+      "perception_publish_age_ms": _timing_stats(self._publish_age_ms),
+    }
 
   def summary(self) -> str:
     t = np.asarray(self._t) if self._t else np.zeros(1)
@@ -662,6 +717,14 @@ def main() -> int:
                       "the CPU and keeps up; once the policy is working, "
                       "inference takes the cores and the queue fills.  Costs "
                       "roughly 4x the disk and almost no CPU")
+  p.add_argument("--target-lifecycle", action="store_true",
+                 help="own the target's identity instead of letting the "
+                      "segmenter re-choose it.  Locks the instance on first "
+                      "sight, refuses a different one during the approach, "
+                      "and during a carry refuses the table entirely and "
+                      "rebuilds the mask at the grasp site.  Replaying the 20 "
+                      "recorded sessions through it turns 326 identity swaps "
+                      "while holding into 0.  Requires --held-target-radius.")
   p.add_argument("--held-target-radius", type=float, default=0.0,
                  help="metres.  Once the jaws are closed on the object the "
                       "camera cannot call it an object any more -- from a "
@@ -674,6 +737,28 @@ def main() -> int:
                       "grasp site, which is where the robot knows the object "
                       "is because it is holding it.  0.045 covers the largest "
                       "object; 0 (the default) keeps the old behaviour")
+  p.add_argument("--target-tracker", default="depth",
+                 choices=("depth", "sam21"),
+                 help="who carries the target between frames.  'depth' is the "
+                      "segmenter and TargetTracker alone, which is what every "
+                      "run so far used.  'sam21' adds SAM2.1 as a causal "
+                      "tracker on top: the depth stack still CHOOSES the "
+                      "instance and SAM only carries that choice, because SAM "
+                      "returns a confident mask of the wrong object 13%% of "
+                      "the time on TwinSight's reviewed frames and the policy "
+                      "has no way to tell that from a correct one.  Scored "
+                      "against the renderer over seven seeds, it takes the "
+                      "target from 47%% of approach frames to 98%% and from 0%% "
+                      "to 100%% while held -- but that was textured RGB in "
+                      "simulation and the rig feeds it grayscale IR, so the "
+                      "rig numbers are not those numbers.  Costs ~28 ms a "
+                      "frame on a 5090; watch the reported perception rate.")
+  p.add_argument("--sam-checkpoint", default=None,
+                 help="override the pinned sam2.1_hiera_small.pt")
+  p.add_argument("--sam-vos-optimized", action="store_true",
+                 help="reserved for SAM VOS compilation; currently refused "
+                      "because the installed torch 2.13/SAM2.1 combination "
+                      "fails its first propagated frame")
   p.add_argument("--gripper-closed", type=float, default=0.045,
                  help="metres of single-finger travel below which the jaws "
                       "count as closed on something, for --held-target-radius")
@@ -799,6 +884,11 @@ def main() -> int:
     p.error("--max-guard-hold-streak must be at least 1")
   if a.max_blind_steps < 0:
     p.error("--max-blind-steps must be non-negative")
+  if a.sam_vos_optimized:
+    p.error("--sam-vos-optimized is disabled: the installed torch 2.13/SAM2.1 "
+            "combination fails its first propagated frame.  Eager SAM is the "
+            "verified deployment path.")
+
 
   # Perception follows the camera, because the alternative is a command that
   # runs happily with the wrong model.  ``--camera d455`` with the default
@@ -957,13 +1047,54 @@ def main() -> int:
       print(f"depth: Fast-FoundationStereo {stereo_backend.path.parent.name}, "
             f"fx*b = {stereo_backend.focal_baseline:.5f} m*px")
 
+    lc = None
+    if a.target_lifecycle:
+      # Refusing the table's label during a carry only helps if something
+      # else supplies the mask; with no rebuild radius it would blank the
+      # target for the whole carry, which is worse than the bystander it
+      # prevents.  Caught here rather than discovered on the arm.
+      if a.held_target_radius <= 0:
+        raise SystemExit("--target-lifecycle needs --held-target-radius: "
+                         "during a carry the table label is refused and the "
+                         "mask is rebuilt at the grasp site instead")
+      lc = lifecycle.TargetLifecycle()
+      print(f"target: lifecycle on, rebuild radius "
+            f"{1000 * a.held_target_radius:.0f} mm")
+
+    sam = None
+    if a.target_tracker == "sam21":
+      # Imported here and nowhere else: it pulls in torch and a 184 MB
+      # checkpoint, and a depth-only run must not pay for either.
+      from .sam2_predictor import Sam2StreamingPredictor
+      from .sam_tracker import SamTargetTracker
+      kw = {} if a.sam_checkpoint is None else {"checkpoint": a.sam_checkpoint}
+      pred = Sam2StreamingPredictor(
+        device=(f"cuda:{a.yolo_device}"
+                if str(a.yolo_device or "").isdigit() else "cuda"),
+        vos_optimized=bool(a.sam_vos_optimized),
+        **kw)
+      sam = SamTargetTracker(pred)
+      print(f"target: SAM2.1 carrying the depth stack's choice "
+            f"(loaded in {pred.load_s:.1f} s).  The depth segmenter still "
+            f"chooses the instance; SAM only carries it, and the watchdog "
+            f"withholds rather than publishes when it disagrees.")
+      if lc is None:
+        # The only signal that says "this object is finished" is the
+        # lifecycle's HELD -> SEARCH edge.  Without it SAM keeps propagating
+        # the object it was anchored on after that object has been dropped in
+        # the bin, and the next anchor cannot arrive until the watchdog gives
+        # up on the old one.
+        print("WARNING: --target-tracker sam21 without --target-lifecycle "
+              "never clears the target on a placement; SAM will keep carrying "
+              "the object it was anchored on until the watchdog loses it")
+
     vision = Perception(reader, reproj, segmenter, tracker,
                         proprio.Kinematics(), rig=rig,
                         flatten=getattr(a, "flatten_scene", False),
                         stereo=stereo_backend,
                         held_radius=a.held_target_radius,
                         gripper_closed_m=a.gripper_closed,
-                        depth_bias=a.depth_bias)
+                        depth_bias=a.depth_bias, lifecycle=lc, sam=sam)
     if vision.flatten:
       print("scene: flattened onto the calibrated table plane")
     vision.set_joints(np.concatenate([st.q, [st.gripper, -st.gripper]]))
@@ -1060,10 +1191,16 @@ def main() -> int:
       fb = robot.feedback(st, mapper.previous)
       if vision is not None:
         vision.set_joints(fb.position)
+        # The same latched bit the observation builder uses, so perception and
+        # proprioception cannot disagree about whether the gripper is loaded.
+        vision.set_contact(builder.contact_latched)
 
       out = vision.latest() if vision is not None else None
       if out is None:
         camera, label, frame, held_over = blank, 0, None, False
+        target_available = vision is None
+        published_at = None
+        age = publication_age = 0.0
         if vision is not None:
           # Nothing to act on yet.  Not an error in the first fraction of a
           # second, and not something to drive an arm with either.
@@ -1075,8 +1212,11 @@ def main() -> int:
           time.sleep(dt)
           continue
       else:
-        camera, stamp, frame, label, held_over = out
-        age = time.time() - stamp
+        camera, published_at, frame, label, held_over, target_available = out
+        now = time.time()
+        age = _observation_age(frame, now)
+        publication_age = now - published_at
+        rates.note_observation(age, publication_age)
         if age > a.max_obs_age:
           rates.stale += 1
           held = hold_and_resync()
@@ -1086,11 +1226,13 @@ def main() -> int:
                            "frame_index": _frame_index(frame),
                            "frame_stamp": _frame_stamp(frame),
                            "observation_age_s": float(age),
+                           "perception_publish_age_s": float(publication_age),
                          }, frame=frame)
           time.sleep(dt)
           continue
-      if not label:
-        rates.no_target += 1
+      if not target_available or held_over:
+        if not target_available:
+          rates.no_target += 1
         # An empty mask is not the same thing as a lost observation, and the
         # simulator is the authority on which.  ``CameraScene`` builds the mask
         # from the segmentation buffer's frontmost geom, so when the arm passes
@@ -1107,8 +1249,8 @@ def main() -> int:
         # steps`` bounds it again in control steps, because the two clocks
         # differ and a camera that stopped delivering must not read as a target
         # that is merely hidden.
-        believed = (vision is not None and a.max_blind_steps > 0
-                    and held_over
+        believed = (target_available and vision is not None
+                    and a.max_blind_steps > 0 and held_over
                     and blind_streak < a.max_blind_steps)
         if believed:
           blind_streak += 1
@@ -1121,6 +1263,7 @@ def main() -> int:
                            "observation_age_s": float(age),
                            "consecutive_blind_steps": blind_streak,
                            "mask": "last known, object occluded",
+                           "perception_publish_age_s": float(publication_age),
                          }, frame=frame)
         else:
           held = hold_and_resync()
@@ -1131,6 +1274,7 @@ def main() -> int:
                            "frame_stamp": _frame_stamp(frame),
                            "observation_age_s": float(age),
                            "consecutive_blind_steps": blind_streak,
+                           "perception_publish_age_s": float(publication_age),
                          }, frame=frame)
           time.sleep(dt)
           continue
@@ -1240,6 +1384,7 @@ def main() -> int:
                        "observation_age_s": float(age),
                        "loop_ms_before_log_copy": float(ms),
                        "measured_grasp_height_m": float(actual_height),
+                       "perception_publish_age_s": float(publication_age),
                        "commanded_grasp_height_m": float(commanded_height),
                        "measured_table_clearance_m": float(actual_clearance),
                        "commanded_table_clearance_m": float(target_clearance),
@@ -1293,28 +1438,20 @@ def main() -> int:
       if viewer.failed:
         print(f"view: the window could not be drawn ({viewer.failed}); the "
               "run was unaffected")
+    perception_report = None
     if vision is not None:
       vision.close()
+      perception_report = vision.report()
       print(vision.summary())
     if reader is not None:
       reader.close()
     if writer is not None:
       writer.close()
-      timings = np.asarray(rates._t, dtype=np.float64)
       (writer.dir / "run.json").write_text(json.dumps({
         "stop_reason": stop_reason,
         "args": vars(a),
-        "rates": {
-          "steps": rates.steps,
-          "overruns": rates.overruns,
-          "stale": rates.stale,
-          "no_target": rates.no_target,
-          "blind": rates.blind,
-          "guard_holds": rates.guard_holds,
-          "median_ms": (float(np.median(timings)) if timings.size else None),
-          "p95_ms": (float(np.percentile(timings, 95)) if timings.size else None),
-          "worst_ms": rates.worst_ms,
-        },
+        "rates": rates.report(),
+        "perception": perception_report,
         "final_feedback": final,
       }, indent=2) + "\n")
     print("\n" + rates.summary())
@@ -1394,7 +1531,7 @@ class Perception(threading.Thread):
   def __init__(self, reader, reproj, segmenter, tracker, kin, rig=None,
                flatten: bool = False, stereo=None,
                held_radius: float = 0.0, gripper_closed_m: float = 0.045,
-               depth_bias: float = 0.0):
+               depth_bias: float = 0.0, lifecycle=None, sam=None):
     super().__init__(daemon=True, name="perception")
     self.reader = reader
     # Held by THIS thread and nobody else: it owns a TensorRT context and CUDA
@@ -1417,11 +1554,27 @@ class Perception(threading.Thread):
     self.segmenter = segmenter
     self.tracker = tracker
     self.kin = kin
+    # Which instance the robot is working on.  ``None`` keeps the historical
+    # behaviour, where the tracker's choice went straight to the policy and a
+    # stale target let a bystander take over -- 326 times across 20 recorded
+    # sessions, every one of them during a carry.  See ``lifecycle`` and
+    # ``scripts/measure_target_gaps.py --replay-lifecycle``.
+    self.lifecycle = lifecycle
+    self._loaded = False
     self._lock = threading.Lock()
     self._joints = None
     self._out = None
     self._view = None
-    self._last_target = None
+    self._error: BaseException | None = None
+    # ``SamTargetTracker`` or None.  When it is present the grasp-site sphere
+    # becomes a fallback rather than an override: measured against the
+    # renderer, SAM's held mask is IoU 0.804 and the sphere is 0.614, so
+    # rebuilding on top of a mask that already exists is a downgrade.
+    self.sam = sam
+    self.sam_state = "off"
+    self._was_holding = False
+    self._target_mask = target_mask.TargetMask(
+      self.held_radius, reproj, rig, rebuild_only_if_empty=sam is not None)
     """The most recent mask that came from a confirmed target, kept so an
     occluded object still reads as present.  Cleared when the tracker gives up
     on it, never carried across a reset."""
@@ -1429,6 +1582,15 @@ class Perception(threading.Thread):
     # replaces a method the interpreter calls when the thread ends.
     self._stopping = threading.Event()
     self.periods: list[float] = []
+    self.capture_to_publish_ms: list[float] = []
+    self.stage_ms = {
+      "depth_source": [],
+      "segment_and_select": [],
+      "sam": [],
+      "reproject_and_observation": [],
+    }
+    self._first_finished: float | None = None
+    self._last_finished: float | None = None
     self.frames = 0
 
   def set_joints(self, q) -> None:
@@ -1441,9 +1603,24 @@ class Perception(threading.Thread):
     with self._lock:
       self._joints = np.asarray(q, dtype=np.float64).copy()
 
+  def set_contact(self, loaded: bool) -> None:
+    """The gripper's contact latch, from the control loop.
+
+    ``proprio.ProprioBuilder._contact_bit`` already applies hysteresis to the
+    drive current and was measured on this gripper; the perception thread had
+    no way to see it, so "am I holding something" was being decided on the jaw
+    gap alone.  A gap says the jaws are closed, not that they closed on
+    anything.
+    """
+    with self._lock:
+      self._loaded = bool(loaded)
+
   def latest(self):
     with self._lock:
-      return self._out
+      error, out = self._error, self._out
+    if error is not None:
+      raise RuntimeError("perception thread failed") from error
+    return out
 
   def view(self):
     """The pieces a live viewer wants, or None.  Cheap and lock-brief."""
@@ -1451,18 +1628,28 @@ class Perception(threading.Thread):
       return self._view
 
   def run(self) -> None:
+    try:
+      self._run()
+    except BaseException as e:
+      with self._lock:
+        self._error = e
+      self._stopping.set()
+
+  def _run(self) -> None:
     last_index = -1
     while not self._stopping.is_set():
       frame = self.reader.latest()
       with self._lock:
         q = None if self._joints is None else self._joints.copy()
+        loaded = self._loaded
       if frame is None or q is None or frame.index == last_index:
         time.sleep(0.002)
         continue
       last_index = frame.index
-      t0 = time.time()
+      t0 = time.perf_counter()
 
       self.kin.update(q)
+      stage_t = time.perf_counter()
       # One depth map per frame, and every stage below sees the same one.
       # Computed here rather than in the reader so the 14 ms of GPU lands on
       # the thread that already owns the perception budget, and the reader
@@ -1503,12 +1690,58 @@ class Perception(threading.Thread):
       # Positive values pull the scene TOWARDS the camera.
       if self.depth_bias:
         raw_depth = np.where(raw_depth > 0.0, raw_depth - self.depth_bias, 0.0)
+      self.stage_ms["depth_source"].append(
+        (time.perf_counter() - stage_t) * 1000.0)
+      stage_t = time.perf_counter()
 
-      seg = self.segmenter(raw_depth, rgb=frame.gray,
-                           arm=self.kin.link_spheres())
+      arm_spheres = self.kin.link_spheres()
+      # Read before the lifecycle is updated, so a HELD -> SEARCH transition
+      # (the object was let go) is visible as an edge below.
+      self._was_holding = (self.lifecycle.holding
+                           if self.lifecycle is not None else False)
+      seg = self.segmenter(raw_depth, rgb=frame.gray, arm=arm_spheres)
       label = self.tracker.update(seg, self.kin.site_pos)
+      if self.lifecycle is not None:
+        jaws_closed = (q.size > 6 and self.gripper_closed_m > 0
+                       and float(q[6]) < self.gripper_closed_m)
+        label = self.lifecycle.update(label, jaws_closed, loaded)
       payload = (mask.full_mask(seg, label, self.segmenter.decimate)
                  if label else None)
+      self.stage_ms["segment_and_select"].append(
+        (time.perf_counter() - stage_t) * 1000.0)
+
+      # SAM2.1 carries the instance the depth stack chose, between frames and
+      # across its gaps.  It never introduces one: with no depth mask and no
+      # existing anchor, ``carry`` returns nothing.  The order matters -- the
+      # lifecycle has already had its say about WHICH instance, so what SAM is
+      # handed is a target the rest of the stack has confirmed.
+      if self.sam is not None:
+        # NOT reset on ``tracker.has_target``.  That was tried and measured:
+        stage_t = time.perf_counter()
+        # the depth tracker's window expires after 15 frames without an
+        # instance, and during a carry the segmenter produces none at all, so
+        # resetting on it clears SAM on every frame of exactly the phase it
+        # exists for -- SAM's held detection went from 100% to 1.2%.  What
+        # clears the target is a lifecycle event: the object was placed, or a
+        # different instance was confirmed.
+        carrying_now = (self.lifecycle.holding
+                        if self.lifecycle is not None else False)
+        if self.lifecycle is not None and self._was_holding and not carrying_now:
+          self.sam.reset("placed")
+        chosen = (payload.astype(bool) if payload is not None
+                  else np.zeros(raw_depth.shape, bool))
+        arm_img = (self.segmenter.arm_image_mask(
+                     raw_depth, arm_spheres, self.kin.site_pos)
+                   if hasattr(self.segmenter, "arm_image_mask") else None)
+        rep = self.sam.carry(frame.gray, chosen, raw_depth > 0, arm_img)
+        self.sam_state = rep.state.value + (f" ({rep.reason})"
+                                            if rep.reason else "")
+        payload = (rep.mask.astype(np.int32)
+                   if rep.mask is not None and rep.mask.any() else None)
+
+        self.stage_ms["sam"].append(
+          (time.perf_counter() - stage_t) * 1000.0)
+      stage_t = time.perf_counter()
       depth, valid, target = self.reproj(raw_depth, payload=payload)
       if self._plane is not None:
         depth, valid = obs.flatten_scene(
@@ -1518,72 +1751,36 @@ class Perception(threading.Thread):
       if target is None:
         target = np.zeros_like(valid)
 
-      # The arm occludes its own target.  Reaching over an object puts the
-      # forearm between it and a camera bolted to the world, and the object
-      # goes from 400 pixels to nothing in a couple of frames -- measured on
-      # the first powered run, which then held for 1168 of 1376 steps because
-      # a held pose cannot uncover what it is covering.
-      #
-      # Feeding the empty mask through instead is worse, and that was tried:
-      # an empty mask is not "the target is hidden", it is "there is no
-      # target", and the policy has no way to tell them apart.  It drove for
-      # 137 blind steps and drifted 285 mm away from the object.
-      #
-      # What is true here and not in general: this camera is bolted down and
-      # the object is not moving.  So the last mask the segmenter produced is
-      # still where the object is, and re-using it says exactly the right
-      # thing -- "it is still there, you are standing in front of it".  The
-      # tracker's ``lost_frames`` window bounds how long that stays credible;
-      # past it the object may really have moved and the loop holds instead.
-      held_over = False
-      if label:
-        self._last_target = target.copy()
-      elif self._last_target is not None and self.tracker.has_target:
-        target = self._last_target
-        held_over = True
-      elif not self.tracker.has_target:
-        self._last_target = None
-
-      # Once the jaws are closed on the object, the sentence above stops being
-      # true.  "The camera is bolted down and the object is not moving" is what
-      # makes re-using the last mask correct during the approach; after a grasp
-      # the object travels with the hand, and the last mask points at the patch
-      # of table it was lifted from.
-      #
-      # Measured on recordings/v4_fixedseg_try6, which grasped successfully and
-      # then froze: with the jaws closed the target was reported in 155 of 1894
-      # frames, and the arm held one pose from t=15.7 s to t=45 s because a held
-      # pose cannot uncover what it is covering.  The pixels were not the
-      # problem -- 809 valid points sat within 50 mm of the grasp site -- and
-      # neither was ``arm_mask``: sparing that volume moved detection only from
-      # 8.2% to 11.2%.  What the segmenter cannot do is call the thing in the
-      # gripper an object, because from a fixed viewpoint it is inside the arm.
-      #
-      # But the robot is not guessing where it is.  It is holding it.  The
-      # object is at the grasp site, to within the jaw gap, and that is a
-      # better measurement than the camera has.  So the mask is rebuilt there
-      # from the depth that actually arrived: policy pixels whose unprojected
-      # base point falls within ``held_target_radius`` of the grasp site.  No
-      # pixel is invented -- a pixel with no depth stays out -- and the result
-      # is what the simulator shows the policy at this moment, which is the
-      # object travelling with the hand rather than an empty frame.
-      if (not label and self.held_radius > 0 and self.rig is not None
-          and q.size > 6 and self.gripper_closed_m > 0
-          and float(q[6]) < self.gripper_closed_m):
-        site = np.asarray(self.kin.site_pos, dtype=np.float64)
-        pts = self.reproj.virtual_points_base(depth, self.rig)
-        near = (np.linalg.norm(pts - site, axis=1) < self.held_radius)
-        near = near.reshape(target.shape) & valid
-        if near.any():
-          target = near
-          held_over = True
-          self.held_frames += 1
+      # Hold-over while the arm covers the object, and reconstruction at the
+      # grasp site during a carry.  Both live in ``target_mask`` so that
+      # ``scripts/sim_perception_check.py`` scores THIS code against the
+      # renderer rather than a second copy of it.
+      carrying = (self.lifecycle.holding if self.lifecycle is not None
+                  else (not label
+                        and q.size > 6 and self.gripper_closed_m > 0
+                        and float(q[6]) < self.gripper_closed_m))
+      target, held_over = self._target_mask(
+        target, label, self.tracker.has_target, carrying, depth, valid,
+        self.kin.site_pos)
+      self.held_frames = self._target_mask.rebuilds
       camera = obs.camera_obs(depth, valid, target > 0)
+      self.stage_ms["reproject_and_observation"].append(
+        (time.perf_counter() - stage_t) * 1000.0)
 
-      self.periods.append(time.time() - t0)
+      finished = time.perf_counter()
+      published_at = time.time()
+      self.periods.append(finished - t0)
+      self.capture_to_publish_ms.append(
+        max(0.0, (published_at - float(frame.stamp)) * 1000.0))
       self.frames += 1
+      if self._first_finished is None:
+        self._first_finished = finished
+      self._last_finished = finished
+      target_available = bool(np.asarray(target).any())
       with self._lock:
-        self._out = (camera, time.time(), frame, label, held_over)
+        # Safety uses capture time; publish time only measures queueing.
+        self._out = (camera, published_at, frame, label, held_over,
+                     target_available)
         # References, not copies: the viewer annotates on its own thread at its
         # own rate and the segmenter has already finished with these.  A copy
         # here would put the viewer's cost on the perception thread, which is
@@ -1594,17 +1791,43 @@ class Perception(threading.Thread):
     self._stopping.set()
     self.join(timeout=2.0)
 
+  def report(self) -> dict:
+    elapsed = (None if self._first_finished is None
+               or self._last_finished is None
+               else max(0.0, self._last_finished - self._first_finished))
+    actual_hz = (None if elapsed is None or elapsed <= 0.0 or self.frames < 2
+                 else float((self.frames - 1) / elapsed))
+    out = {
+      "frames": int(self.frames),
+      "elapsed_s": elapsed,
+      "actual_hz": actual_hz,
+      "compute_ms": _timing_stats(np.asarray(self.periods) * 1000.0),
+      "capture_to_publish_ms": _timing_stats(self.capture_to_publish_ms),
+      "stages_ms": {name: _timing_stats(values)
+                    for name, values in self.stage_ms.items()},
+      "held_rebuilds": int(self.held_frames),
+      "stereo_misses": int(self.stereo_misses),
+    }
+    if self.sam is not None:
+      out["sam"] = self.sam.report()
+    return out
+
   def summary(self) -> str:
-    if not self.periods:
+    report = self.report()
+    compute = report["compute_ms"]
+    if compute is None:
       return "perception: no frames"
-    t = np.asarray(self.periods) * 1000
-    return (f"perception: {self.frames} frames, median {np.median(t):.1f} ms "
-            f"({1000 / max(np.median(t), 1e-6):.1f} Hz), p95 "
-            f"{np.percentile(t, 95):.1f} ms"
+    hz = report["actual_hz"]
+    hz_text = "n/a" if hz is None else f"{hz:.1f} Hz actual"
+    return (f"perception: {self.frames} frames, {hz_text}, compute median "
+            f"{compute['p50']:.1f} ms, p95 {compute['p95']:.1f} ms, "
+            f"capture-to-publish p95 "
+            f"{report['capture_to_publish_ms']['p95']:.1f} ms"
             + (f", {self.held_frames} frame(s) with the target rebuilt at the "
                f"grasp site" if self.held_frames else "")
             + (f", {self.stereo_misses} frame(s) without an imager pair"
-               if self.stereo_misses else ""))
+               if self.stereo_misses else "")
+            + (f"\n{self.sam.summary()}" if self.sam is not None else ""))
 
 
 class _Replay:
