@@ -146,8 +146,18 @@ micromamba run -n mjlab python -m hardware.deploy.run \
     --camera d455 --mask depth --policy-device cpu \
     --record recordings/<a fresh directory> \
     --home-first --command-rate-scale 0.6 \
-    --depth-source stereo
+    --target-lifecycle --held-target-radius 0.045 \
+    --target-tracker sam21 --depth-source sensor \
+    --no-record-compress
 ```
+
+For the first SAM2.1 run, keep ``--depth-source sensor``.  On the recorded
+rig data, eager BF16 SAM plus the depth stack runs at about 20 Hz and has about
+100 ms p95 capture-to-control age; adding FoundationStereo to the same serial
+GPU path has not passed that latency budget.  Do not add
+``--sam-vos-optimized``: the installed torch 2.13/SAM2.1 combination fails on
+its first propagated frame, and ``run.py`` refuses the flag; eager SAM is the
+verified deployment path.
 
 **Before pressing enter.** Keep the physical emergency stop in hand, clear the
 workspace, and use a directory that does not exist yet -- `run.py` refuses real
