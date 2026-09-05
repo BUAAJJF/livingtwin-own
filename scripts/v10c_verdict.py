@@ -100,7 +100,10 @@ def snapshot(a):
     "initial_dr": {"actuator": 0.0, "scene": 0.0, "vision": 0.0,
                    "note": "nominal ranges; heavy profile reached only through the curriculum"},
     "heavy_dr_profile": cold_curriculum.robust_cfg.HEAVY_DR_PROFILE,
-    "criteria": CRITERIA,
+    "criteria": {**CRITERIA, "eval": {**CRITERIA["eval"], "task": a.eval_task}},
+    "plant": {"arm_velocity_limit_rad_s": {k: float(v) for k, v in cfg.actions["arm"].velocity_limit.items()}},
+    "exploration": {"entropy_coef": rl.algorithm.entropy_coef,
+                    "std_range": rl.actor.distribution_cfg.get("std_range", "default (0.02, 2.0)")},
   }
   txt = json.dumps(snap, indent=1, default=str)
   if a.out == "/dev/stdout":
@@ -221,6 +224,7 @@ def main():
   p.add_argument("--task"); p.add_argument("--sight", default="1"); p.add_argument("--seed", default="42")
   p.add_argument("--envs", default="8192"); p.add_argument("--iters", default="9000"); p.add_argument("--gpu", default="0")
   p.add_argument("--command", default=""); p.add_argument("--out", default="/dev/stdout")
+  p.add_argument("--eval-task", default="Mjlab-Pick-Place-PiperX-Robust")
   p.add_argument("--out-dir"); p.add_argument("--checkpoint", default=None)
   a = p.parse_args()
   if a.snapshot_only:

@@ -22,13 +22,17 @@ OUT=${OUT:-results/d455_heavy_dr/$TAG}
 SEED=${SEED:-42}
 TEACHER_ENVS=${TEACHER_ENVS:-8192}
 TEACHER_ITERS=${TEACHER_ITERS:-9000}
-EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust
+# v10c evaluates on the plain -Robust domain.  v10d trains under a tighter slew
+# ceiling (0.35 x trip) and is evaluated under it: the Cold2 play config is
+# -Robust plus that ceiling plus the approach terms at zero weight.
+EVAL_TASK=${EVAL_TASK:-}
 EVAL_ENVS=${EVAL_ENVS:-256}
 EVAL_STEPS=${EVAL_STEPS:-2400}
 EVAL_SEEDS=${EVAL_SEEDS:-"101 202 303"}
 APPROACH=${APPROACH:-0}   # 1: the v10d variant with the approach terms (-Cold2 ids)
 if [ "$APPROACH" = "1" ]; then BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold2; else BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; fi
 if [ "$SIGHT" = "1" ]; then TASK=$BASE_TASK; else TASK=${BASE_TASK}-NoSight; fi
+if [ -z "$EVAL_TASK" ]; then if [ "$APPROACH" = "1" ]; then EVAL_TASK=$TASK; else EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust; fi; fi
 
 cd "$ROOT"
 ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
@@ -86,7 +90,7 @@ say "v10c ($TAG) task $TASK on physical GPU $GPU, seed $SEED, budget $TEACHER_IT
 # --- the declaration, before anything trains --------------------------------
 TRAIN_CMD="TASK=$TASK NUM_ENVS=$TEACHER_ENVS ITERS=$TEACHER_ITERS GPUS=[$GPU] RUN_NAME=${TAG}_teacher bash scripts/train.sh --agent.logger tensorboard --agent.seed $SEED"
 "$MM" run -n "$ENV_NAME" python scripts/v10c_verdict.py --snapshot-only --task "$TASK" --sight "$SIGHT" --seed "$SEED" \
-  --envs "$TEACHER_ENVS" --iters "$TEACHER_ITERS" --gpu "$GPU" --command "$TRAIN_CMD" --out "$OUT/config_snapshot.json" \
+  --envs "$TEACHER_ENVS" --iters "$TEACHER_ITERS" --gpu "$GPU" --command "$TRAIN_CMD" --eval-task "$EVAL_TASK" --out "$OUT/config_snapshot.json" \
   >"$OUT/config_snapshot.log" 2>&1 || fail "config snapshot -- see $OUT/config_snapshot.log"
 say "wrote $OUT/config_snapshot.json"
 

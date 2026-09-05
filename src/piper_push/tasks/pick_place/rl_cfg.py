@@ -43,32 +43,39 @@ def bounded_init_std(scale: float = 1.0) -> list[float]:
   return [float(v * scale) for v in BOUNDED_INIT_STD]
 
 
-def _distribution_cfg(bounded: bool) -> dict:
-  return {
+def _distribution_cfg(bounded: bool, std_min: list[float] | None = None) -> dict:
+  cfg = {
     "class_name": SQUASHED if bounded else "GaussianDistribution",
     "init_std": list(BOUNDED_INIT_STD) if bounded else 0.6,
     "std_type": "scalar",
   }
+  if bounded and std_min is not None:
+    cfg["std_range"] = (list(std_min), 2.0)
+  return cfg
+
+
+# v10d: the sigma floor, 0.1 x the old convention's joint-space noise per joint
+# (0.6 x PICK_ARM_SCALE / BOUNDED_ARM_SCALE / 6), 0.1 on the gripper.
+V10D_STD_MIN: list[float] = [float(v) / 6.0 for v in BOUNDED_INIT_STD[:6]] + [0.1]
+V10D_ENTROPY_COEF = 0.004
 
 
 def pick_place_ppo_runner_cfg(
   experiment_name: str = "piperx_pick_place",
   max_iterations: int = 3000,
   bounded: bool = True,
+  entropy_coef: float = 0.012,
+  std_min: list[float] | None = None,
 ) -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
       hidden_dims=(512, 256, 128),
       activation="elu",
       obs_normalization=True,
-      distribution_cfg={
-        "class_name": _distribution_cfg(bounded)["class_name"],
-        "init_std": _distribution_cfg(bounded)["init_std"],
-        # Six joint targets scaled by 0.3-0.5 rad plus a gripper scaled by
-        # 25 mm.  std=1.0 would explore +-0.5 rad per step, which the command
-        # rate limiter would simply throw away.
-                "std_type": "scalar",
-      },
+      # Six joint targets scaled by 0.3-0.5 rad plus a gripper scaled by
+      # 25 mm.  std=1.0 would explore +-0.5 rad per step, which the command
+      # rate limiter would simply throw away.
+      distribution_cfg=_distribution_cfg(bounded, std_min),
     ),
     critic=RslRlModelCfg(
       hidden_dims=(512, 256, 128),
@@ -86,7 +93,7 @@ def pick_place_ppo_runner_cfg(
       # 0.012: of five schedules the one with this coefficient reached the
       # highest grasp rate (0.984 against 0.91-0.94), so the extra exploration
       # is not costing the delicate part of the task anything.
-      entropy_coef=0.012,
+      entropy_coef=entropy_coef,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,

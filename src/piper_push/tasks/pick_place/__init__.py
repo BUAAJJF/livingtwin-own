@@ -16,6 +16,8 @@ from piper_push.distill import PickPlaceDistillationRunner
 from piper_push.runners import PickPlaceOnPolicyRunner
 
 from .rl_cfg import (
+  V10D_ENTROPY_COEF,
+  V10D_STD_MIN,
   pick_place_distill_runner_cfg,
   pick_place_ppo_runner_cfg,
   pick_place_vision_ppo_runner_cfg,
@@ -329,13 +331,15 @@ register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Robust-Cold2",
   env_cfg=make_cold_env_cfg(sight=True, approach=True),
   play_env_cfg=make_cold_env_cfg(sight=True, play=True, approach=True),
-  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold2", max_iterations=9000),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold2", max_iterations=9000,
+                                   entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
   runner_cls=PickPlaceOnPolicyRunner,
 )
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Robust-Cold2-NoSight",
   env_cfg=make_cold_env_cfg(sight=False, approach=True),
   play_env_cfg=make_cold_env_cfg(sight=False, play=True, approach=True),
-  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold2", max_iterations=9000),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold2", max_iterations=9000,
+                                   entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
   runner_cls=PickPlaceOnPolicyRunner,
 )

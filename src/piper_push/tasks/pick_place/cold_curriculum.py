@@ -65,12 +65,30 @@ def _weights(guidance_scale: float, action_rate: float, action_acc: float, prema
 # decayed, because it is the deployment posture and not a hint on the way to
 # one.  Weights: approach_speed is per m/s of excess, object_disturbed per m/s
 # of object speed, top_down_grasp in [0, 1].
+# command_acc is per (rad/s^2)^2 summed over six joints: the v10b/v10c teachers
+# sit at ~17 rad/s^2 mean joint acceleration, so -1e-4 charges roughly 0.2/step
+# at that level and nothing for a smooth full-speed move.  command_reversal is
+# the fraction of joints that flipped direction (0.09-0.14 measured), charged
+# so that a flip every ten steps costs about what reach pays.  action_rate/acc
+# are the -Robust values x3, restoring the per-radian weight the bounded scale
+# diluted.  joint_acc goes from a nominal -2e-7 to a weight that is felt.
 APPROACH_TERMS = {
-  "reach":  {"approach_speed": -0.3, "object_disturbed": -0.5, "top_down_grasp": 0.3},
-  "grasp":  {"approach_speed": -0.6, "object_disturbed": -1.0, "top_down_grasp": 0.3},
-  "place":  {"approach_speed": -1.0, "object_disturbed": -1.5, "top_down_grasp": 0.3},
-  "robust": {"approach_speed": -1.5, "object_disturbed": -2.0, "top_down_grasp": 0.3},
+  "reach":  {"approach_speed": -0.3, "object_disturbed": -0.5, "top_down_grasp": 0.3,
+             "command_acc": -1e-5, "command_reversal": -0.2, "joint_acc": -2e-5,
+             "action_rate": -0.06, "action_acc": -0.03},
+  "grasp":  {"approach_speed": -0.6, "object_disturbed": -1.0, "top_down_grasp": 0.3,
+             "command_acc": -3e-5, "command_reversal": -0.5, "joint_acc": -5e-5,
+             "action_rate": -0.12, "action_acc": -0.06},
+  "place":  {"approach_speed": -1.0, "object_disturbed": -1.5, "top_down_grasp": 0.3,
+             "command_acc": -6e-5, "command_reversal": -1.0, "joint_acc": -1e-4,
+             "action_rate": -0.18, "action_acc": -0.09},
+  "robust": {"approach_speed": -1.5, "object_disturbed": -2.0, "top_down_grasp": 0.3,
+             "command_acc": -1e-4, "command_reversal": -1.5, "joint_acc": -2e-4,
+             "action_rate": -0.45, "action_acc": -0.24},
 }
+# The penalties whose ramp the throughput guard may hold (v10d).
+PENALTY_KEYS = ("approach_speed", "object_disturbed", "command_acc", "command_reversal", "joint_acc",
+                "action_rate", "action_acc", "premature_touch", "table_touch", "sight_arm", "sight_hand")
 
 
 def schedule(sight: bool, approach: bool = False) -> dict[str, Any]:
@@ -82,6 +100,12 @@ def schedule(sight: bool, approach: bool = False) -> dict[str, Any]:
   sched = _schedule(sight)
   if approach:
     sched["version"] = "v10d-1"
+    sched["throughput_guard"] = {"hold_penalty_ramp_below_fraction_of_entry": 0.9,
+                                 "note": "penalty weights stop ramping while rolling placed/episode is under 90% of "
+                                         "its value when the stage was entered; DR and guidance ramps continue; "
+                                         "stages never regress"}
+    sched["plant"] = {"command_derate": 0.35}
+    sched["exploration"] = {"entropy_coef": 0.004, "std_min": "0.1 x old joint-space noise per joint, 0.1 gripper"}
     for st in sched["stages"]:
       st["weights"].update(APPROACH_TERMS[st["name"]])
     sched["notes"]["approach_terms"] = ("approach_speed: grasp-site speed above an allowance falling from 0.6 m/s at "
@@ -212,6 +236,9 @@ class cold_start_curriculum:
     self._acc = {"episodes": 0.0, "placed": 0.0, "grasp_attempts": 0.0, "grasped_at_end": 0.0,
                  "over_speed": 0.0, "object_lost": 0.0}
     self._prev_targets = self._targets(0)
+    self._guard = self.sched.get("throughput_guard")
+    self._placed_at_entry = 0.0
+    self._penalty_f = 0.0
     self._last_log_it = -1000
     self.log_path = os.environ.get("PIPER_CURRICULUM_LOG")
     apply_weights(env, self._targets(0)["weights"])
@@ -223,9 +250,11 @@ class cold_start_curriculum:
     st = self.sched["stages"][stage]
     return {"weights": dict(st["weights"]), "dr": dict(st["dr"])}
 
-  def _blend(self, f: float) -> dict[str, Any]:
+  def _blend(self, f: float, f_penalty: float | None = None) -> dict[str, Any]:
     new = self._targets(self.stage); old = self._prev_targets
-    return {"weights": {k: _lerp(old["weights"][k], new["weights"][k], f) for k in new["weights"]},
+    fp = f if f_penalty is None else f_penalty
+    return {"weights": {k: _lerp(old["weights"][k], new["weights"][k], fp if k in PENALTY_KEYS else f)
+                        for k in new["weights"]},
             "dr": {k: _lerp(old["dr"][k], new["dr"][k], f) for k in new["dr"]}}
 
   def metrics(self) -> dict[str, float]:
@@ -254,7 +283,7 @@ class cold_start_curriculum:
            "persist": self.persist, "metrics": self.metrics(),
            "weights": {k: round(float(env.reward_manager.get_term_cfg(k).weight), 4)
                        for k in self._targets(self.stage)["weights"] if k in env.reward_manager.active_terms},
-           "dr": self._current_dr}
+           "dr": self._current_dr, "penalty_ramp": round(self._penalty_f, 3), "placed_at_entry": round(self._placed_at_entry, 3)}
     if extra:
       rec.update(extra)
     print(f"[cold-curriculum] {event} it {self.iteration} stage {rec['stage_name']} persist {self.persist} "
@@ -297,7 +326,9 @@ class cold_start_curriculum:
       else:
         self.persist = 0
       if self.persist >= self.sched["persist_iterations"]:
-        self._prev_targets = self._blend(min(1.0, dwell / self.sched["ramp_iterations"]))
+        self._prev_targets = self._blend(min(1.0, dwell / self.sched["ramp_iterations"]), self._penalty_f)
+        self._placed_at_entry = float(m.get("placed_per_episode", 0.0))
+        self._penalty_f = 0.0
         self.stage += 1
         self.stage_entered_it = it
         self.persist = 0
@@ -306,7 +337,16 @@ class cold_start_curriculum:
           self.full_dr_entered_it = it
         self._say(env, "advance", extra={"to": self.sched["stages"][self.stage]["name"]})
       f = min(1.0, (it - self.stage_entered_it) / self.sched["ramp_iterations"])
-      cur = self._blend(f)
+      if self._guard is None:
+        self._penalty_f = f
+      else:
+        # Hold the penalty ramp while throughput has dropped below the guard;
+        # it resumes from where it was, never goes back.
+        floor = self._guard["hold_penalty_ramp_below_fraction_of_entry"] * self._placed_at_entry
+        healthy = self._placed_at_entry <= 0.0 or m.get("placed_per_episode", 0.0) >= floor
+        if healthy:
+          self._penalty_f = max(self._penalty_f, f)
+      cur = self._blend(f, self._penalty_f)
       apply_weights(env, cur["weights"])
       self._current_dr = {k: round(v, 3) for k, v in cur["dr"].items()}
       apply_dr_level(env, cur["dr"]["actuator"], cur["dr"]["scene"])

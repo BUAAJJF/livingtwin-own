@@ -192,7 +192,15 @@ class PreSquashGaussianDistribution(Distribution):
       self.log_std_param = nn.Parameter(torch.log(init), requires_grad=learn_std)
     else:
       raise ValueError(f"Unknown standard deviation type: {std_type}. Should be 'scalar' or 'log'.")
-    self.std_range = [max(float(std_range[0]), 1e-6), float(std_range[1])]
+    # The floor may be per dimension (v10d: 0.1 x the old convention's joint-space
+    # noise per joint, so exploration never collapses to a bang-bang mean).
+    lo = torch.as_tensor(std_range[0], dtype=torch.float32).reshape(-1).clamp_min(1e-6)
+    if lo.numel() == 1:
+      lo = lo.expand(output_dim).clone()
+    if lo.numel() != output_dim:
+      raise ValueError(f"std_range[0] has {lo.numel()} entries for {output_dim} outputs")
+    self.register_buffer("std_min", lo)
+    self.std_range = [float(lo.min()), float(std_range[1])]
     self.log_std_range = [float(np.log(self.std_range[0])), float(np.log(self.std_range[1]))]
     self.entropy_samples = int(entropy_samples)
     self.telemetry = UTelemetry(output_dim, every=telemetry_every) if telemetry_every > 0 else None
@@ -201,8 +209,8 @@ class PreSquashGaussianDistribution(Distribution):
 
   def _std(self) -> torch.Tensor:
     if self.std_type == "scalar":
-      return self.std_param.clamp(self.std_range[0], self.std_range[1])
-    return torch.exp(self.log_std_param.clamp(self.log_std_range[0], self.log_std_range[1]))
+      return torch.maximum(self.std_param, self.std_min).clamp(max=self.std_range[1])
+    return torch.maximum(torch.exp(self.log_std_param.clamp(max=self.log_std_range[1])), self.std_min)
 
   def update(self, mlp_output: torch.Tensor) -> None:
     self._normal = Normal(mlp_output, self._std())

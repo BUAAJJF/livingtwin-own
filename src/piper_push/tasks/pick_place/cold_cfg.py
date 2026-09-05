@@ -12,10 +12,18 @@ from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from piper_push import robot as piper
 from piper_push.tasks.pick_place import cold_curriculum
 from piper_push.tasks.pick_place import mdp as pick_mdp
 from piper_push.tasks.pick_place.env_cfg import TASK
 from piper_push.tasks.pick_place.robust_cfg import make_robust_env_cfg
+
+V10D_COMMAND_DERATE = 0.35
+"""The slew ceiling as a fraction of the joint trip speed (the -Robust task
+uses 0.5).  Measured on the v10b teacher: x0.7 costs 5% throughput and cuts
+safety-shell trips six-fold, and a limit the policy trains under is one it
+adapts to, unlike a filter added at evaluation (which cost 20-50% and doubled
+the trips)."""
 
 
 def _grasp_site() -> SceneEntityCfg:
@@ -33,6 +41,12 @@ def add_approach_terms(cfg) -> None:
   cfg.rewards["top_down_grasp"] = RewardTermCfg(
     func=pick_mdp.top_down_grasp, weight=0.0,
     params={"command_name": TASK, "asset_cfg": _grasp_site(), "near_m": 0.20})
+  # Smoothness of the realised command, not of the raw action.
+  cfg.rewards["command_acc"] = RewardTermCfg(func=pick_mdp.command_acc, weight=0.0, params={"action_name": "arm"})
+  cfg.rewards["command_reversal"] = RewardTermCfg(func=pick_mdp.command_reversal, weight=0.0,
+                                                  params={"action_name": "arm", "dead_rad": 1e-4})
+  # The plant: a tighter slew ceiling, trained under so the policy adapts to it.
+  cfg.actions["arm"].velocity_limit = {j: V10D_COMMAND_DERATE * v for j, v in piper.JOINT_TRIP_RAD_S.items()}
 
 
 def make_cold_env_cfg(*, sight: bool = True, play: bool = False, approach: bool = False):

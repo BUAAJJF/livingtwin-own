@@ -1939,3 +1939,51 @@ def top_down_grasp(
   site = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
   near = torch.linalg.norm(cmd.target_pos_w() - site, dim=-1) < near_m
   return down.clamp(0.0, 1.0) * (near | cmd.grasped).float()
+
+
+# --- smoothness of what actually left the slew limiter (v10d) -------------------
+#
+# ``action_rate``/``action_acc`` charge the policy's raw action, and a policy
+# can keep that cheap while its TARGET slams into the slew limiter every step
+# (v10b/v10c teachers: 88-90% of steps at the clamp, a reversal every ten).
+# These two read the arm term's realised target instead.  Neither charges a
+# sustained maximum-speed move -- only changes of speed and changes of sign --
+# because throughput was measured not to depend on the top speed.
+
+
+class command_acc:
+  """Second difference of the realised arm target, (rad/s^2)^2 summed over joints."""
+
+  def __init__(self, cfg, env) -> None:
+    self._prev = None
+    self._prev_d = None
+
+  def __call__(self, env: "ManagerBasedRlEnv", action_name: str = "arm") -> torch.Tensor:
+    term = env.action_manager.get_term(action_name)
+    tgt = term._previous_target
+    if self._prev is None or self._prev.shape != tgt.shape:
+      self._prev = tgt.clone(); self._prev_d = torch.zeros_like(tgt)
+      return torch.zeros(tgt.shape[0], device=tgt.device)
+    d = (tgt - self._prev) / env.step_dt
+    acc = (d - self._prev_d) / env.step_dt
+    self._prev = tgt.clone(); self._prev_d = d
+    return torch.sum(torch.square(acc), dim=1)
+
+
+class command_reversal:
+  """Fraction of arm joints whose realised target changed direction this step."""
+
+  def __init__(self, cfg, env) -> None:
+    self._prev = None
+    self._prev_d = None
+
+  def __call__(self, env: "ManagerBasedRlEnv", action_name: str = "arm", dead_rad: float = 1e-4) -> torch.Tensor:
+    term = env.action_manager.get_term(action_name)
+    tgt = term._previous_target
+    if self._prev is None or self._prev.shape != tgt.shape:
+      self._prev = tgt.clone(); self._prev_d = torch.zeros_like(tgt)
+      return torch.zeros(tgt.shape[0], device=tgt.device)
+    d = tgt - self._prev
+    flipped = (d * self._prev_d < 0) & (d.abs() > dead_rad) & (self._prev_d.abs() > dead_rad)
+    self._prev = tgt.clone(); self._prev_d = d
+    return flipped.float().mean(dim=1)
