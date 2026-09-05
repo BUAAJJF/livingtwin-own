@@ -55,8 +55,11 @@ p.add_argument("--sensor", choices=("clean", "real", "measured", "task"),
                     "nominal task, the robust profile on a -Robust one -- "
                     "which is what the robot will hand the policy.")
 p.add_argument("--device", default="cuda:0")
+from piper_push import evalcfg as _evalcfg  # noqa: E402
+_evalcfg.add_action_api_arg(p)
 a = p.parse_args()
 
+_evalcfg.apply_action_api_arg(a)
 env_cfg = load_env_cfg(a.task, play=True)
 # ``play`` switches the sensor model off so that two recordings of the same
 # policy differ only by the policy.  'real' puts it back, for the times the

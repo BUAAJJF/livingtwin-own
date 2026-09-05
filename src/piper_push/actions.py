@@ -178,11 +178,12 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     not in the policy head so that PPO's storage holds ``u`` and its density is
     evaluated on the stored sample (see piper_push.squashed).
 
-    A policy trained under the old unbounded convention emits |u| of 3-28 on
-    its first steps; a pre-squash Gaussian with the squashed entropy term does
-    not reach 10.  Above 10 the term raises rather than drive a different
-    robot silently.  Checked every call for the first 200 control steps and
-    every 100th after, because the check is a device sync."""
+    The only thing checked here is that ``u`` is finite; a NaN action would
+    otherwise poison the slew limiter's state for the rest of the episode.
+    Which convention a policy was trained under is not decidable from the
+    magnitude of ``u`` -- a healthy pre-squash Gaussian drifts past 10 within a
+    few hundred iterations, and a guard at 10 killed five v10 attempts -- so
+    that is checked where checkpoints are loaded (piper_push.action_api)."""
 
     slew_scale: float = 1.0
     """Multiplies ``velocity_limit``.  1.0 is the trained command path; below
@@ -282,7 +283,6 @@ class RateLimitedJointPositionAction(JointPositionAction):
         self._default = self._entity.data.default_joint_pos[:, self._target_ids].clone()
         self._previous_target = self._default.clone()
         self._bounded = bool(cfg.bounded)
-        self._bounded_calls = 0
         self._ramp_from = self._default.clone()
 
         # -- evaluation-time shaping, all inert unless configured -------------
@@ -413,14 +413,8 @@ class RateLimitedJointPositionAction(JointPositionAction):
 
     def process_actions(self, actions: torch.Tensor) -> None:
         if self._bounded:
-            self._bounded_calls += 1
-            if self._bounded_calls <= 200 or self._bounded_calls % 100 == 0:
-                worst = actions.detach().abs().max()
-                if bool(worst > 10.0):
-                    raise ValueError(
-                        f"pre-squash action |u| = {float(worst):.1f} on a bounded task: "
-                        "this looks like a policy trained under the pre-2026-09-05 "
-                        "unbounded convention; evaluate it on the matching '-V1' task id.")
+            if not bool(torch.isfinite(actions).all()):
+                raise ValueError("non-finite pre-squash action reached the action term")
             actions = torch.tanh(actions)
         super().process_actions(actions)
         target = self._processed_actions

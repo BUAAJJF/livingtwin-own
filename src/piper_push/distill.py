@@ -21,6 +21,8 @@ import torch
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlModelCfg
 from rsl_rl.algorithms import Distillation
 
+from piper_push.runners import ActionApiRunnerMixin
+
 
 @dataclass
 class RslRlDistillationAlgorithmCfg:
@@ -71,7 +73,7 @@ class RslRlDistillationRunnerCfg(RslRlBaseRunnerCfg):
   )
 
 
-class PickPlaceDistillationRunner(MjlabOnPolicyRunner):
+class PickPlaceDistillationRunner(ActionApiRunnerMixin, MjlabOnPolicyRunner):
   """mjlab's runner, pointed at the student and the teacher.
 
   Two things have to change.  ``MjlabOnPolicyRunner`` strips unset optional

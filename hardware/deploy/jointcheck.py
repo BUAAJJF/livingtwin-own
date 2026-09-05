@@ -67,7 +67,8 @@ def main() -> int:
 
   spec = json.loads(pathlib.Path(SPEC_FILE).read_text())
   arm = robot.DryRunArm(spec) if a.dry_run else robot.PiperArm(a.can)
-  mapper = robot.ActionMapper(spec)
+  # No policy is involved here; the mapper is used for the unit conversion only.
+  mapper = robot.ActionMapper(spec, allow_legacy=True)
 
   if not a.dry_run and not a.yes:
     print(f"About to move joint {a.joint} by +-{a.degrees} degrees on "

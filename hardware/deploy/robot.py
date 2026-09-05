@@ -108,7 +108,8 @@ class ActionMapper:
   def __init__(self, spec: dict, dt: float = 1.0 / config.CONTROL_HZ,
                clip_actions: float | None = None,
                accel_limit: float | None = None,
-               gripper_accel_limit: float | None = None):
+               gripper_accel_limit: float | None = None,
+               allow_legacy: bool = False):
     self.dt = float(dt)
     self.clip_actions = clip_actions
     self.accel_limit = (None if accel_limit is None else np.asarray(
@@ -128,9 +129,30 @@ class ActionMapper:
     # Exports since carry the bounded one (a = +-1 is the safe clip; the policy
     # emits u and tanh is applied here);
     # driving either with the other's constants is driving a different robot.
+    from piper_push import action_api
     aspec = spec.get("action_spec")
-    if aspec is None:
+    api = spec.get("action_api")
+    if aspec is None or api is None:
+      # A spec from before the stamp: v1, and only when asked for.
+      if not (allow_legacy or action_api.legacy_allowed()):
+        raise action_api.ActionApiError(
+          "obs_spec.json carries no action_spec/action_api block: it was exported "
+          "before 2026-09-05 and describes the unbounded v1 convention.  Deploying "
+          "it is a deliberate act: pass --allow-legacy-action-api (or set "
+          f"{action_api.ENV_FLAG}=1).")
       aspec = sim_robot.action_spec("v1", dict(zip(names, default.tolist())))
+      api = action_api.for_convention("v1", dict(zip(names, default.tolist())))
+      self.action_api_status = "legacy-unstamped"
+    else:
+      expect = {"version": action_api.VERSION[aspec["convention"]],
+                "spec_hash": action_api.spec_hash(aspec)}
+      if api.get("version") != expect["version"] or api.get("spec_hash") != expect["spec_hash"]:
+        raise action_api.ActionApiError(
+          f"obs_spec.json action_api {api} does not match its own action_spec "
+          f"(version {expect['version']}, hash {expect['spec_hash']}); the file was edited "
+          "or assembled from two exports.")
+      self.action_api_status = "ok"
+    self.action_api = dict(api)
     if list(aspec["joints"]) != list(ARM_JOINTS) + [GRIPPER_JOINT]:
       raise ValueError(f"action_spec joints {aspec['joints']} are not {list(ARM_JOINTS) + [GRIPPER_JOINT]}")
     self.convention = str(aspec["convention"])

@@ -30,6 +30,7 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
+from piper_push import action_api
 from piper_push import robot as piper
 
 p = argparse.ArgumentParser()
@@ -80,6 +81,10 @@ spec = {
   "action_spec": piper.action_spec(
     "bounded" if cfg.actions["arm"].bounded else "v1",
     dict(zip(robot.joint_names, robot.data.default_joint_pos[0].tolist()))),
+  # Version and hash of the block above; hardware.deploy.robot.ActionMapper
+  # refuses a spec without it unless legacy loading is asked for explicitly.
+  "action_api": action_api.for_env_cfg(
+    cfg, dict(zip(robot.joint_names, robot.data.default_joint_pos[0].tolist()))),
   "control_hz": 1.0 / (env.cfg.sim.mujoco.timestep * env.cfg.decimation),
 }
 

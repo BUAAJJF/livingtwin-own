@@ -235,7 +235,7 @@ def test_the_slew_limit_starts_from_where_the_arm_is():
   from hardware.deploy import proprio, robot
 
   spec = __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
-  m = robot.ActionMapper(spec)
+  m = robot.ActionMapper(spec, allow_legacy=True)
   q = np.asarray(spec["default_joint_pos"], dtype=np.float64) + 0.5
   m.reset(q)
   assert m.previous[0] == pytest.approx(q[0])
@@ -251,7 +251,7 @@ def test_targets_stay_inside_the_safety_envelope():
   from hardware.deploy import proprio, robot
 
   spec = __import__("json").loads(pathlib.Path(proprio.SPEC_FILE).read_text())
-  m = robot.ActionMapper(spec)
+  m = robot.ActionMapper(spec, allow_legacy=True)
   m.reset()
   rng = np.random.default_rng(0)
   for _ in range(500):
@@ -1076,7 +1076,7 @@ def test_every_can_message_passes_the_sdk_s_own_validator():
   spec = __import__("json").loads(pathlib.Path(
     pathlib.Path(__file__).resolve().parents[1] / "hardware" / "deploy"
     / "obs_spec.json").read_text())
-  mapper = robot.ActionMapper(spec)
+  mapper = robot.ActionMapper(spec, allow_legacy=True)
   mapper.reset()
 
   arm = robot.PiperArm.__new__(robot.PiperArm)
@@ -1222,14 +1222,14 @@ def test_initial_hardware_rate_scale_reduces_every_slew_limit():
   from hardware.deploy import proprio, robot, run
 
   spec = json.loads(proprio.SPEC_FILE.read_text())
-  base = robot.ActionMapper(spec)
+  base = robot.ActionMapper(spec, allow_legacy=True)
   args = SimpleNamespace(camera="d405", rig_file=None, dry_run=True,
                          allow_nominal=True, replay=None, no_arm=True,
                          device="cpu", mask="depth",
                          command_rate_scale=0.25, policy="unused")
   # The build path applies the scalar immediately after constructing mapper;
   # exercise the exact arithmetic without constructing a camera or policy.
-  scaled = robot.ActionMapper(spec)
+  scaled = robot.ActionMapper(spec, allow_legacy=True)
   scaled.max_step *= args.command_rate_scale
   assert np.allclose(scaled.max_step, base.max_step * 0.25)
 
@@ -1240,7 +1240,7 @@ def test_action_mapper_optional_acceleration_limit_bounds_reversals():
   from hardware.deploy import proprio, robot
 
   spec = json.loads(proprio.SPEC_FILE.read_text())
-  m = robot.ActionMapper(spec, accel_limit=0.5, gripper_accel_limit=0.05)
+  m = robot.ActionMapper(spec, accel_limit=0.5, gripper_accel_limit=0.05, allow_legacy=True)
   m.reset()
   q0 = m.previous.copy()
   q1 = m(np.full(7, 10.0))
@@ -1274,7 +1274,7 @@ def test_grasp_height_guard_uses_the_training_fk():
   from hardware.deploy import proprio, robot, run
 
   spec = json.loads(proprio.SPEC_FILE.read_text())
-  mapper = robot.ActionMapper(spec)
+  mapper = robot.ActionMapper(spec, allow_legacy=True)
   kin = proprio.Kinematics()
   assert run._grasp_height(kin, mapper.default_target) > 0.07
   bad = mapper.default_target.copy()
@@ -1287,7 +1287,7 @@ def test_table_guard_checks_full_collision_geometry_against_plane():
 
   from hardware.deploy import proprio, robot, run
 
-  mapper = robot.ActionMapper(json.loads(proprio.SPEC_FILE.read_text()))
+  mapper = robot.ActionMapper(json.loads(proprio.SPEC_FILE.read_text()), allow_legacy=True)
   kin = proprio.Kinematics()
   clearance, geom = run._table_clearance(
     kin, mapper.default_target, np.array([0.0, 0.0, 1.0]), 0.0)

@@ -12,6 +12,7 @@ from mjlab.tasks.registry import register_mjlab_task
 from .env_cfg import make_pick_place_env_cfg
 from .robust_cfg import make_robust_env_cfg
 from piper_push.distill import PickPlaceDistillationRunner
+from piper_push.runners import PickPlaceOnPolicyRunner
 
 from .rl_cfg import (
   pick_place_distill_runner_cfg,
@@ -24,7 +25,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(),
   play_env_cfg=make_pick_place_env_cfg(play=True),
   rl_cfg=pick_place_ppo_runner_cfg(),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 # Conservative D455 deployment domain.  The ordinary tasks remain the
@@ -35,7 +36,7 @@ register_mjlab_task(
   env_cfg=make_robust_env_cfg(),
   play_env_cfg=make_robust_env_cfg(play=True),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 # The smoke variant: one fixed cube in every environment.  A reward bug is
@@ -46,7 +47,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(shape_variety=0.0),
   play_env_cfg=make_pick_place_env_cfg(play=True, shape_variety=0.0),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_cube"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 # Halfway through the shape curriculum: the distribution's midpoint plus half
@@ -57,7 +58,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(shape_variety=0.5),
   play_env_cfg=make_pick_place_env_cfg(play=True, shape_variety=0.5),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_mid"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 
@@ -70,7 +71,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(vision=True),
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_vision_ppo_runner_cfg(),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -79,7 +80,7 @@ register_mjlab_task(
   play_env_cfg=make_robust_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 
@@ -139,7 +140,7 @@ register_mjlab_task(
     play=True, vision=True, mask_dropout_scale=0.75),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -149,7 +150,7 @@ register_mjlab_task(
     play=True, vision=True, mask_dropout_scale=0.5),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 
@@ -177,7 +178,7 @@ register_mjlab_task(
     play=True, vision=True, wrist=True, mask_dropout_scale=0.75),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -188,7 +189,7 @@ register_mjlab_task(
     play=True, vision=True, wrist=True, mask_dropout_scale=0.5),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 # The undomainrandomised wrist task exists for one reason: the DR-degradation
@@ -201,7 +202,7 @@ register_mjlab_task(
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, wrist=True),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_wrist", wrist=True),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -212,7 +213,7 @@ register_mjlab_task(
     play=True, vision=True, wrist=True, mask_dropout_scale=1.0),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust_wrist", wrist=True),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 
@@ -226,7 +227,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(num_objects=3),
   play_env_cfg=make_pick_place_env_cfg(play=True, num_objects=3),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_cleanup"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -234,7 +235,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(vision=True, num_objects=3),
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, num_objects=3),
   rl_cfg=pick_place_vision_ppo_runner_cfg(experiment_name="piperx_cleanup_vision"),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 
 register_mjlab_task(
@@ -258,7 +259,7 @@ register_mjlab_task(
   env_cfg=make_pick_place_env_cfg(bounded_actions=False),
   play_env_cfg=make_pick_place_env_cfg(play=True, bounded_actions=False),
   rl_cfg=pick_place_ppo_runner_cfg(bounded=False),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Robust-V1",
@@ -266,14 +267,14 @@ register_mjlab_task(
   play_env_cfg=make_robust_env_cfg(play=True, bounded_actions=False),
   rl_cfg=pick_place_ppo_runner_cfg(
     experiment_name="piperx_pick_place_robust", bounded=False),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Vision-V1",
   env_cfg=make_pick_place_env_cfg(vision=True, bounded_actions=False),
   play_env_cfg=make_pick_place_env_cfg(play=True, vision=True, bounded_actions=False),
   rl_cfg=pick_place_vision_ppo_runner_cfg(bounded=False),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-V1",
@@ -281,7 +282,7 @@ register_mjlab_task(
   play_env_cfg=make_robust_env_cfg(play=True, vision=True, bounded_actions=False),
   rl_cfg=pick_place_vision_ppo_runner_cfg(
     experiment_name="piperx_pick_place_vision_robust", bounded=False),
-  runner_cls=MjlabOnPolicyRunner,
+  runner_cls=PickPlaceOnPolicyRunner,
 )
 register_mjlab_task(
   task_id="Mjlab-Pick-Place-PiperX-Distill-V1",

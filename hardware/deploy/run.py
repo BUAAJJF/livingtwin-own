@@ -380,6 +380,16 @@ class Rates:
 def build(a):
   """Everything the loop needs, and a clear error for whatever is missing."""
   spec = json.loads(pathlib.Path(proprio.SPEC_FILE).read_text())
+  # The action mapping comes from the POLICY's exported spec when it has one:
+  # a bounded policy driven through the repository's legacy spec would be a
+  # different robot.  proprio keeps reading the repository spec for the
+  # observation layout, which _check_obs_spec asserts is the same file.
+  policy_spec_path = (pathlib.Path(a.policy) if getattr(a, "policy", None) else None)
+  if policy_spec_path is not None:
+    policy_spec_path = (policy_spec_path if policy_spec_path.is_dir() else policy_spec_path.parent) / "obs_spec.json"
+  action_spec_source = spec
+  if policy_spec_path is not None and policy_spec_path.exists():
+    action_spec_source = json.loads(policy_spec_path.read_text())
   camera = str(getattr(a, "camera", "d405"))
   suffix = "" if camera == "d405" else f"_{camera}"
   rig_path = (pathlib.Path(a.rig_file) if getattr(a, "rig_file", None)
@@ -431,10 +441,13 @@ def build(a):
   tracker = mask.TargetTracker()
   builder = proprio.ProprioBuilder()
   mapper = robot.ActionMapper(
-    spec, dt=1.0 / config.CONTROL_HZ,
+    action_spec_source, dt=1.0 / config.CONTROL_HZ,
     accel_limit=getattr(a, "command_accel_limit", None),
     gripper_accel_limit=getattr(a, "gripper_accel_limit", None),
+    allow_legacy=bool(getattr(a, "allow_legacy_action_api", False)),
   )
+  print(f"action convention: {mapper.convention} ({mapper.action_api_status}), "
+        f"squashed={mapper.squashed}")
   mapper.max_step *= float(getattr(a, "command_rate_scale", 1.0))
 
   arm = (robot.DryRunArm(spec) if (a.dry_run or a.no_arm or a.replay)
@@ -759,6 +772,10 @@ def main() -> int:
                  help="reserved for SAM VOS compilation; currently refused "
                       "because the installed torch 2.13/SAM2.1 combination "
                       "fails its first propagated frame")
+  p.add_argument("--allow-legacy-action-api", action="store_true",
+                 help="drive the arm from an obs_spec.json that predates the action "
+                      "convention stamp (unbounded v1, every export before 2026-09-05). "
+                      "Refused otherwise.")
   p.add_argument("--gripper-closed", type=float, default=0.045,
                  help="metres of single-finger travel below which the jaws "
                       "count as closed on something, for --held-target-radius")

@@ -38,6 +38,8 @@ from typing import Any
 
 import torch
 
+from piper_push import action_api
+
 # Every environment variable the task configuration reads at import time.  Add
 # to this list when adding an ``os.environ`` read to ``env_cfg``/``robust_cfg``;
 # ``tests/test_evalcfg.py`` checks the two stay in step.
@@ -55,6 +57,10 @@ ENV_KNOBS: tuple[str, ...] = (
   "RESET_FULL_RANGE",
   "PIPER_X_URDF",
 )
+
+# Environment variables the code reads that are NOT domain knobs (telemetry
+# sinks, the legacy-loading flag); listed so the knob audit can tell them apart.
+NON_DOMAIN_ENV: tuple[str, ...] = ("PIPER_U_TELEMETRY", "PIPER_U_TELEMETRY_TAG", "PIPER_ALLOW_LEGACY_ACTION_API")
 
 SENSOR_CHOICES: tuple[str, ...] = ("clean", "measured", "task")
 
@@ -115,6 +121,12 @@ def load_weights(runner, checkpoint_path: str, device: str | None = None
   """
   raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
   key, weights = weights_in(raw)
+  # The convention the checkpoint was trained under has to be the one the
+  # task runs; a checkpoint with no stamp is refused unless legacy loading
+  # was asked for explicitly (piper_push.action_api).
+  env = getattr(runner, "env", None)
+  api_record = (action_api.check(raw, action_api.for_env(env), where=checkpoint_path)
+                if env is not None else {"status": "unchecked-no-env"})
   net = evaluated_network(runner)
   net.load_state_dict(weights, strict=True)
   after = net.state_dict()
@@ -127,7 +139,7 @@ def load_weights(runner, checkpoint_path: str, device: str | None = None
     raise RuntimeError(
       f"{len(unequal)} of {len(weights)} tensors did not arrive "
       f"(first: {unequal[0]}); the runner's network is not the one loaded")
-  return {"key": key, "n_tensors": len(weights), "iter": raw.get("iter")}
+  return {"key": key, "n_tensors": len(weights), "iter": raw.get("iter"), "action_api": api_record}
 
 
 def load_policy(runner, checkpoint_path: str, device: str | None = None):
@@ -216,6 +228,19 @@ def add_sensor_arg(parser, default: str = "clean") -> None:
          "penalties) on a -Robust task.  'task': whatever the play config "
          "says, which on a -Robust task is the robust sensor and on a nominal "
          "one is clean.  Only 'measured' says anything about the robot.")
+
+
+def add_action_api_arg(parser) -> None:
+  parser.add_argument(
+    "--allow-legacy-action-api", action="store_true",
+    help="load a checkpoint that carries no action_api stamp (every checkpoint "
+         "from before 2026-09-05, unbounded v1 convention) -- only meaningful "
+         f"on a '-V1' task id.  Equivalent to {action_api.ENV_FLAG}=1.")
+
+
+def apply_action_api_arg(args) -> None:
+  if getattr(args, "allow_legacy_action_api", False):
+    os.environ[action_api.ENV_FLAG] = "1"
 
 
 def provenance(sensor: dict[str, Any] | None = None, **extra) -> dict[str, Any]:

@@ -268,8 +268,11 @@ def main() -> int:
                       "fractions so a reader can pick a different one")
   evalcfg.add_sensor_arg(p, default="measured")
   p.add_argument("--out", default=None)
+  from piper_push import evalcfg as _evalcfg  # noqa: E402
+  _evalcfg.add_action_api_arg(p)
   a = p.parse_args()
 
+  _evalcfg.apply_action_api_arg(a)
   torch.manual_seed(a.seed)
   cfg = load_env_cfg(a.task, play=True)
   cfg.scene.num_envs = a.num_envs

@@ -30,7 +30,8 @@ def test_every_import_time_environ_read_is_recorded():
   for f in (ROOT / "src/piper_push").rglob("*.py"):
     seen |= set(re.findall(r'os\.environ\.get\("([A-Z_0-9]+)"', f.read_text()))
   assert seen, "the scan found nothing; the pattern is wrong"
-  assert seen <= set(evalcfg.ENV_KNOBS), sorted(seen - set(evalcfg.ENV_KNOBS))
+  known = set(evalcfg.ENV_KNOBS) | set(evalcfg.NON_DOMAIN_ENV)
+  assert seen <= known, sorted(seen - known)
 
 
 def test_env_knobs_reads_the_given_environment_not_the_process():

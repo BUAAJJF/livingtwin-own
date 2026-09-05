@@ -107,8 +107,11 @@ def main() -> int:
   from piper_push import evalcfg
   evalcfg.add_sensor_arg(p, default="measured")
   p.add_argument("--out", default=None)
+  from piper_push import evalcfg as _evalcfg  # noqa: E402
+  _evalcfg.add_action_api_arg(p)
   a = p.parse_args()
 
+  _evalcfg.apply_action_api_arg(a)
   import torch
   import mjlab.tasks  # noqa: F401
   from mjlab.envs import ManagerBasedRlEnv

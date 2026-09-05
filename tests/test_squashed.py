@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
+import pytest
+
 from piper_push.squashed import PreSquashGaussianDistribution, log1m_tanh2
 
 
@@ -129,3 +131,70 @@ def test_rsl_rl_model_uses_the_head_through_its_class_name():
   u = m(obs, stochastic_output=True)
   assert u.shape == (4, 7)
   assert torch.isfinite(m.get_output_log_prob(u)).all() and torch.isfinite(m.output_entropy).all()
+
+
+def test_entropy_uses_a_fresh_rsample_with_gradient_and_pulls_a_saturated_mean_home():
+  """At mu = +8 the arm is pinned; maximising the entropy must move mu toward
+  0.  That only happens if the Jacobian term is evaluated on a fresh,
+  differentiable rsample of the CURRENT distribution -- no detach, no
+  no_grad, no cached sample."""
+  import inspect
+  import piper_push.squashed as m
+  src = inspect.getsource(m.PreSquashGaussianDistribution.entropy.fget)
+  assert "rsample" in src and "detach" not in src and "no_grad" not in src
+  torch.manual_seed(0)
+  d = PreSquashGaussianDistribution(1, init_std=0.3, entropy_samples=256, telemetry_every=0)
+  mu = torch.full((1, 1), 8.0, requires_grad=True)
+  d.update(mu)
+  h = d.entropy.sum()
+  (g,) = torch.autograd.grad(h, mu)
+  assert g.item() < 0.0                       # dH/dmu < 0: ascent decreases mu
+  mu2 = (mu + 0.1 * g).detach()               # one ascent step
+  assert mu2.item() < 8.0
+  d.update(mu2)
+  assert d.entropy.sum().item() > h.item()    # and the entropy did go up
+  # symmetric on the other side
+  mu = torch.full((1, 1), -8.0, requires_grad=True)
+  d.update(mu)
+  (g,) = torch.autograd.grad(d.entropy.sum(), mu)
+  assert g.item() > 0.0
+
+
+def test_u_telemetry_counts_per_dimension_and_names_the_worst_sample(capsys, tmp_path, monkeypatch):
+  from piper_push.squashed import UTelemetry
+  monkeypatch.setenv("PIPER_U_TELEMETRY", str(tmp_path / "u.jsonl"))
+  monkeypatch.setenv("PIPER_U_TELEMETRY_TAG", "unit")
+  t = UTelemetry(3, every=2, rollout_only=False)
+  mu = torch.tensor([[0.0, 7.0, 0.0], [0.0, 7.0, 0.0]])
+  std = torch.tensor([0.1, 0.1, 2.0])
+  u1 = torch.tensor([[0.0, 7.0, 11.0], [0.5, 6.5, -0.2]])
+  u2 = torch.tensor([[0.0, 7.2, 0.1], [0.1, 6.8, 0.3]])
+  t.observe(mu, std, u1)
+  assert t._t is not None
+  t.observe(mu, std, u2)   # second call: reports and resets
+  import json
+  rec = json.loads((tmp_path / "u.jsonl").read_text().strip())
+  assert rec["tag"] == "unit" and rec["samples_per_dim"] == 4.0
+  assert rec["frac_u_gt6"] == pytest.approx([0.0, 1.0, 0.25])
+  assert rec["frac_u_gt10"] == pytest.approx([0.0, 0.0, 0.25])
+  assert rec["frac_mu_gt6"] == pytest.approx([0.0, 1.0, 0.0])
+  assert rec["frac_sat99"][1] == 1.0 and rec["frac_sat99"][0] == 0.0
+  w = rec["worst"]
+  assert (w["dim"], w["env"]) == (2, 0) and w["u"] == pytest.approx(11.0) and w["mu"] == 0.0
+  assert w["noise_share"] == pytest.approx(1.0)   # this outlier was all noise
+  assert rec["sigma"] == pytest.approx([0.1, 0.1, 2.0])
+  assert "[u-telemetry unit w0]" in capsys.readouterr().out
+  assert t._t is None and t.windows == 1
+
+
+def test_head_telemetry_counts_rollout_samples_only():
+  d = PreSquashGaussianDistribution(2, init_std=0.5, telemetry_every=100)
+  d.update(torch.zeros(4, 2))
+  d.sample()                                  # a PPO-update style call: not counted
+  assert d.telemetry.calls == 0
+  with torch.inference_mode():
+    for _ in range(2):
+      d.sample()                              # rollout: counted
+  assert d.telemetry.calls == 2 and d.telemetry._t is not None
+  d.sample()                                  # and an update after a rollout must not blow up
+  d.telemetry.report()

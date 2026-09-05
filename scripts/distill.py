@@ -67,8 +67,11 @@ def main() -> int:
                       "the blind spot instead of the behaviour.")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
+  from piper_push import evalcfg as _evalcfg  # noqa: E402
+  _evalcfg.add_action_api_arg(p)
   a = p.parse_args()
 
+  _evalcfg.apply_action_api_arg(a)
   if not a.teacher and not a.resume:
     p.error("pass --teacher to start, or --resume to continue")
 

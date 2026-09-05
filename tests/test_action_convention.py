@@ -53,7 +53,7 @@ def test_default_ids_are_bounded_and_v1_ids_are_not():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="builds a MuJoCo-Warp environment")
-def test_bounded_term_squashes_u_feeds_back_tanh_and_refuses_an_unbounded_policy():
+def test_bounded_term_squashes_u_feeds_back_tanh_and_refuses_only_non_finite():
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.tasks.registry import load_env_cfg
   cfg = load_env_cfg("Mjlab-Pick-Place-PiperX", play=True)
@@ -76,8 +76,11 @@ def test_bounded_term_squashes_u_feeds_back_tanh_and_refuses_an_unbounded_policy
     assert torch.allclose(fb, torch.tanh(u)) and fb.abs().max() < 1.0
     assert torch.isfinite(pick_mdp.action_rate_l2_bounded(env)).all()
     assert torch.isfinite(pick_mdp.action_acc_l2_bounded(env)).all()
-    u[:, 0] = 20.0   # an unbounded-convention policy's first step
-    with pytest.raises(ValueError, match="-V1"):
+    u[:, 0] = 20.0   # a saturated joint: legitimate, |u| is never a convention test
+    env.step(u)
+    assert torch.allclose(term.raw_action[:, 0], torch.tanh(u[:, 0]))
+    u[:, 0] = float("nan")
+    with pytest.raises(ValueError, match="non-finite"):
       env.step(u)
   finally:
     env.close()
@@ -108,7 +111,8 @@ def test_bounded_distillation_regresses_on_tanh():
   assert obj.loss_fn(torch.zeros(1, 1), t).item() > 0.9
 
 
-def test_deploy_mapper_reads_the_convention_from_the_spec():
+def test_deploy_mapper_reads_the_convention_from_the_spec(monkeypatch):
+  monkeypatch.delenv("PIPER_ALLOW_LEGACY_ACTION_API", raising=False)
   """A spec without action_spec is a pre-2026-09-05 export and gets v1; one
   with the bounded block gets a = +-1 at the safe clip.  The v4 policy on the
   rig is the former and must keep driving the same robot."""
@@ -119,13 +123,16 @@ def test_deploy_mapper_reads_the_convention_from_the_spec():
 
   legacy = json.loads(pathlib.Path(proprio.SPEC_FILE).read_text())
   legacy.pop("action_spec", None)
-  m1 = robot.ActionMapper(legacy)
+  with pytest.raises(Exception, match="no action_spec/action_api"):
+    robot.ActionMapper(legacy)
+  m1 = robot.ActionMapper(legacy, allow_legacy=True)
   assert m1.convention == "v1"
   names = legacy["joint_names"]
   j4 = legacy["default_joint_pos"][names.index("joint4")]
   assert m1.offset[3] == pytest.approx(j4) and m1.scale[3] == pytest.approx(piper.PICK_ARM_SCALE["joint4"])
 
-  bounded = dict(legacy, action_spec=piper.action_spec("bounded"))
+  from piper_push import action_api
+  bounded = dict(legacy, action_spec=piper.action_spec("bounded"), action_api=action_api.for_convention("bounded"))
   m2 = robot.ActionMapper(bounded)
   assert m2.convention == "bounded" and m2.squashed
   m2.reset(np.zeros(7))
@@ -142,8 +149,8 @@ def test_deploy_mapper_reads_the_convention_from_the_spec():
   assert one[0] == pytest.approx(np.tanh(1.0) * piper.BOUNDED_ARM_SCALE["joint1"] + piper.BOUNDED_ARM_OFFSET["joint1"])
   assert not m1.squashed
 
-  bad = dict(legacy, action_spec=dict(piper.action_spec("bounded"), joints=["x"] * 7))
-  with pytest.raises(ValueError, match="action_spec joints"):
+  bad = dict(bounded, action_spec=dict(piper.action_spec("bounded"), joints=["x"] * 7))
+  with pytest.raises(Exception, match="does not match its own action_spec"):
     robot.ActionMapper(bad)
 
 

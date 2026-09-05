@@ -2,8 +2,8 @@
 # v10 overnight: the first teacher -> student -> PPO pipeline under the bounded
 # action convention (tanh head, a = +-1 is the safe clip; 2026-09-05).
 #
-#   TAG=v10_sight   SIGHT=1 GPU=0 nohup setsid bash scripts/run_v10.sh >results/d455_heavy_dr/v10_sight/watcher.log 2>&1 &
-#   TAG=v10_nosight SIGHT=0 GPU=1 nohup setsid bash scripts/run_v10.sh >results/d455_heavy_dr/v10_nosight/watcher.log 2>&1 &
+#   TAG=v10b_sight   SIGHT=1 GPU=4 nohup setsid bash scripts/run_v10.sh >results/d455_heavy_dr/v10b_sight/watcher.log 2>&1 &
+#   TAG=v10b_nosight SIGHT=0 GPU=5 nohup setsid bash scripts/run_v10.sh >results/d455_heavy_dr/v10b_nosight/watcher.log 2>&1 &
 #
 # Two arms, one knob between them: SIGHT=1 is the v4 lineage (the current
 # -Robust task) WITH the visibility reward family (sight_arm, sight_hand,
@@ -62,6 +62,9 @@ if [ "$SIGHT" = "0" ]; then
 fi
 # The detector domain for the vision stages (distill, finetune, evals).
 VISION_ENV=(env HELD_PROXY_M="$HELD_PROXY_M")
+# Per-dimension telemetry of the pre-squash action, one JSON line per window,
+# tagged by stage (piper_push.squashed.UTelemetry).
+export PIPER_U_TELEMETRY="$OUT/u_telemetry.jsonl"
 
 say()  { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 fail() { printf '[%s] FAILED: %s\n' "$(date -Is)" "$*" >&2; exit 1; }
@@ -167,7 +170,7 @@ write_domain "$OUT"
 # --- 1. teacher, cold ------------------------------------------------------
 if ! stage_done teacher; then
   say "teacher: cold start, $TEACHER_ENVS envs x $TEACHER_ITERS iterations"
-  if ! TASK=Mjlab-Pick-Place-PiperX-Robust NUM_ENVS="$TEACHER_ENVS" ITERS="$TEACHER_ITERS" \
+  if ! PIPER_U_TELEMETRY_TAG=teacher TASK=Mjlab-Pick-Place-PiperX-Robust NUM_ENVS="$TEACHER_ENVS" ITERS="$TEACHER_ITERS" \
        GPUS="[$GPU]" RUN_NAME="${TAG}_teacher" bash scripts/train.sh --agent.logger tensorboard \
        >"$OUT/teacher.log" 2>&1; then
     fail "teacher -- see $OUT/teacher.log"
@@ -191,7 +194,7 @@ FINAL=""; FINAL_TASK=""
 if stage_done distill; then
   say "distillation already done"
 elif fits "$DISTILL_COST_H"; then
-  run_stage distill "${VISION_ENV[@]}" \
+  run_stage distill "${VISION_ENV[@]}" PIPER_U_TELEMETRY_TAG=distill \
     "$MM" run -n "$ENV_NAME" python -u scripts/distill.py \
       --task Mjlab-Pick-Place-PiperX-Distill-Robust --teacher "$RT" \
       --num-envs "$VISION_ENVS" --iterations "$DISTILL_ITERS" --episode-length-s "$EPISODE_S" \
@@ -219,7 +222,7 @@ if [ -n "$FINAL" ]; then
   if stage_done finetune; then
     say "fine-tuning already done"
   elif fits "$FINETUNE_COST_H"; then
-    run_stage finetune "${VISION_ENV[@]}" \
+    run_stage finetune "${VISION_ENV[@]}" PIPER_U_TELEMETRY_TAG=finetune \
       "$MM" run -n "$ENV_NAME" python -u scripts/finetune.py \
         --task Mjlab-Pick-Place-PiperX-Vision-Robust --student "$RD" --critic "$RT" \
         --num-envs "$VISION_ENVS" --iterations "$FINETUNE_ITERS" --episode-length-s "$EPISODE_S" \

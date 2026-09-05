@@ -163,8 +163,11 @@ def main() -> int:
                       "rather than merely poor")
   p.add_argument("--html", default=None)
   p.add_argument("--out", default=None)
+  from piper_push import evalcfg as _evalcfg  # noqa: E402
+  _evalcfg.add_action_api_arg(p)
   a = p.parse_args()
 
+  _evalcfg.apply_action_api_arg(a)
   src = SimSource(task=a.task, device=a.device, num_envs=a.num_envs,
                   seed=a.seed)
   chk = src.self_check()

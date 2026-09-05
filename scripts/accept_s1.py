@@ -286,8 +286,11 @@ def main() -> int:
                         "replaced, not just at the episode boundary.  The "
                         "control for 'is the memory carrying anything across "
                         "objects'.")
+    from piper_push import evalcfg as _evalcfg  # noqa: E402
+    _evalcfg.add_action_api_arg(p)
     a = p.parse_args()
 
+    _evalcfg.apply_action_api_arg(a)
     env_cfg = load_env_cfg(a.task, play=True)
     # ``play`` turns the sensor model off so that two recordings of the same
     # policy can be compared; an evaluation that is asking what the robot

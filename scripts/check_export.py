@@ -20,8 +20,11 @@ p.add_argument("--task", default="Mjlab-Pick-Place-PiperX-Vision")
 p.add_argument("--device", default="cuda:0")
 p.add_argument("--steps", type=int, default=8)
 p.add_argument("--out", default="/tmp/vision_policy")
+from piper_push import evalcfg as _evalcfg  # noqa: E402
+_evalcfg.add_action_api_arg(p)
 a = p.parse_args()
 
+_evalcfg.apply_action_api_arg(a)
 env_cfg = load_env_cfg(a.task, play=True)
 agent_cfg = load_rl_cfg(a.task)
 env_cfg.scene.num_envs = 1

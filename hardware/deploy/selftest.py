@@ -409,7 +409,9 @@ def main() -> int:
   print("command")
   import json
   spec = json.loads(pathlib.Path(config.HERE / "obs_spec.json").read_text())
-  mapper = ActionMapper(spec, clip_actions=agent.clip_actions)
+  # The self-test checks the mapper's mechanics against the repository spec;
+  # the convention gate for a real deployment is run.py's ActionMapper.
+  mapper = ActionMapper(spec, clip_actions=agent.clip_actions, allow_legacy=True)
   term = env.action_manager.get_term("arm")
   # Seeded from the simulator's own previous target, not from the measured
   # joint position.  Deployment seeds from the measurement -- that is what
