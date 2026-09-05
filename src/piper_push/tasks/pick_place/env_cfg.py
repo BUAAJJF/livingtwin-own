@@ -230,7 +230,10 @@ def make_pick_place_env_cfg(
     # The reward switches behaviour on this flag; hiding it would make the MDP
     # non-Markov in exactly the dimension the task turns on.
     "grasped": ObservationTermCfg(func=pick_mdp.grasp_state, params={"command_name": TASK}),
-    "actions": ObservationTermCfg(func=mdp.last_action),
+    # Under the bounded convention the policy emits u and the arm receives
+    # tanh(u); the policy is told what the arm received.
+    "actions": ObservationTermCfg(
+      func=pick_mdp.bounded_last_action if bounded_actions else mdp.last_action),
   }
 
   object_state = {
@@ -592,8 +595,12 @@ def make_pick_place_env_cfg(
     # link geometry, speed and smoothness terms still discourage a dangerous
     # arm-level strike without making simulator contact part of the policy.
     # -- move smoothly and cheaply -------------------------------------------
-    "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.15),
-    "action_acc": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.08),
+    "action_rate": RewardTermCfg(
+      func=pick_mdp.action_rate_l2_bounded if bounded_actions else mdp.action_rate_l2,
+      weight=-0.15),
+    "action_acc": RewardTermCfg(
+      func=pick_mdp.action_acc_l2_bounded if bounded_actions else mdp.action_acc_l2,
+      weight=-0.08),
     "joint_vel": RewardTermCfg(
       func=mdp.joint_vel_l2, weight=-1.0e-3, params={"asset_cfg": arm()}
     ),

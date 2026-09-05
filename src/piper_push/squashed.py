@@ -1,37 +1,39 @@
-"""A Gaussian squashed through tanh: the action head is bounded, and it has a gradient everywhere.
+"""The bounded action head: a Gaussian on u, and tanh applied by the environment.
 
-Why the raw Gaussian head had to go.  The action term maps ``a`` onto a joint
-target with ``offset + scale * a`` and clips the *target*; nothing bounded
-``a``.  Every value of the gripper action below -1 is the same closed jaw, so
-a teacher drifted to -14 (results/audit_20260904/gripper_action_*.json: 95%
-of its steps outside [-1, 1]) at no cost -- ``action_rate`` is a difference,
-a constant has none -- while the same number was fed back as the ``actions``
-observation and became the label the student regressed on.  The arm did the
-same with a different excuse: its scales spanned a quarter of the safe range,
-so reaching the workspace needed |a| of 3.
+What the policy emits is ``u``, a plain Gaussian sample.  What the arm gets is
+``a = tanh(u)``, applied inside the action term (``actions.py``, ``bounded``),
+fed back to the policy as the ``actions`` observation, penalised by the
+smoothness terms, regressed on by distillation and applied again by the deploy
+mapper on the robot.  So every consumer of the action sees a bounded number,
+and PPO never has to invert the tanh:
 
-A tanh on the mean alone would not fix it: with |mu| large the gradient of
-tanh vanishes and the latch comes back as a dead unit.  The head here is the
-SAC construction -- ``u ~ N(mu, sigma)``, ``a = tanh(u)``, with the Jacobian
-``sum log(1 - a^2)`` in the log-probability -- so the policy gradient is
-exact in ``a`` and the entropy bonus, which carries ``log(1 - tanh^2(mu))``,
-pulls a saturating mean back toward the range where the action still does
-something.
+* rsl_rl stores what ``sample`` returns and hands it back to ``log_prob``.
+  That is ``u`` itself, in the float32 it was drawn in, so the density is the
+  Gaussian density of the stored sample -- no ``atanh``, no rounding.  The
+  first version of this head returned ``a`` and recovered ``u = atanh(a)``
+  from float32; next to 1.0 that is off by 0.15 at |u| = 8, five sigmas when
+  sigma is 0.03, and the PPO ratio overflowed (surrogate loss 3.7e7) and took
+  sigma to NaN in both v10 teachers.  The rule since: the density is always
+  evaluated on the stored sample, never on a value reconstructed from it.
 
-Everything is expressed in ``u`` except the number that leaves the model.
-``sample`` and ``deterministic_output`` return ``a``; the environment, the
-``actions`` observation, the distillation loss and the exported graph all
-see ``a`` in (-1, 1).  ``params`` and ``kl_divergence`` are in ``u`` space,
-where the KL between two squashed Gaussians equals the KL between the
-Gaussians (tanh is a bijection).  ``entropy`` is ``H(u) + E_u[log(1 -
-tanh^2(u))]`` with the expectation taken over a few reparameterised samples.
-The cheaper proxy that evaluates the Jacobian term at the mean is unbounded
-in sigma -- H(u) grows with log(sigma) and the term at the mean does not
-know -- and PPO's entropy bonus drove sigma up until the reported entropy
-was 12 nats for seven dimensions that cannot hold more than 7 log 2 = 4.85
-(the first 200-iteration run on the state task: reward peaked at iteration
-125 and then fell as the samples went bang-bang).  Sampled, the term falls
-like -2 E|u| and the bonus stops paying for noise the tanh throws away.
+* The importance ratio in ``a`` equals the ratio in ``u``: the Jacobian of
+  the tanh is a property of the sample, not of the parameters, and cancels
+  between old and new.  ``kl_divergence`` likewise is the Gaussian KL.
+
+* The entropy is the entropy OF ``a``, ``H(u) + E[log(1 - tanh^2 u)]``, over
+  a few reparameterised draws.  ``H(u)`` alone is unbounded in sigma and the
+  entropy bonus inflated sigma until the samples were bang-bang; the
+  Jacobian term falls like -2 E|u| and stops paying for noise the tanh throws
+  away, and its gradient pulls a saturating mean back toward the range where
+  the action still does something.
+
+Why a bounded head at all: the old term mapped ``a`` onto the target with
+``offset + scale * a`` and clipped the target; nothing bounded ``a``, and the
+arm scales spanned a quarter of the safe range.  The teachers ran the gripper
+between -28 and +14 with 95% of steps past +-1, joint 4 of the deployed v4 sat
+at a = -3.5 (results/audit_20260904/gripper_action_*.json), a constant
+saturated value cost nothing, was fed back verbatim as the ``actions``
+observation and was the label the student regressed on.
 """
 
 from __future__ import annotations
@@ -51,24 +53,13 @@ def log1m_tanh2(u: torch.Tensor) -> torch.Tensor:
   return 2.0 * (math.log(2.0) - u - F.softplus(-2.0 * u))
 
 
-# |u| beyond this is the same action to the arm (tanh(6) = 1 - 1.2e-5, a jaw
-# or joint target within 1e-5 of its clip), but not to the density: the action
-# is stored in float32, whose spacing next to 1.0 is 6e-8, so recovering u
-# from a = tanh(u) is off by 0.0025 at |u| = 6 and by 0.15 at |u| = 8.  With
-# sigma at 0.03 the second is five standard deviations of pure rounding, the
-# PPO ratio exp(logp_new - logp_old) overflowed (surrogate loss 3.7e7 in the
-# v10 teacher logs), the gradient went NaN and so did sigma.  Sampling clamps
-# u here and the density recovers u here, so the round trip is exact to the
-# float64 it is done in and the tail beyond is one consistent point.
-U_MAX = 6.0
-
-
-class SquashedGaussianDistribution(Distribution):
-  """``a = tanh(u)``, ``u ~ N(mu, sigma)``, state-independent ``sigma``.
+class PreSquashGaussianDistribution(Distribution):
+  """``u ~ N(mu, sigma)``; the environment applies ``tanh``.
 
   Constructor arguments mirror ``rsl_rl.modules.GaussianDistribution`` so the
-  runner configs differ by ``class_name`` only.  ``init_std`` is in ``u``
-  space; 0.6 about ``mu = 0`` is a spread of about 0.5 in ``a``.
+  runner configs differ by ``class_name`` only.  ``init_std`` may be one number
+  or one per output; the bounded task uses one per joint so that the initial
+  exploration in joint space matches the old convention's.
   """
 
   def __init__(
@@ -78,16 +69,10 @@ class SquashedGaussianDistribution(Distribution):
     std_range: tuple[float, float] = (0.02, 2.0),
     std_type: str = "scalar",
     learn_std: bool = True,
-    atanh_eps: float = 1e-6,
     entropy_samples: int = 4,
   ) -> None:
     super().__init__(output_dim)
     self.std_type = std_type
-    # ``init_std`` may be one number or one per dimension.  Per dimension is
-    # how the head matches the old convention's exploration in JOINT space:
-    # sigma 0.6 on a scale of 0.9 rad was 0.54 rad of noise on joint 1; the
-    # same sigma on the bounded scale of 2.62 rad would be 1.3 rad, and the
-    # first 200-iteration comparison learned at half the old speed for it.
     init = torch.as_tensor(init_std, dtype=torch.float32).reshape(-1)
     if init.numel() == 1:
       init = init.expand(output_dim).clone()
@@ -101,12 +86,9 @@ class SquashedGaussianDistribution(Distribution):
       raise ValueError(f"Unknown standard deviation type: {std_type}. Should be 'scalar' or 'log'.")
     self.std_range = [max(float(std_range[0]), 1e-6), float(std_range[1])]
     self.log_std_range = [float(np.log(self.std_range[0])), float(np.log(self.std_range[1]))]
-    self.atanh_eps = float(atanh_eps)
     self.entropy_samples = int(entropy_samples)
     self._normal: Normal | None = None
     Normal.set_default_validate_args(False)
-
-  # -- parameters -----------------------------------------------------------
 
   def _std(self) -> torch.Tensor:
     if self.std_type == "scalar":
@@ -116,16 +98,18 @@ class SquashedGaussianDistribution(Distribution):
   def update(self, mlp_output: torch.Tensor) -> None:
     self._normal = Normal(mlp_output, self._std())
 
-  # -- outputs, in a ---------------------------------------------------------
+  # -- outputs: u, always ------------------------------------------------------
 
   def sample(self) -> torch.Tensor:
-    return torch.tanh(self._normal.sample().clamp(-U_MAX, U_MAX))  # type: ignore[union-attr]
+    return self._normal.sample()  # type: ignore[union-attr]
 
   def deterministic_output(self, mlp_output: torch.Tensor) -> torch.Tensor:
-    return torch.tanh(mlp_output)
+    return mlp_output
 
   def as_deterministic_output_module(self) -> nn.Module:
-    return nn.Tanh()
+    # The exported graph emits u; the deploy mapper applies the tanh, exactly
+    # as the action term does in simulation (action_spec["squashed"]).
+    return nn.Identity()
 
   @property
   def input_dim(self) -> int:
@@ -133,32 +117,21 @@ class SquashedGaussianDistribution(Distribution):
 
   @property
   def mean(self) -> torch.Tensor:
-    """The deterministic action, ``tanh(mu)``."""
-    return torch.tanh(self._normal.mean)  # type: ignore[union-attr]
+    return self._normal.mean  # type: ignore[union-attr]
 
   @property
   def std(self) -> torch.Tensor:
-    """``sigma`` in ``u`` space; what the logs call the action std."""
     return self._normal.stddev  # type: ignore[union-attr]
 
-  # -- densities, in u ---------------------------------------------------------
-
-  def _u(self, outputs: torch.Tensor) -> torch.Tensor:
-    """``atanh`` in float64, clamped to ``+-U_MAX`` -- see the note on U_MAX."""
-    a_max = math.tanh(U_MAX)
-    return torch.atanh(outputs.double().clamp(-a_max, a_max))
+  # -- densities: on the stored u ---------------------------------------------
 
   def log_prob(self, outputs: torch.Tensor) -> torch.Tensor:
-    n = self._normal
-    u = self._u(outputs)
-    dist = Normal(n.mean.double(), n.stddev.double())  # type: ignore[union-attr]
-    lp = (dist.log_prob(u) - log1m_tanh2(u)).sum(dim=-1)
-    return lp.to(outputs.dtype)
+    return self._normal.log_prob(outputs).sum(dim=-1)  # type: ignore[union-attr]
 
   @property
   def entropy(self) -> torch.Tensor:
-    """``H(u) + E[log(1 - tanh^2 u)]``, the expectation over ``entropy_samples``
-    reparameterised draws so the gradient reaches both ``mu`` and ``sigma``."""
+    """Entropy of ``a = tanh(u)``: ``H(u) + E[log(1 - tanh^2 u)]``, the
+    expectation over ``entropy_samples`` reparameterised draws."""
     n = self._normal
     u = n.rsample((self.entropy_samples,))  # type: ignore[union-attr]
     return n.entropy().sum(dim=-1) + log1m_tanh2(u).mean(dim=0).sum(dim=-1)  # type: ignore[union-attr]

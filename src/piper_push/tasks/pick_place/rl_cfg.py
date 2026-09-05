@@ -19,12 +19,12 @@ from piper_push.distill import (
 )
 
 
-# The action head.  Since 2026-09-05 the policy emits a = tanh(u) in (-1, 1)
-# and the action term makes +-1 the safe clip (piper_push.squashed explains
-# why the unbounded head had to go).  ``bounded=False`` is the original
+# The action head.  Since 2026-09-05 the policy emits u, the action term applies
+# a = tanh(u) and makes +-1 the safe clip; PPO's density is on the stored u
+# (piper_push.squashed explains why, and why the unbounded head had to go).  ``bounded=False`` is the original
 # Gaussian head, kept for the ``-V1`` task ids and the checkpoints trained
 # under it.
-SQUASHED = "piper_push.squashed:SquashedGaussianDistribution"
+SQUASHED = "piper_push.squashed:PreSquashGaussianDistribution"
 
 # The old head explored with sigma 0.6 on PICK_ARM_SCALE; the same sigma on
 # the bounded scale (the half-span of the safe clip) is 2-4x the joint-space
@@ -206,6 +206,8 @@ def pick_place_distill_runner_cfg(
       # silently discard the remainder.
       gradient_length=16,
       learning_rate=5.0e-4,
+      # The loss on tanh(u), i.e. on what the arm receives (piper_push.distill).
+      class_name=("piper_push.distill:BoundedDistillation" if bounded else "Distillation"),
       max_grad_norm=1.0,
       loss_type="mse",
     ),

@@ -1,4 +1,4 @@
-"""The bounded action convention: a = +-1 is the safe clip, and an unbounded policy is refused."""
+"""The bounded action convention: the policy emits u, the term applies tanh, a = +-1 is the safe clip."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def test_default_ids_are_bounded_and_v1_ids_are_not():
     assert arm.use_default_offset is (not bounded)
     rl = load_rl_cfg(tid)
     head = getattr(rl, "actor", None) or rl.student
-    squashed = "Squashed" in head.distribution_cfg["class_name"]
+    squashed = "PreSquash" in head.distribution_cfg["class_name"]
     assert squashed is bounded, tid
     if bounded:
       assert arm.scale == piper.BOUNDED_ARM_SCALE and arm.offset == piper.BOUNDED_ARM_OFFSET
@@ -53,7 +53,7 @@ def test_default_ids_are_bounded_and_v1_ids_are_not():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="builds a MuJoCo-Warp environment")
-def test_bounded_term_refuses_an_unbounded_action_and_maps_unit_to_the_clip():
+def test_bounded_term_squashes_u_feeds_back_tanh_and_refuses_an_unbounded_policy():
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.tasks.registry import load_env_cfg
   cfg = load_env_cfg("Mjlab-Pick-Place-PiperX", play=True)
@@ -61,20 +61,51 @@ def test_bounded_term_refuses_an_unbounded_action_and_maps_unit_to_the_clip():
   env = ManagerBasedRlEnv(cfg=cfg, device="cuda:0", render_mode=None)
   try:
     env.reset()
-    a = torch.zeros(2, 7, device="cuda:0")
-    a[:, 6] = 1.0
-    env.step(a)  # in range: fine
+    u = torch.zeros(2, 7, device="cuda:0")
+    u[:, 0] = 3.0    # legitimate: deep in saturation, tanh(3) = 0.995
+    env.step(u)
     term = env.action_manager.get_term("arm")
-    # +-1 on the arm is the safe clip, before the slew limiter has its say.
-    hi = torch.ones(2, 6, device="cuda:0")
-    target = hi * term.scale + term.offset
-    assert torch.allclose(target[0], torch.tensor([b for _, b in piper.SAFE_TARGET_CLIP.values()],
-                                                  device="cuda:0"), atol=1e-6)
-    a[:, 0] = 3.0
+    # what the term saw is tanh(u), and +-1 of it is the safe clip
+    assert torch.allclose(term.raw_action[:, 0], torch.tanh(u[:, 0]))
+    hi = torch.ones(2, 6, device="cuda:0") * term.scale + term.offset
+    assert torch.allclose(hi[0], torch.tensor([b for _, b in piper.SAFE_TARGET_CLIP.values()],
+                                              device="cuda:0"), atol=1e-6)
+    # the policy is told tanh(u), not u
+    from piper_push.tasks.pick_place import mdp as pick_mdp
+    fb = pick_mdp.bounded_last_action(env)
+    assert torch.allclose(fb, torch.tanh(u)) and fb.abs().max() < 1.0
+    assert torch.isfinite(pick_mdp.action_rate_l2_bounded(env)).all()
+    assert torch.isfinite(pick_mdp.action_acc_l2_bounded(env)).all()
+    u[:, 0] = 20.0   # an unbounded-convention policy's first step
     with pytest.raises(ValueError, match="-V1"):
-      env.step(a)
+      env.step(u)
   finally:
     env.close()
+
+
+def test_bounded_smoothness_terms_ignore_changes_deep_in_saturation():
+  from types import SimpleNamespace
+  from piper_push.tasks.pick_place import mdp as pick_mdp
+  am = SimpleNamespace(action=torch.tensor([[12.0, 0.0]]), prev_action=torch.tensor([[6.0, 0.0]]),
+                       prev_prev_action=torch.tensor([[3.0, 0.5]]))
+  env = SimpleNamespace(action_manager=am)
+  # 12 vs 6 vs 3 are the same arm target; the old terms charged 36 (rate) and
+  # 9 (acceleration) for the sequence.
+  assert pick_mdp.action_rate_l2_bounded(env).item() < 1e-4
+  assert pick_mdp.action_acc_l2_bounded(env).item() < 0.25
+  assert torch.allclose(pick_mdp.bounded_last_action(env), torch.tanh(am.action))
+
+
+def test_bounded_distillation_regresses_on_tanh():
+  from piper_push.distill import BoundedDistillation
+  obj = BoundedDistillation.__new__(BoundedDistillation)
+  obj.loss_fn = torch.nn.functional.mse_loss
+  # emulate the tail of __init__: wrap whatever loss the base chose
+  base = obj.loss_fn
+  obj.loss_fn = lambda s, t: base(torch.tanh(s), torch.tanh(t))
+  s, t = torch.tensor([[8.0]]), torch.tensor([[4.0]])
+  assert obj.loss_fn(s, t).item() < 1e-5         # both saturated: same action
+  assert obj.loss_fn(torch.zeros(1, 1), t).item() > 0.9
 
 
 def test_deploy_mapper_reads_the_convention_from_the_spec():
@@ -96,14 +127,20 @@ def test_deploy_mapper_reads_the_convention_from_the_spec():
 
   bounded = dict(legacy, action_spec=piper.action_spec("bounded"))
   m2 = robot.ActionMapper(bounded)
-  assert m2.convention == "bounded"
+  assert m2.convention == "bounded" and m2.squashed
   m2.reset(np.zeros(7))
   m2.max_step = np.full(7, 1e9)  # take the slew limiter out of the picture
-  hi = m2(np.ones(7))
-  assert hi[:6] == pytest.approx([b for _, b in piper.SAFE_TARGET_CLIP.values()])
-  assert hi[6] == pytest.approx(piper.GRIPPER_OPEN_M)
-  lo = m2(-np.ones(7))
-  assert lo[:6] == pytest.approx([a for a, _ in piper.SAFE_TARGET_CLIP.values()])
+  # the policy emits u; the mapper squashes it, so a large u is the clip edge
+  hi = m2(np.full(7, 20.0))
+  assert hi[:6] == pytest.approx([b for _, b in piper.SAFE_TARGET_CLIP.values()], abs=1e-6)
+  assert hi[6] == pytest.approx(piper.GRIPPER_OPEN_M, abs=1e-6)
+  lo = m2(np.full(7, -20.0))
+  assert lo[:6] == pytest.approx([a for a, _ in piper.SAFE_TARGET_CLIP.values()], abs=1e-6)
+  mid = m2(np.zeros(7))
+  assert mid[:6] == pytest.approx([(a + b) / 2 for a, b in piper.SAFE_TARGET_CLIP.values()])
+  one = m2(np.ones(7))   # u = 1 is tanh(1) = 0.76 of the half-span, not the edge
+  assert one[0] == pytest.approx(np.tanh(1.0) * piper.BOUNDED_ARM_SCALE["joint1"] + piper.BOUNDED_ARM_OFFSET["joint1"])
+  assert not m1.squashed
 
   bad = dict(legacy, action_spec=dict(piper.action_spec("bounded"), joints=["x"] * 7))
   with pytest.raises(ValueError, match="action_spec joints"):
@@ -116,8 +153,6 @@ def test_bounded_initial_sigma_matches_the_old_joint_space_noise():
     assert s * piper.BOUNDED_ARM_SCALE[j] == pytest.approx(0.6 * piper.PICK_ARM_SCALE[j])
   assert BOUNDED_INIT_STD[6] == pytest.approx(0.6)
   assert bounded_init_std(0.15 / 0.6)[6] == pytest.approx(0.15)
-  from piper_push.squashed import SquashedGaussianDistribution
-  d = SquashedGaussianDistribution(7, init_std=list(BOUNDED_INIT_STD))
+  from piper_push.squashed import PreSquashGaussianDistribution
+  d = PreSquashGaussianDistribution(7, init_std=list(BOUNDED_INIT_STD))
   assert torch.allclose(d.std_param, torch.tensor(BOUNDED_INIT_STD))
-  with pytest.raises(ValueError):
-    SquashedGaussianDistribution(7, init_std=[0.1, 0.2])

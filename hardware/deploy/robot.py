@@ -125,7 +125,8 @@ class ActionMapper:
     # The convention the policy was trained under, from the spec written next
     # to it.  Exports before 2026-09-05 carry no "action_spec": that is the v1
     # convention (PICK_ARM_SCALE about the default pose, nothing bounding a).
-    # Exports since carry the bounded one (a = +-1 is the safe clip, tanh head);
+    # Exports since carry the bounded one (a = +-1 is the safe clip; the policy
+    # emits u and tanh is applied here);
     # driving either with the other's constants is driving a different robot.
     aspec = spec.get("action_spec")
     if aspec is None:
@@ -133,6 +134,9 @@ class ActionMapper:
     if list(aspec["joints"]) != list(ARM_JOINTS) + [GRIPPER_JOINT]:
       raise ValueError(f"action_spec joints {aspec['joints']} are not {list(ARM_JOINTS) + [GRIPPER_JOINT]}")
     self.convention = str(aspec["convention"])
+    # The bounded convention's policy emits u; the simulator's action term
+    # applied tanh, so the mapper does too, before scale and offset.
+    self.squashed = bool(aspec.get("squashed", False))
     self.scale = np.asarray(aspec["scale"], dtype=np.float64)
     self.offset = np.asarray(aspec["offset"], dtype=np.float64)
     lo, hi = [], []
@@ -188,6 +192,8 @@ class ActionMapper:
       raise ValueError(f"expected 7 actions, got {a.size}")
     if self.clip_actions is not None:
       a = np.clip(a, -self.clip_actions, self.clip_actions)
+    if self.squashed:
+      a = np.tanh(a)
     target = np.clip(a * self.scale + self.offset, self.lo, self.hi)
     delta = target - self.previous
     if self.accel_limit is not None:

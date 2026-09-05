@@ -217,9 +217,9 @@ def main() -> int:
       # Under the bounded convention the std lives in tanh-input space and is
       # per joint; --init-std is read as the old convention's number and
       # scaled the same way the initial sigma was (rl_cfg.bounded_init_std).
-      from piper_push.squashed import SquashedGaussianDistribution
+      from piper_push.squashed import PreSquashGaussianDistribution
       from piper_push.tasks.pick_place.rl_cfg import bounded_init_std
-      if isinstance(actor.distribution, SquashedGaussianDistribution):
+      if isinstance(actor.distribution, PreSquashGaussianDistribution):
         target = torch.tensor(bounded_init_std(a.init_std / 0.6))
       else:
         target = torch.tensor(float(a.init_std))

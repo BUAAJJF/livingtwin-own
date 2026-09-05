@@ -52,7 +52,7 @@ The reward-free, decision-aware sim-to-real calibration research track (WM0/WM1/
 - `src/piper_push/tasks/pick_place/robust_cfg.py`: versioned broad D455 domain randomization (`HEAVY_DR_PROFILE`, currently named `d455_heavy_dr_v2`).
 - `src/piper_push/tasks/pick_place/__init__.py`: all mjlab task registrations.
 - `src/piper_push/robot.py`, `objects.py`, `shapes.py`, `camera.py`: robot/scene geometry, object distribution, camera model, and cadence.
-- `src/piper_push/actions.py`: policy action scaling, clipping, slew limiting, latency/hold/response/deadband plant hooks.  Since 2026-09-05 the convention is bounded: a = ±1 is the safe clip (`robot.BOUNDED_ARM_SCALE/OFFSET`) and the head is `piper_push.squashed.SquashedGaussianDistribution`; pre-2026-09-05 checkpoints evaluate only on the `-V1` task ids.
+- `src/piper_push/actions.py`: policy action scaling, clipping, slew limiting, latency/hold/response/deadband plant hooks.  Since 2026-09-05 the convention is bounded: the policy emits u (`piper_push.squashed.PreSquashGaussianDistribution`), the action term applies a = tanh(u), and a = ±1 is the safe clip (`robot.BOUNDED_ARM_SCALE/OFFSET`); PPO's density is on the stored u, never atanh of a float32 a; pre-2026-09-05 checkpoints evaluate only on the `-V1` task ids.
 - `src/piper_push/depth_noise.py`, `d455_noise.py`: active-stereo depth corruption and fitted D455 parameters.
 - `src/piper_push/layout.py`: calibrated layout convention, including the requested +90-degree workspace/goal rotation.
 - `src/piper_push/models.py`, `distill.py`, `checkpoints.py`: recurrent visual model, distillation runner, and checkpoint conversion.

@@ -17,7 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+import torch
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlModelCfg
+from rsl_rl.algorithms import Distillation
 
 
 @dataclass
@@ -99,3 +101,23 @@ class PickPlaceDistillationRunner(MjlabOnPolicyRunner):
         "state policy's checkpoint with --teacher."
       )
     super().learn(num_learning_iterations, init_at_random_ep_len)
+
+
+class BoundedDistillation(Distillation):
+  """rsl_rl's Distillation with the behaviour-cloning loss taken on ``tanh``.
+
+  Under the bounded convention both networks emit the pre-squash ``u`` and the
+  arm receives ``tanh(u)``.  Regressing on ``u`` would spend the student's
+  capacity matching how far past saturation the teacher sits, which is no
+  behaviour at all -- the old convention's failure mode in new clothes.  The
+  loss is therefore on what the arm receives.
+  """
+
+  def __init__(self, *args, **kwargs) -> None:
+    super().__init__(*args, **kwargs)
+    base = self.loss_fn
+
+    def on_tanh(student_out: torch.Tensor, teacher_out: torch.Tensor) -> torch.Tensor:
+      return base(torch.tanh(student_out), torch.tanh(teacher_out))
+
+    self.loss_fn = on_tanh

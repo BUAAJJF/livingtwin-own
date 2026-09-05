@@ -85,9 +85,12 @@ them on the research branch.
 
 ## Task
 
-> **Action convention (2026-09-05).** The policy head is a tanh-squashed
-> Gaussian (`piper_push.squashed`) and the action term makes a = ±1 the safe
-> target clip (`piper_push.robot.BOUNDED_ARM_SCALE/OFFSET`).  Before that,
+> **Action convention (2026-09-05).** The policy emits u from a Gaussian head
+> (`piper_push.squashed`); the action term applies a = tanh(u) and makes a = ±1
+> the safe target clip (`piper_push.robot.BOUNDED_ARM_SCALE/OFFSET`).  PPO's
+> density is evaluated on the stored u and never on a value recovered from a;
+> the `actions` observation, the smoothness penalties, the distillation loss
+> and the deploy mapper all work on tanh(u).  Before that,
 > nothing bounded a and the arm scales spanned a quarter of the clip: the
 > teachers ran the gripper at −28 and joint 4 at −3.5 (`results/audit_20260904/
 > gripper_action_*.json`), the smoothness penalties spent a third of their
@@ -104,7 +107,7 @@ them on the research branch.
 |---|---|
 | Actor observation | proprioception (joint positions and velocities, end-effector pose, gripper opening, pad contacts, gripper servo error, last action) + the 3-channel depth image |
 | Critic observation | the above, uncorrupted, plus object pose/velocity/shape and privileged physics — training only |
-| Action | 6 joint position targets + gripper, from a tanh-squashed Gaussian head: a = ±1 is the safe target clip on every joint and 0–50 mm on the jaw. Rate-limited to 0.62 × the safety-shell trip speed and interpolated across physics substeps |
+| Action | 6 joint position targets + gripper, the policy emits u, the action term applies tanh: a = ±1 is the safe target clip on every joint and 0–50 mm on the jaw. Rate-limited to 0.62 × the safety-shell trip speed and interpolated across physics substeps |
 | Objects | five shape classes, 25–45 mm wide, 24–90 mm tall, 50–400 g, friction 0.4–1.0, redrawn **per object** |
 | Episode | fixed length; success never ends it, so throughput is rewarded directly |
 

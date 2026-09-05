@@ -558,9 +558,9 @@ GRIPPER_OFFSET = GRIPPER_OPEN_M / 2.0
 GRIPPER_CLIP: dict[str, tuple[float, float]] = {"gripper_joint1": (0.0, GRIPPER_OPEN_M)}
 
 # The bounded convention (2026-09-05): a = +-1 IS the safe target clip.  The
-# policy head is a tanh-squashed Gaussian (piper_push.squashed), so a never
-# leaves (-1, 1), and there is no target the policy can name that the clip
-# would have to cut.  PICK_ARM_SCALE above is the convention every checkpoint
+# policy emits u from a Gaussian head (piper_push.squashed) and the action
+# term applies a = tanh(u), so a never leaves (-1, 1) and there is no target
+# the policy can name that the clip would have to cut.  PICK_ARM_SCALE above is the convention every checkpoint
 # before that date was trained under; results/audit_20260904 measured those
 # policies using |a| of 3-5 on the arm and up to 28 on the gripper, because
 # PICK_ARM_SCALE spans a quarter of the clip and nothing bounded a.  The

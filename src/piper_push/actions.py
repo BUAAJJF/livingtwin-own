@@ -172,11 +172,17 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     velocity_limit: dict[str, float] | None = None
 
     bounded: bool = False
-    """The task's convention is that ``a`` lies in [-1, 1] (a tanh head).  A
-    policy trained under the old unbounded convention produces |a| of 3-28 on
-    its first step; rather than drive a different robot silently, the term
-    raises.  Checked on every call for the first 200 control steps and every
-    100th after, because the check is a device sync."""
+    """The bounded convention (2026-09-05): the policy emits ``u`` and this term
+    applies ``a = tanh(u)`` before scale, offset and clip, so a = +-1 is the
+    clip and the policy can name no target beyond it.  The tanh lives HERE and
+    not in the policy head so that PPO's storage holds ``u`` and its density is
+    evaluated on the stored sample (see piper_push.squashed).
+
+    A policy trained under the old unbounded convention emits |u| of 3-28 on
+    its first steps; a pre-squash Gaussian with the squashed entropy term does
+    not reach 10.  Above 10 the term raises rather than drive a different
+    robot silently.  Checked every call for the first 200 control steps and
+    every 100th after, because the check is a device sync."""
 
     slew_scale: float = 1.0
     """Multiplies ``velocity_limit``.  1.0 is the trained command path; below
@@ -410,11 +416,12 @@ class RateLimitedJointPositionAction(JointPositionAction):
             self._bounded_calls += 1
             if self._bounded_calls <= 200 or self._bounded_calls % 100 == 0:
                 worst = actions.detach().abs().max()
-                if bool(worst > 1.0 + 1e-3):
+                if bool(worst > 10.0):
                     raise ValueError(
-                        f"action {float(worst):.2f} outside [-1, 1] on a bounded task: "
-                        "this policy was trained under the pre-2026-09-05 unbounded "
-                        "convention; evaluate it on the matching '-V1' task id.")
+                        f"pre-squash action |u| = {float(worst):.1f} on a bounded task: "
+                        "this looks like a policy trained under the pre-2026-09-05 "
+                        "unbounded convention; evaluate it on the matching '-V1' task id.")
+            actions = torch.tanh(actions)
         super().process_actions(actions)
         target = self._processed_actions
 

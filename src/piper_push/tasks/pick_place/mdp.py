@@ -1836,3 +1836,30 @@ def reset_arm_valid_posture(
 
   final = torch.where(accepted.unsqueeze(-1), chosen, default)
   robot.write_joint_state_to_sim(final, zero, joint_ids=joint_ids, env_ids=env_ids)
+
+
+# --- the bounded action convention: what the policy emits is u, what everything
+# else should see is a = tanh(u) -------------------------------------------------
+
+
+def bounded_last_action(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """The previous action as the arm received it, ``tanh(u)``.
+
+  ``mdp.last_action`` returns the manager's raw action, which under the bounded
+  convention is the pre-squash ``u``; feeding that back would hand the policy
+  an unbounded channel again (the old convention's raw -14 was exactly this).
+  """
+  return torch.tanh(env.action_manager.action)
+
+
+def action_rate_l2_bounded(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """``action_rate_l2`` on ``tanh(u)``: a change deep in saturation is no
+  change to the arm and is not charged as one."""
+  am = env.action_manager
+  return torch.sum(torch.square(torch.tanh(am.action) - torch.tanh(am.prev_action)), dim=1)
+
+
+def action_acc_l2_bounded(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  am = env.action_manager
+  a, p, pp = torch.tanh(am.action), torch.tanh(am.prev_action), torch.tanh(am.prev_prev_action)
+  return torch.sum(torch.square(a - 2.0 * p + pp), dim=1)
