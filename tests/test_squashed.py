@@ -85,14 +85,14 @@ def test_entropy_is_bounded_by_the_box_and_stops_paying_for_noise():
   torch.manual_seed(0)
   ents = {}
   for std in (0.1, 0.6, 2.0, 5.0):
-    d = SquashedGaussianDistribution(7, init_std=std, entropy_samples=512)
+    d = SquashedGaussianDistribution(7, init_std=std, std_range=(1e-3, 10.0), entropy_samples=512)
     d.update(torch.zeros(1, 7))
     ents[std] = d.entropy.detach().item()
   assert all(e < 7 * math.log(2.0) + 0.1 for e in ents.values()), ents
   assert ents[0.6] > ents[0.1]
   assert ents[5.0] < ents[2.0], ents  # more noise in u is LESS entropy in a
   # And sigma gets a gradient from it, so the bonus can push sigma down.
-  d = SquashedGaussianDistribution(7, init_std=3.0, entropy_samples=64)
+  d = SquashedGaussianDistribution(7, init_std=3.0, std_range=(1e-3, 10.0), entropy_samples=64)
   d.update(torch.zeros(1, 7))
   (g,) = torch.autograd.grad(d.entropy.sum(), d.std_param)
   assert (g < 0).all(), g
@@ -127,3 +127,33 @@ def test_rsl_rl_model_uses_the_head_through_its_class_name():
   assert torch.isfinite(m.get_output_log_prob(a)).all()
   assert torch.isfinite(m.output_entropy).all()
   assert m(obs).abs().max() < 1.0
+
+
+def test_small_sigma_near_saturation_keeps_the_ratio_finite():
+  """The v10 teacher crash: sigma 0.03, mean near 7, actions stored in
+  float32.  Recovering u from the stored a was off by more than sigma, the
+  PPO ratio overflowed and sigma went NaN.  Old and new log-probs of the
+  same stored action must now differ by a finite, moderate amount."""
+  torch.manual_seed(0)
+  d = SquashedGaussianDistribution(7, init_std=0.03)
+  mu_old = torch.full((256, 7), 7.0)
+  d.update(mu_old)
+  a = d.sample().float()                    # what rsl_rl stores
+  assert torch.isfinite(a).all() and a.abs().max() < 1.0
+  lp_old = d.log_prob(a)
+  d.update(mu_old + 0.01)                   # one KL-limited step later
+  lp_new = d.log_prob(a)
+  ratio = torch.exp(lp_new - lp_old)
+  assert torch.isfinite(lp_old).all() and torch.isfinite(lp_new).all()
+  assert torch.isfinite(ratio).all() and ratio.max() < 10.0, ratio.max()
+  # and the gradient that reaches sigma is finite
+  d2 = SquashedGaussianDistribution(7, init_std=0.03)
+  d2.update(mu_old + 0.01)
+  (g,) = torch.autograd.grad(d2.log_prob(a).sum(), d2.std_param)
+  assert torch.isfinite(g).all()
+
+
+def test_sigma_has_a_floor_below_which_the_density_would_lie():
+  d = SquashedGaussianDistribution(3, init_std=1e-4)
+  d.update(torch.zeros(1, 3))
+  assert (d.std >= 0.02).all()

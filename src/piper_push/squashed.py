@@ -51,6 +51,18 @@ def log1m_tanh2(u: torch.Tensor) -> torch.Tensor:
   return 2.0 * (math.log(2.0) - u - F.softplus(-2.0 * u))
 
 
+# |u| beyond this is the same action to the arm (tanh(6) = 1 - 1.2e-5, a jaw
+# or joint target within 1e-5 of its clip), but not to the density: the action
+# is stored in float32, whose spacing next to 1.0 is 6e-8, so recovering u
+# from a = tanh(u) is off by 0.0025 at |u| = 6 and by 0.15 at |u| = 8.  With
+# sigma at 0.03 the second is five standard deviations of pure rounding, the
+# PPO ratio exp(logp_new - logp_old) overflowed (surrogate loss 3.7e7 in the
+# v10 teacher logs), the gradient went NaN and so did sigma.  Sampling clamps
+# u here and the density recovers u here, so the round trip is exact to the
+# float64 it is done in and the tail beyond is one consistent point.
+U_MAX = 6.0
+
+
 class SquashedGaussianDistribution(Distribution):
   """``a = tanh(u)``, ``u ~ N(mu, sigma)``, state-independent ``sigma``.
 
@@ -63,7 +75,7 @@ class SquashedGaussianDistribution(Distribution):
     self,
     output_dim: int,
     init_std: float | list[float] | tuple[float, ...] = 0.6,
-    std_range: tuple[float, float] = (1e-6, 1e6),
+    std_range: tuple[float, float] = (0.02, 2.0),
     std_type: str = "scalar",
     learn_std: bool = True,
     atanh_eps: float = 1e-6,
@@ -107,7 +119,7 @@ class SquashedGaussianDistribution(Distribution):
   # -- outputs, in a ---------------------------------------------------------
 
   def sample(self) -> torch.Tensor:
-    return torch.tanh(self._normal.sample())  # type: ignore[union-attr]
+    return torch.tanh(self._normal.sample().clamp(-U_MAX, U_MAX))  # type: ignore[union-attr]
 
   def deterministic_output(self, mlp_output: torch.Tensor) -> torch.Tensor:
     return torch.tanh(mlp_output)
@@ -132,11 +144,16 @@ class SquashedGaussianDistribution(Distribution):
   # -- densities, in u ---------------------------------------------------------
 
   def _u(self, outputs: torch.Tensor) -> torch.Tensor:
-    return torch.atanh(outputs.clamp(-1.0 + self.atanh_eps, 1.0 - self.atanh_eps))
+    """``atanh`` in float64, clamped to ``+-U_MAX`` -- see the note on U_MAX."""
+    a_max = math.tanh(U_MAX)
+    return torch.atanh(outputs.double().clamp(-a_max, a_max))
 
   def log_prob(self, outputs: torch.Tensor) -> torch.Tensor:
+    n = self._normal
     u = self._u(outputs)
-    return (self._normal.log_prob(u) - log1m_tanh2(u)).sum(dim=-1)  # type: ignore[union-attr]
+    dist = Normal(n.mean.double(), n.stddev.double())  # type: ignore[union-attr]
+    lp = (dist.log_prob(u) - log1m_tanh2(u)).sum(dim=-1)
+    return lp.to(outputs.dtype)
 
   @property
   def entropy(self) -> torch.Tensor:
