@@ -343,3 +343,7 @@ register_mjlab_task(
                                    entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
   runner_cls=PickPlaceOnPolicyRunner,
 )
+
+
+# The point-cloud routes (branch yf/pc): registered by the module on import.
+from . import pc_cfg  # noqa: E402,F401

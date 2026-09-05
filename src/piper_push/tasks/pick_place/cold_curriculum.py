@@ -227,23 +227,32 @@ class cold_start_curriculum:
 
   def __init__(self, cfg, env) -> None:
     self.sched = schedule(bool(cfg.params.get("sight", True)), approach=bool(cfg.params.get("approach", False)))
-    self.stage = 0
+    # A continuation (yf/pc, 2026-09-06) resumes AT the stage the checkpoint had
+    # reached instead of re-opening every gate from nominal DR: the stage's own
+    # weights and DR level apply from the first step, the blend is flat, and the
+    # remaining gates (if any) work as they always did.  Unset means stage 0.
+    start = int(os.environ.get("PIPER_COLD_START_STAGE", "0"))
+    if not 0 <= start < len(self.sched["stages"]):
+      raise ValueError(f"PIPER_COLD_START_STAGE={start} outside 0..{len(self.sched['stages']) - 1}")
+    self.stage = start
     self.stage_entered_it = 0
     self.persist = 0
     self.iteration = -1
-    self.full_dr_entered_it: int | None = None
+    self.full_dr_entered_it: int | None = 0 if start == len(self.sched["stages"]) - 1 else None
     self.window = collections.deque(maxlen=self.sched["window_iterations"])
     self._acc = {"episodes": 0.0, "placed": 0.0, "grasp_attempts": 0.0, "grasped_at_end": 0.0,
                  "over_speed": 0.0, "object_lost": 0.0}
-    self._prev_targets = self._targets(0)
+    self._prev_targets = self._targets(start)
     self._guard = self.sched.get("throughput_guard")
     self._placed_at_entry = 0.0
-    self._penalty_f = 0.0
+    self._penalty_f = 1.0 if start > 0 else 0.0
     self._last_log_it = -1000
     self.log_path = os.environ.get("PIPER_CURRICULUM_LOG")
-    apply_weights(env, self._targets(0)["weights"])
-    apply_dr_level(env, 0.0, 0.0)
-    self._say(env, "start", extra={"stage": self.sched["stages"][0]["name"]})
+    first = self._targets(start)
+    apply_weights(env, first["weights"])
+    apply_dr_level(env, first["dr"]["actuator"], first["dr"]["scene"])
+    self._current_dr = {k: round(float(v), 3) for k, v in first["dr"].items()}
+    self._say(env, "start", extra={"stage": self.sched["stages"][start]["name"], "start_stage": start})
 
   # -- helpers --
   def _targets(self, stage: int) -> dict[str, Any]:
