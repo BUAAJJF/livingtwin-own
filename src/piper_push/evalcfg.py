@@ -60,7 +60,7 @@ ENV_KNOBS: tuple[str, ...] = (
 
 # Environment variables the code reads that are NOT domain knobs (telemetry
 # sinks, the legacy-loading flag); listed so the knob audit can tell them apart.
-NON_DOMAIN_ENV: tuple[str, ...] = ("PIPER_U_TELEMETRY", "PIPER_U_TELEMETRY_TAG", "PIPER_ALLOW_LEGACY_ACTION_API")
+NON_DOMAIN_ENV: tuple[str, ...] = ("PIPER_U_TELEMETRY", "PIPER_U_TELEMETRY_TAG", "PIPER_ALLOW_LEGACY_ACTION_API", "PIPER_CURRICULUM_LOG")
 
 SENSOR_CHOICES: tuple[str, ...] = ("clean", "measured", "task")
 

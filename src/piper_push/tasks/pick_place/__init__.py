@@ -11,6 +11,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from .env_cfg import make_pick_place_env_cfg
 from .robust_cfg import make_robust_env_cfg
+from .cold_cfg import make_cold_env_cfg
 from piper_push.distill import PickPlaceDistillationRunner
 from piper_push.runners import PickPlaceOnPolicyRunner
 
@@ -298,4 +299,25 @@ register_mjlab_task(
   rl_cfg=pick_place_distill_runner_cfg(
     experiment_name="piperx_pick_place_distill_robust", bounded=False),
   runner_cls=PickPlaceDistillationRunner,
+)
+
+
+# ---------------------------------------------------------------------------
+# Cold-start teachers (2026-09-05): the -Robust task under a capability-gated
+# curriculum (cold_curriculum.py).  Training only; play mode is the full
+# -Robust domain, so a checkpoint from here is evaluated on -Robust.
+# ---------------------------------------------------------------------------
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold",
+  env_cfg=make_cold_env_cfg(sight=True),
+  play_env_cfg=make_cold_env_cfg(sight=True, play=True),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold", max_iterations=9000),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight",
+  env_cfg=make_cold_env_cfg(sight=False),
+  play_env_cfg=make_cold_env_cfg(sight=False, play=True),
+  rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold", max_iterations=9000),
+  runner_cls=PickPlaceOnPolicyRunner,
 )
