@@ -1863,3 +1863,79 @@ def action_acc_l2_bounded(env: "ManagerBasedRlEnv") -> torch.Tensor:
   am = env.action_manager
   a, p, pp = torch.tanh(am.action), torch.tanh(am.prev_action), torch.tanh(am.prev_prev_action)
   return torch.sum(torch.square(a - 2.0 * p + pp), dim=1)
+
+
+# --- approach behaviour (v10d): come in slowly, come in from above ----------------
+#
+# Two things the sight viewer showed on the v10c teachers: the hand arrives at
+# speed and bats the object away, and the jaws arrive horizontal, so on the rig
+# the wrist body reaches the object before the pads do and pushes it.  Both are
+# priced here as what they are -- a speed and an orientation -- not by proxy.
+
+
+def approach_speed(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  asset_cfg: SceneEntityCfg,
+  near_m: float = 0.15,
+  stop_m: float = 0.03,
+  v_near_m_s: float = 0.10,
+  v_far_m_s: float = 0.60,
+) -> torch.Tensor:
+  """Grasp-site speed above an allowance that shrinks as the hand nears the object.
+
+  The allowance is ``v_far`` at ``near_m`` and beyond, falls linearly to
+  ``v_near`` at ``stop_m``, and holds there; the penalty is the excess, in
+  m/s, while the object is not yet held.  Nothing is charged for moving fast
+  across the table, only for arriving fast.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  robot: Entity = env.scene[asset_cfg.name]
+  site = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
+  speed = torch.linalg.norm(robot.data.site_lin_vel_w[:, asset_cfg.site_ids].squeeze(1), dim=-1)
+  d = torch.linalg.norm(cmd.target_pos_w() - site, dim=-1)
+  frac = ((d - stop_m) / max(near_m - stop_m, 1e-6)).clamp(0.0, 1.0)
+  allow = v_near_m_s + (v_far_m_s - v_near_m_s) * frac
+  return (speed - allow).clamp_min(0.0) * (~cmd.grasped).float()
+
+
+def object_disturbed(
+  env: "ManagerBasedRlEnv", command_name: str, v_floor_m_s: float = 0.02,
+) -> torch.Tensor:
+  """The object's speed while nobody is holding it: it should be at rest until grasped.
+
+  This is the knock itself, measured on the thing that was knocked, so it
+  fires whatever part of the hand did it -- pads, wrist, forearm -- which is
+  the case ``premature_touch`` (pads and palm only) cannot see.  A small floor
+  keeps settling and physics jitter free.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  speed = torch.linalg.norm(cmd.target_lin_vel_w(), dim=-1)
+  return (speed - v_floor_m_s).clamp_min(0.0) * (~cmd.grasped).float()
+
+
+def top_down_grasp(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  asset_cfg: SceneEntityCfg,
+  near_m: float = 0.20,
+) -> torch.Tensor:
+  """How vertical the approach axis is, near the object and while holding it.
+
+  The grasp site's local +z is the direction the fingers extend (the pads sit
+  ``FINGERTIP_DROP_M`` past the site along it).  Pointing it at the table --
+  world -z -- means the pads reach the object before the wrist body does; the
+  horizontal grasp the v10c teachers converged to puts the wrist at object
+  height, and on the rig that is what shoves the object away.  1 when
+  vertical, 0 when horizontal or worse, paid within ``near_m`` and while
+  grasped so the posture is held through the lift.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  robot: Entity = env.scene[asset_cfg.name]
+  q = robot.data.site_quat_w[:, asset_cfg.site_ids].squeeze(1)          # (B, 4) wxyz
+  w, x, y, z = q.unbind(-1)
+  # third column of R(q): world direction of the site's local +z
+  down = -(2.0 * (w * w + z * z) - 1.0)                                    # -R_zz
+  site = robot.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
+  near = torch.linalg.norm(cmd.target_pos_w() - site, dim=-1) < near_m
+  return down.clamp(0.0, 1.0) * (near | cmd.grasped).float()

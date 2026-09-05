@@ -59,8 +59,38 @@ def _weights(guidance_scale: float, action_rate: float, action_acc: float, prema
   return w
 
 
-def schedule(sight: bool) -> dict[str, Any]:
-  """The whole curriculum as data, so it can be written next to the run."""
+# v10d: the approach terms (mdp.approach_speed, object_disturbed, top_down_grasp),
+# per stage.  The two penalties start small and reach full weight with the
+# other style penalties; the top-down posture reward is guidance that is NOT
+# decayed, because it is the deployment posture and not a hint on the way to
+# one.  Weights: approach_speed is per m/s of excess, object_disturbed per m/s
+# of object speed, top_down_grasp in [0, 1].
+APPROACH_TERMS = {
+  "reach":  {"approach_speed": -0.3, "object_disturbed": -0.5, "top_down_grasp": 0.3},
+  "grasp":  {"approach_speed": -0.6, "object_disturbed": -1.0, "top_down_grasp": 0.3},
+  "place":  {"approach_speed": -1.0, "object_disturbed": -1.5, "top_down_grasp": 0.3},
+  "robust": {"approach_speed": -1.5, "object_disturbed": -2.0, "top_down_grasp": 0.3},
+}
+
+
+def schedule(sight: bool, approach: bool = False) -> dict[str, Any]:
+  """The whole curriculum as data, so it can be written next to the run.
+
+  ``approach=True`` is the v10d variant: the same stages and gates with the
+  approach-speed, object-disturbance and top-down terms added.
+  """
+  sched = _schedule(sight)
+  if approach:
+    sched["version"] = "v10d-1"
+    for st in sched["stages"]:
+      st["weights"].update(APPROACH_TERMS[st["name"]])
+    sched["notes"]["approach_terms"] = ("approach_speed: grasp-site speed above an allowance falling from 0.6 m/s at "
+                                        "15 cm to 0.1 m/s at 3 cm; object_disturbed: object speed while not held; "
+                                        "top_down_grasp: verticality of the approach axis within 20 cm and while held")
+  return sched
+
+
+def _schedule(sight: bool) -> dict[str, Any]:
   s = 1.0 if sight else 0.0
   return {
     "version": "v10c-1",
@@ -172,7 +202,7 @@ class cold_start_curriculum:
   mjlab logs under ``Curriculum/cold_start/*``."""
 
   def __init__(self, cfg, env) -> None:
-    self.sched = schedule(bool(cfg.params.get("sight", True)))
+    self.sched = schedule(bool(cfg.params.get("sight", True)), approach=bool(cfg.params.get("approach", False)))
     self.stage = 0
     self.stage_entered_it = 0
     self.persist = 0
@@ -239,7 +269,7 @@ class cold_start_curriculum:
   _current_dr: dict[str, float] = {"actuator": 0.0, "scene": 0.0, "vision": 0.0}
 
   # -- the per-reset call --
-  def __call__(self, env, env_ids: torch.Tensor, sight: bool = True) -> dict[str, torch.Tensor]:
+  def __call__(self, env, env_ids: torch.Tensor, sight: bool = True, approach: bool = False) -> dict[str, torch.Tensor]:
     cmd = env.command_manager.get_term("pick")
     tm = env.termination_manager
     n = float(len(env_ids)) if env_ids is not None else float(env.num_envs)

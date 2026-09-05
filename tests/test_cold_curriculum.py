@@ -41,7 +41,8 @@ def test_registered_cold_tasks_start_with_the_declared_weights_and_share_the_rob
   from mjlab.tasks.registry import load_env_cfg
   for tid, sight in (("Mjlab-Pick-Place-PiperX-Robust-Cold", True), ("Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight", False)):
     cfg = load_env_cfg(tid)
-    assert list(cfg.curriculum) == ["cold_start"] and cfg.curriculum["cold_start"].params == {"sight": sight}
+    assert list(cfg.curriculum) == ["cold_start"]
+    assert cfg.curriculum["cold_start"].params["sight"] is sight and not cfg.curriculum["cold_start"].params.get("approach")
     w0 = cc.schedule(sight)["stages"][0]["weights"]
     for k, v in w0.items():
       assert cfg.rewards[k].weight == pytest.approx(v), (tid, k)

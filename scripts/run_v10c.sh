@@ -26,7 +26,9 @@ EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust
 EVAL_ENVS=${EVAL_ENVS:-256}
 EVAL_STEPS=${EVAL_STEPS:-2400}
 EVAL_SEEDS=${EVAL_SEEDS:-"101 202 303"}
-if [ "$SIGHT" = "1" ]; then TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; else TASK=Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight; fi
+APPROACH=${APPROACH:-0}   # 1: the v10d variant with the approach terms (-Cold2 ids)
+if [ "$APPROACH" = "1" ]; then BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold2; else BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; fi
+if [ "$SIGHT" = "1" ]; then TASK=$BASE_TASK; else TASK=${BASE_TASK}-NoSight; fi
 
 cd "$ROOT"
 ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
