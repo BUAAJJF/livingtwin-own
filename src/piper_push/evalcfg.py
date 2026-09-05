@@ -139,7 +139,10 @@ def load_weights(runner, checkpoint_path: str, device: str | None = None
     raise RuntimeError(
       f"{len(unequal)} of {len(weights)} tensors did not arrive "
       f"(first: {unequal[0]}); the runner's network is not the one loaded")
-  return {"key": key, "n_tensors": len(weights), "iter": raw.get("iter"), "action_api": api_record}
+  filled = [n for n, m in net.named_modules()
+            if getattr(m, "std_min_filled_on_load", False)]
+  return {"key": key, "n_tensors": len(weights), "iter": raw.get("iter"),
+          "action_api": api_record, "config_buffers_filled": filled}
 
 
 def load_policy(runner, checkpoint_path: str, device: str | None = None):

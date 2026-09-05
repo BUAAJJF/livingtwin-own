@@ -200,12 +200,28 @@ class PreSquashGaussianDistribution(Distribution):
     if lo.numel() != output_dim:
       raise ValueError(f"std_range[0] has {lo.numel()} entries for {output_dim} outputs")
     self.register_buffer("std_min", lo)
+    self.std_min_filled_on_load = False
     self.std_range = [float(lo.min()), float(std_range[1])]
     self.log_std_range = [float(np.log(self.std_range[0])), float(np.log(self.std_range[1]))]
     self.entropy_samples = int(entropy_samples)
     self.telemetry = UTelemetry(output_dim, every=telemetry_every) if telemetry_every > 0 else None
     self._normal: Normal | None = None
     Normal.set_default_validate_args(False)
+
+  def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                            missing_keys, unexpected_keys, error_msgs):
+    # ``std_min`` is a configuration constant (the sigma floor, v10d), not a
+    # trained tensor.  Checkpoints written before it existed (v10b, v10c)
+    # carry the same head without it; loading one keeps the floor the task
+    # config built and records that it did, instead of failing a strict load
+    # on a buffer nothing ever learned.  The action convention and its spec
+    # hash are not involved: that check runs before any weight is loaded.
+    key = prefix + "std_min"
+    if key not in state_dict:
+      state_dict[key] = self.std_min.detach().clone()
+      self.std_min_filled_on_load = True
+    super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                  missing_keys, unexpected_keys, error_msgs)
 
   def _std(self) -> torch.Tensor:
     if self.std_type == "scalar":
