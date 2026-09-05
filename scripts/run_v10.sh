@@ -154,7 +154,7 @@ if [ -n "${SELFCHECK:-}" ]; then
 import mjlab.tasks, piper_push.tasks
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 c = load_env_cfg('Mjlab-Pick-Place-PiperX-Robust'); r = load_rl_cfg('Mjlab-Pick-Place-PiperX-Robust')
-assert c.actions['arm'].bounded and 'Squashed' in r.actor.distribution_cfg['class_name']
+assert c.actions['arm'].bounded and 'PreSquash' in r.actor.distribution_cfg['class_name']
 rw = c.rewards
 print('bounded convention OK; sight weights:', {k: rw[k].weight for k in rw if 'sight' in k or 'wrist' in k})
 " 2>&1 | grep -v "^\[" | tail -2 || fail "task check"
