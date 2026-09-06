@@ -224,6 +224,38 @@ def summarise(tr: dict, dt: float, window: int, idle_s: float, drop_grace_s: flo
       "dist_mm_p50": _pct(tr["dist"][m] * 1000, 50) if m.any() else None,
     }
   stall_m = stalled
+  # An object that is neither on the table nor grasped for a long time is not
+  # waiting to be picked: it is resting on the bin rim or wedged somewhere.
+  # Reported apart so that it is never read as a stall, and so that a policy
+  # that leaves objects there is seen to.
+  stuck_lengths, stuck = [], np.zeros((T, B), bool)
+  for b in range(B):
+    starts, lengths, ends = _runs(place[:, b])
+    for s0, ln in zip(starts, lengths):
+      if ln >= idle_steps:
+        stuck_lengths.append(ln * dt)
+        stuck[s0:s0 + ln, b] = True
+  end_state = {
+    "stalled": float(stall_m[-1].mean()), "stuck_object": float(stuck[-1].mean()),
+    "carrying": float(g[-1].mean()), "engaged": float(eng[-1].mean()),
+  }
+  # The same rates over the arm-time in which an object was actually available:
+  # a placement can only happen in a live environment, so the live rate is the
+  # policy's own throughput and its late/early is the policy's own decay.
+  live = ~stuck
+  live_min = live.sum() * dt / 60.0
+  def per_window_live(mask):
+    out = []
+    for k in range(nw):
+      sl = slice(k * window, (k + 1) * window)
+      mins = live[sl].sum() * dt / 60.0
+      out.append(float(mask[sl].sum() / mins) if mins > 1e-9 else None)
+    return out
+  pw_live, aw_live = per_window_live(placed), per_window_live(attempt)
+  def ratio_live(xs):
+    a_ = [x for x in xs[:half] if x is not None]; b_ = [x for x in xs[half:] if x is not None]
+    e = float(np.mean(a_)) if a_ else float("nan"); l = float(np.mean(b_)) if b_ else float("nan")
+    return e, l, (l / e if e > 1e-9 else float("nan"))
   term = tr["term"].astype(np.int64)
   term_names = tr.get("term_names", [])
   term_counts = {name: int((term == i + 1).sum()) for i, name in enumerate(term_names)}
@@ -262,6 +294,14 @@ def summarise(tr: dict, dt: float, window: int, idle_s: float, drop_grace_s: flo
                "jaw_cmd_mm_while_stalled": float(tr["jaw_cmd"][stall_m].mean() * 1000) if stall_m.any() else None,
                "dist_mm_p50_while_stalled": _pct(tr["dist"][stall_m] * 1000, 50) if stall_m.any() else None,
                "target_points_fresh_mean_while_stalled": float(ts[stall_m & fresh].mean()) if (stall_m & fresh).any() else None},
+    "placed_per_live_min": float(n_pl / live_min) if live_min > 1e-9 else None,
+    "attempts_per_live_min": float(n_att / live_min) if live_min > 1e-9 else None,
+    "placed_per_window_live": pw_live, "attempts_per_window_live": aw_live,
+    "late_over_early_placed_live": ratio_live(pw_live)[2], "late_over_early_attempts_live": ratio_live(aw_live)[2],
+    "stuck_object": {"n": len(stuck_lengths), "step_fraction": float(stuck.mean()),
+                     "length_s_p50": _pct(stuck_lengths, 50), "length_s_max": float(max(stuck_lengths)) if stuck_lengths else None},
+    "stuck_fraction_per_window": frac_window(stuck),
+    "end_state_env_fraction": end_state,
     "by_phase": by_phase,
     "target_switches": tswitch,
     "terminations": term_counts, "resets": int(reset.sum()),
@@ -392,6 +432,9 @@ def main() -> int:
           f"points mean/p50/p10 {d['target_points_mean']}/{d['target_points_p50']}/{d['target_points_p10']}  "
           f"zero {d['frac_frames_zero_target_points']}  jaw cmd/meas {d['jaw_cmd_mm']}/{d['jaw_meas_mm']}")
   print(f"drops {out['drops']}  terminations {out['terminations']}  resets {out['resets']}  target switches {out['target_switches']}")
+  print(f"stuck object (place phase >= {a.idle_s} s): {out['stuck_object']}  end-state env fractions {out['end_state_env_fraction']}")
+  print(f"live-time rates: placed/min {out['placed_per_live_min']}  attempts/min {out['attempts_per_live_min']}  "
+        f"l/e placed {out['late_over_early_placed_live']}  l/e attempts {out['late_over_early_attempts_live']}")
   if a.out:
     pathlib.Path(a.out).write_text(json.dumps(out, indent=2) + "\n")
   if a.trace_npz:

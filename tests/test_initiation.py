@@ -109,3 +109,31 @@ def test_target_visibility_is_read_on_fresh_frames_by_phase():
   assert s["by_phase"]["approach_first"]["fresh_frames"] == 50
   # late/early on attempts: one attempt in the second half only
   assert s["early_attempts_per_min"] == 0.0 and s["late_attempts_per_min"] > 0
+
+
+def test_a_stuck_object_is_not_a_stall_and_live_rates_exclude_it():
+  T, B = 600, 2
+  tr = _trace(T, B)
+
+  def cycle(b, t0):
+    tr["engaged"][t0 + 10:t0 + 20, b] = 1.0
+    tr["grasped"][t0 + 20:t0 + 50, b] = 1.0
+    tr["on_table"][t0 + 50:t0 + 60, b] = 0.0
+    tr["placed"][t0 + 59, b] = 1.0
+
+  # env 0: two cycles, then the object sits in the bin footprint unregistered from step 160 on
+  cycle(0, 0); cycle(0, 100)
+  tr["in_bin"][160:, 0] = 1.0
+  # env 1: a cycle every 100 steps, steadily
+  for k in range(6):
+    cycle(1, 100 * k)
+  s = summarise(tr, DT, 100, idle_s=3.0)
+  assert s["stalls"]["n"] == 0                      # a stuck object never counts as a stall
+  # the place run starts at the release (step 150) and runs to the end: 450 steps
+  assert s["stuck_object"]["n"] == 1 and abs(s["stuck_object"]["length_s_max"] - 450 * DT) < 1e-9
+  assert s["end_state_env_fraction"]["stuck_object"] == 0.5
+  # raw late/early: 5 placements in the first half against 3 in the second
+  assert abs(s["late_over_early_placed"] - 0.6) < 1e-9
+  # over live time the steady environment is what is left, and the ratio says so
+  assert s["late_over_early_placed_live"] >= 0.85
+  assert s["placed_per_live_min"] > s["placed_per_min"]
