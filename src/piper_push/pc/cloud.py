@@ -264,6 +264,7 @@ class WorkspaceCloud:
     pts = unproject(depth, self._rays, cam_pos, cam_quat)
     inside = valid & in_workspace(pts, workspace)
     self.full_points, self.full_inside = pts, inside
+    self.last_depth = depth        # the corrupted metric depth this capture came from, for viewers
     if mode == "depth":
       out = torch.stack([torch.where(inside, depth, torch.zeros_like(depth)), inside.float()], dim=1)
       count = inside.reshape(b, -1).sum(dim=1)

@@ -42,6 +42,7 @@ input[type=range]{width:100%}
 <div id="top">
  <div><div>top view (x right, y up)</div><canvas id="c1" width="560" height="560"></canvas></div>
  <div><div>side view (y right, z up)</div><canvas id="c2" width="560" height="380"></canvas></div>
+ <div><div id="camcap">camera frame</div><img id="rgb" width="448" height="336" style="display:block;border:1px solid #333;image-rendering:auto"><div>depth the cloud came from (0.3 m red … 1.5 m blue, holes at the far plane)</div><img id="dep" width="448" height="336" style="display:block;border:1px solid #333"></div>
  <div id="panel">
   <div><b>__TITLE__</b></div>
   <div class="k">← → step &nbsp; shift+← → ×10 &nbsp; space play &nbsp; h = held frames only</div>
@@ -82,6 +83,8 @@ function draw(){
     ['held / placed', `${s.held ? 'HELD' : 'no'} / ${s.placed}`], ['jaw', `${(s.jaw*1000).toFixed(1)} mm  (cmd ${(s.jaw_cmd*1000).toFixed(1)})`],
     ['a = tanh(u)', s.a.map(v=>v.toFixed(2)).join(' ')], ['|u| max', s.umax.toFixed(2)], ['termination', s.term || '—']];
   document.getElementById('t').innerHTML = rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+  const im = D.images[String(s.img)]; if (im) { document.getElementById('rgb').src = 'data:image/jpeg;base64,' + im.rgb; if (im.depth) document.getElementById('dep').src = 'data:image/jpeg;base64,' + im.depth; }
+  document.getElementById('camcap').textContent = `camera frame captured at step ${s.img} (the frame this cloud came from; ${s.age} step(s) old)`;
   sl.value = i; drawTimeline();
 }
 function drawTimeline(){ const ctx = tl.getContext('2d'); ctx.fillStyle='#181818'; ctx.fillRect(0,0,tl.width,tl.height);
@@ -121,10 +124,21 @@ def main() -> int:
   from piper_push.pc import cloud as pc_cloud
   from piper_push.tasks.pick_place import env_cfg as task_cfg
 
+  import cv2
+  import dataclasses as _dc
+  from piper_push import camera as camera_mod
+
   torch.manual_seed(a.seed)
   cfg = load_env_cfg(a.task, play=True)
   cfg.scene.num_envs = 1
   cfg.seed = a.seed
+  # The policy's camera renders depth and segmentation; for the reader the
+  # same camera also renders RGB here.  Rendering only -- nothing reaches the
+  # observation.
+  cfg.scene.sensors = tuple(
+    _dc.replace(s, data_types=tuple(dict.fromkeys(list(s.data_types) + ["rgb"])))
+    if getattr(s, "name", None) == camera_mod.CAMERA_NAME else s
+    for s in cfg.scene.sensors)
   sensor_prov = evalcfg.apply_sensor(cfg, a.task, a.sensor)
   env = ManagerBasedRlEnv(cfg=cfg, device=a.device, render_mode=None)
   agent = load_rl_cfg(a.task)
@@ -144,8 +158,27 @@ def main() -> int:
   if isinstance(obs, tuple):
     obs = obs[0]
   steps, clouds = [], []
+  images: dict[int, dict] = {}
+  owner = env._pc_cloud_owner
+  sensor = env.scene[camera_mod.CAMERA_NAME]
+
+  def jpeg(img: np.ndarray) -> str:
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+    return base64.b64encode(buf.tobytes()).decode("ascii") if ok else ""
+
+  def snapshot(t: int) -> None:
+    """The camera frame captured this step: RGB and the corrupted depth the cloud came from."""
+    rgb = sensor.data.rgb[0].cpu().numpy()
+    d = owner.last_depth[0].cpu().numpy() if getattr(owner, "last_depth", None) is not None else None
+    dep = ""
+    if d is not None:
+      g = np.clip((d - 0.30) / (1.50 - 0.30), 0.0, 1.0)
+      dep = jpeg(cv2.applyColorMap((255 * (1.0 - g)).astype(np.uint8), cv2.COLORMAP_TURBO))
+    images[t] = {"rgb": jpeg(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)), "depth": dep}
+
   last_cloud_id = -1
   last_cloud_sig = None
+  snapshot(-1)
   for t in range(a.steps):
     with torch.inference_mode():
       u = policy(obs)
@@ -180,12 +213,21 @@ def main() -> int:
     for c in causes:
       if bool(tm.get_term(c)[0]):
         steps[-1]["term"] = c
+    # The capture made during this step (the obs just returned is for step t+1).
+    if owner.fresh is not None and bool(owner.fresh[0]):
+      snapshot(t)
   env.close()
+  # Which capture each step's cloud came from: the delayed age says how far back.
+  keys = sorted(images)
+  for t, s in enumerate(steps):
+    want = t - 1 - s["age"]           # obs at step t was captured at t-1-age (t-1 is the step whose obs this is)
+    k = max([x for x in keys if x <= want], default=keys[0])
+    s["img"] = k
   placed = steps[-1]["placed"] if steps else 0
   ws = pc_cloud.WORKSPACE
   bx, by = objects.BIN_CENTER
   hx, hy = objects.BIN_INNER
-  data = {"steps": steps, "clouds": clouds,
+  data = {"steps": steps, "clouds": clouds, "images": {str(k): v for k, v in images.items()},
           "ws": {"r_min": ws.r_min, "r_max": ws.r_max, "a_lo": ws.angle_lo, "a_hi": ws.angle_hi},
           "bin": [bx, by, hx + objects.BIN_WALL_THICKNESS, hy + objects.BIN_WALL_THICKNESS],
           "meta": {"checkpoint": a.checkpoint, "task": a.task, "seed": a.seed, "steps": a.steps,
