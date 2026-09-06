@@ -154,15 +154,21 @@ def propose(points: torch.Tensor, inside: torch.Tensor, arm_pos: torch.Tensor, e
   mx = g(sx) / ccount.clamp_min(1.0)
   my = g(sy) / ccount.clamp_min(1.0)
   mh = g(hmax)
-  wx = (g(xmax) - g(xmin) + CELL).clamp_min(CELL)
-  wy = (g(ymax) - g(ymin) + CELL).clamp_min(CELL)
+  # Extent across each axis, centre to centre plus half a cell: a 40 mm object
+  # on the 1 cm grid reads 40-50 mm.  The commanded width adds a 6 mm margin
+  # and is capped at the jaw; feasibility is the EXTENT against the jaw with
+  # half a cell of slack, so that the 45 mm objects at the top of the trained
+  # distribution are not refused for the grid's own coarseness.
+  wx = (g(xmax) - g(xmin) + 0.5 * CELL).clamp_min(0.5 * CELL)
+  wy = (g(ymax) - g(ymin) + 0.5 * CELL).clamp_min(0.5 * CELL)
   # Two candidates per component: close across x (yaw 0) and across y (yaw pi/2).
   yaw = torch.stack([torch.zeros_like(mx), torch.full_like(mx, math.pi / 2)], dim=-1)   # (B, C, 2)
-  width = torch.stack([wx, wy], dim=-1) + 0.010
+  extent = torch.stack([wx, wy], dim=-1)
+  width = (extent + 0.006).clamp(max=JAW_M)
   pos = torch.stack([mx, my, table_z + (0.5 * mh).clamp(0.012, 0.060)], dim=-1)         # (B, C, 3)
   pos = pos.unsqueeze(2).expand(-1, -1, 2, -1)
-  feasible = present.unsqueeze(-1) & (width <= JAW_M) & (mh.unsqueeze(-1) >= H_MIN)
-  score = feasible.float() * (1.0 - width / 0.06).clamp(0.0, 1.0) * (mh.unsqueeze(-1) / 0.05).clamp(0.3, 1.0)
+  feasible = present.unsqueeze(-1) & (extent <= JAW_M + 0.5 * CELL) & (mh.unsqueeze(-1) >= H_MIN)
+  score = feasible.float() * (1.0 - extent / 0.07).clamp(0.05, 1.0) * (mh.unsqueeze(-1) / 0.05).clamp(0.3, 1.0)
   # Collision margin: nearest other component, minus the half-widths.
   centres = torch.stack([mx, my], dim=-1)                                            # (B, C, 2)
   dc = torch.cdist(centres, centres)

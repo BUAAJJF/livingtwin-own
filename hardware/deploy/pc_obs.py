@@ -156,7 +156,9 @@ class GraspObs:
       return
     arm = torch.as_tensor(np.asarray(self.kin.data.xpos[self.body_ids], dtype=np.float32),
                           device=self.device).unsqueeze(0)
-    ee = torch.as_tensor(np.asarray(self.kin.site_pos(), dtype=np.float32), device=self.device).unsqueeze(0)
+    site = self.kin.site_pos
+    site = site() if callable(site) else site
+    ee = torch.as_tensor(np.asarray(site, dtype=np.float32), device=self.device).unsqueeze(0)
     props = grasp.propose(frame.points_base, frame.inside, arm, ee, table_z=0.0)
     feats, valid = props.feats[0], props.valid[0]
     order = (feats[:, grasp.I_SCORE] - (~valid).float() * 10.0).argsort(descending=True)
