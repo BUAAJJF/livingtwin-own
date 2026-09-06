@@ -163,6 +163,12 @@ def main():
   rule["grasps per attempt worse"] = better("ini grasps per attempt", higher=False)
   clear_keys = [k for k in ("ini grasps per attempt", "ini l/e placed", "ini l/e placed live") if rule[k] and rule[k]["clear"]]
   print("\nrule:", json.dumps(rule, indent=1))
+  if any(rule[k] is None for k in ("ini grasps per attempt", "ini l/e placed", "ini l/e placed live")):
+    print("\nverdict: INCOMPLETE -- the initiation rows are not in yet for both routes")
+    if a.json:
+      json.dump({"e0": {"rows": r0, "manifest": m0, "timing": t0}, "e2": {"rows": r2, "manifest": m2, "timing": t2},
+                 "rule": rule, "verdict": "incomplete"}, open(a.json, "w"), indent=1, default=str)
+    return
   gate_placed = 0.70 * 19.3
   e0_close = bool(r0.get("accept placed/min") and r0["accept placed/min"]["median"] >= gate_placed and r0.get("endurance l/e (24 s)") and r0["endurance l/e (24 s)"]["median"] >= 0.85)
   if len(clear_keys) == 3:
