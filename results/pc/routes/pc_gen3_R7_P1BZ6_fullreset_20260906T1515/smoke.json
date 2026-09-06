@@ -1,0 +1,67 @@
+{
+  "route": "P1BZ6",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill",
+  "num_envs": 8,
+  "obs_shapes": {
+    "proprio": [
+      8,
+      36
+    ],
+    "object": [
+      8,
+      21
+    ],
+    "privileged": [
+      8,
+      5
+    ],
+    "camera": [
+      8,
+      512,
+      5
+    ],
+    "vision_meta": [
+      8,
+      3
+    ],
+    "full_proprio": [
+      8,
+      36
+    ]
+  },
+  "fresh_fraction": 0.590625,
+  "valid_fraction": 0.965625,
+  "lags": [
+    3,
+    3,
+    0,
+    2,
+    2,
+    4,
+    3,
+    1
+  ],
+  "step_ms_p50": 18.677795073017478,
+  "occupancy_mean": 0.965625,
+  "target_channel": "zero",
+  "camera_width": 5,
+  "target_flag_points_mean": 0.0,
+  "target_sampled_count_mean": 39.0,
+  "extent_min": [
+    -0.30837059020996094,
+    0.0558902807533741,
+    -0.0028135953471064568
+  ],
+  "extent_max": [
+    0.5603492259979248,
+    0.5767771005630493,
+    0.3697454333305359
+  ],
+  "student_params": 930638,
+  "encoders": {
+    "camera": "PointPatchEncoder"
+  },
+  "learn_s_per_iter": 1.0415152530185878,
+  "infer_ms_single_env": 2.7901923190802336,
+  "gpu_mem_alloc_gb": 0.327381504
+}
