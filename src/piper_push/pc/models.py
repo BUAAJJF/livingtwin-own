@@ -78,6 +78,13 @@ class SetRecurrentModel(MLPModel):
   def _get_latent_dim(self) -> int:
     return self.latent_dim
 
+  @property
+  def obs_groups_2d(self) -> list[str]:
+    """The encoded groups under the name rsl_rl's CNN model uses, so that
+    scripts/check_export.py and the deployment feed the export by the same
+    list whether a group is an image or a point set."""
+    return list(self.obs_groups_nd)
+
   def _encode(self, obs: TensorDict) -> torch.Tensor:
     parts = []
     lead = None
