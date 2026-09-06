@@ -21,7 +21,7 @@ FINETUNE_ITERS=${FINETUNE_ITERS:-800}
 VISION_ENVS=${VISION_ENVS:-512}
 SEED=${SEED:-42}
 COMMIT=$(git rev-parse --short HEAD)
-DIRTY=$(git status --porcelain | grep -v '^??' | wc -l)
+DIRTY=$(git status --porcelain | { grep -v '^??' || true; } | wc -l)   # grep's "no match" must not trip pipefail
 [ "$DIRTY" = 0 ] || { echo "commit first: $DIRTY tracked files modified" >&2; exit 2; }
 
 echo "== sync code to $HOST ($COMMIT)"
