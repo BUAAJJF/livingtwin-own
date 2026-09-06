@@ -93,8 +93,22 @@ clear, and ONE textured object of the trained size class on the mat.
 1. `python -m hardware.deploy.scene --like recordings/v4_stereo_try3` -- the table matches a known-good scene.
 2. `python -m hardware.deploy.jointcheck --joint 1` (then 2..6): five degrees each, the arm moves the joint the number says.
 3. Shadow run 3 above for 30 s with the object in place: `holds` empty after the first steps, the logged targets stay inside `SAFE_TARGET_CLIP`, the gripper target opens on approach (read `target[6]` in `shadow.jsonl`).
-4. Real motion needs a runner that sends commands; `pc_run.py` deliberately has none.  The first driven run uses `hardware/deploy/run.py`'s guards (fresh `--record`, the typed `move`, `--home-first`, `--command-rate-scale 0.5`, joint-speed fraction, stale-frame and no-target holds) with the point-cloud observation wired in place of the mask -- that wiring is the next piece of work and is NOT in this commit.  Until it exists there is no real-motion command for these policies, and that is deliberate.
-5. Stop conditions, whichever comes first: any hold state for more than 1 s, a joint-speed trip, the object leaving the sector, 60 s.
+4. Real motion goes through `hardware/deploy/run.py --obs pc`: the same guards as every mask-policy run (fresh `--record`, the typed `move`, `--home-first`, `--command-rate-scale`, `--max-joint-speed-fraction`, feedback faults, stale-observation and empty-workspace holds, the final hold), with `PcPerception` in place of the segmenter and the bundle's own obs spec.  Verified on 2026-09-06 with the P1B bundle: a `--dry-run` (no camera) and a `--replay recordings/v4_stereo_try3` (dry arm) both run the loop at 50 Hz with perception at 30 Hz, 5.0 / 7.5 ms compute, no holds beyond the first frame.
+
+   ```bash
+   # 4a. the loop on the rig with the real camera and the DRY arm first (no CAN, nothing moves)
+   micromamba run -n mjlab python -m hardware.deploy.run --obs pc \
+       --policy hardware/deploy/policies/pc_P1B_20260906T0319 --camera d455 --no-arm \
+       --seconds 20 --record recordings/pc_noarm_<try>
+   # 4b. first motion: e-stop in hand, one object, low rate, guarded.  The run asks for the word `move`.
+   micromamba run -n mjlab python -m hardware.deploy.run --obs pc \
+       --policy hardware/deploy/policies/pc_P1B_20260906T0319 --camera d455 --policy-device cuda \
+       --home-first --command-rate-scale 0.5 --max-joint-speed-fraction 0.6 \
+       --seconds 20 --record recordings/pc_motion_<try>
+   ```
+
+   What `--obs pc` refuses on purpose: `--view`, `--mask`, `--target-lifecycle`, `--target-tracker`, `--held-target-radius`, `--flatten-scene` -- they all belong to the mask observation.  `--depth-source stereo` still works (the perception thread owns the TensorRT engine).  The recorded session has the usual `control.json` / `meta.json` / frames plus `mask_state = pc:<route>` and the workspace point count per frame in `detections`.
+5. Stop conditions, whichever comes first: any hold state for more than 1 s, a joint-speed trip, the object leaving the sector, 20 s on the first run, 60 s afterwards.
 6. Two objects only after three clean single-object cycles.
 
 ## GO / NO-GO rule

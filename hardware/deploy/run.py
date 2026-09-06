@@ -435,7 +435,22 @@ def _build(a, resources):
   # Pure compatibility checks happen before starting the camera or opening
   # CAN.  A legacy policy must be acknowledged explicitly; failing this check
   # must not leave a RealSense reader thread behind.
-  builder = proprio.ProprioBuilder()
+  pc_route = None
+  if getattr(a, "obs", "mask") == "pc":
+    # The point-cloud bundle carries its own obs_spec.json (proprio layout,
+    # nd groups, action spec) and names its route; the proprioception is built
+    # from THAT file so that the vector matches the graph it feeds.
+    if policy_spec_path is None or not policy_spec_path.exists():
+      raise SystemExit("--obs pc needs a bundle directory with obs_spec.json "
+                       "(scripts/pc/bundle.py writes one)")
+    bundle_manifest = policy_spec_path.with_name("manifest.json")
+    pc_route = (json.loads(bundle_manifest.read_text()).get("route")
+                if bundle_manifest.exists() else None)
+    if pc_route not in ("P0", "P1A", "P1B", "P2"):
+      raise SystemExit(f"{bundle_manifest} does not name a route (P0/P1A/P1B/P2)")
+    builder = proprio.ProprioBuilder(policy_spec_path)
+  else:
+    builder = proprio.ProprioBuilder()
   mapper = robot.ActionMapper(
     action_spec_source, dt=1.0 / config.CONTROL_HZ,
     accel_limit=getattr(a, "command_accel_limit", None),
@@ -467,8 +482,9 @@ def _build(a, resources):
 
   reproj = rectify.Reprojector(rig, device=a.device)
   rgb_mapper = None
-  needs_rgb = (a.mask in ("yolo", "fused")
-               or getattr(a, "target_tracker", "depth") == "sam21")
+  needs_rgb = (pc_route is None
+               and (a.mask in ("yolo", "fused")
+                    or getattr(a, "target_tracker", "depth") == "sam21"))
   if needs_rgb and reader is not None:
     from .rgbmap import RgbDepthMapper
     if not isinstance(reader.meta, dict):
@@ -480,8 +496,12 @@ def _build(a, resources):
         "visual detection requires synchronized raw RGB from the D455")
     reader.rgb_mapper = rgb_mapper
     print("vision image: synchronized raw RGB; masks projected to depth grid")
-  segmenter = _segmenter(a, rig, reproj, rgb_mapper=rgb_mapper)
-  tracker = mask.TargetTracker()
+  if pc_route is None:
+    segmenter = _segmenter(a, rig, reproj, rgb_mapper=rgb_mapper)
+    tracker = mask.TargetTracker()
+  else:
+    segmenter = tracker = None
+    print(f"observation: point-cloud route {pc_route}; no segmenter, no tracker")
 
   arm = (robot.DryRunArm(spec) if (a.dry_run or a.no_arm or a.replay)
          else robot.PiperArm(a.can))
@@ -513,11 +533,16 @@ def _build(a, resources):
 
   _check_policy_matches_spec(a.policy, spec)
 
-  from .policy import Policy
-  pol = Policy(a.policy, threads=a.policy_threads,
-               providers=(["CUDAExecutionProvider", "CPUExecutionProvider"]
-                          if a.policy_device == "cuda"
-                          else ["CPUExecutionProvider"]))
+  if pc_route is not None:
+    from .pc_perception import PcRunPolicy
+    pol = PcRunPolicy(policy_spec_path.parent, pc_route, threads=a.policy_threads,
+                      cuda=(a.policy_device == "cuda"))
+  else:
+    from .policy import Policy
+    pol = Policy(a.policy, threads=a.policy_threads,
+                 providers=(["CUDAExecutionProvider", "CPUExecutionProvider"]
+                            if a.policy_device == "cuda"
+                            else ["CPUExecutionProvider"]))
   print(f"policy: {pol.path}, {pol.flat_width} + "
         f"{'x'.join(map(str, pol.image_shapes[0]))} in, hidden "
         f"{pol.hidden_shape}")
@@ -656,6 +681,14 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--policy", required=True,
                  help="exported policy.onnx, or the directory holding it")
+  p.add_argument("--obs", choices=("mask", "pc"), default="mask",
+                 help="what the policy is shown.  'mask': the depth image with "
+                      "the segmented target (every policy before yf/pc).  'pc': "
+                      "the point-cloud line -- the bundle's manifest.json names "
+                      "the route (P0 metric depth, P1A/P1B workspace cloud, P2 "
+                      "grasp candidates); no segmenter, no tracker, no mask.  "
+                      "The loop, guards, recorder and arm path are the same; "
+                      "an empty workspace holds exactly as an empty mask does.")
   p.add_argument("--seconds", type=float, default=60.0)
   p.add_argument("--dry-run", action="store_true",
                  help="no camera and no arm: renders nothing, moves nothing")
@@ -942,6 +975,16 @@ def main() -> int:
     p.error("--max-guard-hold-streak must be at least 1")
   if a.max_blind_steps < 0:
     p.error("--max-blind-steps must be non-negative")
+  if a.obs == "pc":
+    if a.view:
+      p.error("--view draws the segmentation; the point-cloud routes have none")
+    for flag, name in ((a.target_lifecycle, "--target-lifecycle"),
+                       (a.target_tracker != "depth", "--target-tracker"),
+                       (a.mask is not None, "--mask"),
+                       (a.flatten_scene, "--flatten-scene"),
+                       (a.held_target_radius > 0, "--held-target-radius")):
+      if flag:
+        p.error(f"{name} belongs to the mask observation; --obs pc has no mask")
   if a.sam_vos_optimized:
     p.error("--sam-vos-optimized is disabled: the installed torch 2.13/SAM2.1 "
             "combination fails its first propagated frame.  Eager SAM is the "
@@ -1161,13 +1204,19 @@ def main() -> int:
               "never clears the target on a placement; SAM will keep carrying "
               "the object it was anchored on until the watchdog loses it")
 
-    vision = Perception(reader, reproj, segmenter, tracker,
-                        proprio.Kinematics(), rig=rig,
-                        flatten=getattr(a, "flatten_scene", False),
-                        stereo=stereo_backend,
-                        held_radius=a.held_target_radius,
-                        gripper_closed_m=a.gripper_closed,
-                        depth_bias=a.depth_bias, lifecycle=lc, sam=sam)
+    if getattr(pol, "pc_route", None) is not None:
+      from .pc_perception import PcPerception
+      vision = PcPerception(reader, rig, pol.pc_route, pol.num_points,
+                            proprio.Kinematics(), device=a.device,
+                            stereo=stereo_backend)
+    else:
+      vision = Perception(reader, reproj, segmenter, tracker,
+                          proprio.Kinematics(), rig=rig,
+                          flatten=getattr(a, "flatten_scene", False),
+                          stereo=stereo_backend,
+                          held_radius=a.held_target_radius,
+                          gripper_closed_m=a.gripper_closed,
+                          depth_bias=a.depth_bias, lifecycle=lc, sam=sam)
     if vision.flatten:
       print("scene: flattened onto the calibrated table plane")
     vision.set_joints(np.concatenate([st.q, [st.gripper, -st.gripper]]))
@@ -1177,7 +1226,9 @@ def main() -> int:
       viewer.start()
       print("view: window opened; it is a reader and cannot stall the loop")
 
-  blank = np.zeros((3, config.HEIGHT, config.WIDTH), np.float32)
+  blank = (pol.blank() if getattr(pol, "pc_route", None) is not None
+           else np.zeros((3, config.HEIGHT, config.WIDTH), np.float32))
+  last_vision_index = None
   print(f"running for {a.seconds:.0f} s at {config.CONTROL_HZ:.0f} Hz; "
         "ctrl-c to stop")
   t_end = time.time() + a.seconds
@@ -1355,7 +1406,18 @@ def main() -> int:
         blind_streak = 0
 
       flat = builder(fb, last_action)
-      last_action = pol(flat, camera)
+      if getattr(pol, "pc_route", None) is not None:
+        # vision_meta as the policy trained on it: age from capture in control
+        # steps, whether this step's cloud is a new frame, and whether the frame
+        # had enough workspace points.  ``frame`` is None only on the dry run.
+        idx = _frame_index(frame)
+        fresh = idx is not None and idx != last_vision_index
+        last_vision_index = idx
+        last_action = pol(flat, camera, age_s=float(age), fresh=fresh,
+                          valid=bool(target_available),
+                          extra=getattr(frame, "pc_extra", None))
+      else:
+        last_action = pol(flat, camera)
       fault = _action_fault(last_action)
       if fault is not None:
         stop_reason = "action_fault: " + fault

@@ -125,14 +125,25 @@ class _ArmReadOnly:
   """A real arm, connected for feedback only.  Drives are never enabled here."""
 
   def __init__(self, spec: dict, can: str) -> None:
-    self.arm = robot.PiperArm(interface=can) if "interface" in robot.PiperArm.__init__.__code__.co_varnames else robot.PiperArm()
+    # connect() opens CAN and reads; enable() is what powers the drives, and it
+    # is never called here.  The measured pose doubles as the "target" the
+    # proprioception's squeeze term subtracts, so the squeeze reads zero.
+    self.arm = robot.PiperArm(can)
     self.arm.connect()
     self.names = list(spec["joint_names"])
+    self.last = None
 
   def read(self) -> proprio.JointFeedback:
     st = self.arm.read()
-    return proprio.JointFeedback.from_arm(st.q, st.dq, st.gripper, st.gripper_vel, st.q, st.gripper,
-                                         float(getattr(st, "gripper_effort", 0.0)), self.names)
+    self.last = st
+    target = np.concatenate([np.asarray(st.q, dtype=np.float64), [float(st.gripper)]])
+    return robot.feedback(st, target)
+
+  def close(self) -> None:
+    try:
+      self.arm.disconnect()
+    except Exception:
+      pass
 
 
 class Perception(threading.Thread):
