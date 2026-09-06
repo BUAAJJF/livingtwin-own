@@ -28,9 +28,21 @@ FINETUNE_ITERS=${FINETUNE_ITERS:-1000}
 EPISODE_S=${EPISODE_S:-36.0}
 EVAL_ENVS=${EVAL_ENVS:-256}
 OUT=${OUT:-results/pc/routes/$TAG}
-DISTILL_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Distill
-VISION_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision
-HELDOUT_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision-Heldout
+# ROUTE=MASK runs the depth + target-mask observation (the first hardware
+# policy's line) through the identical stages, so the point-cloud routes have
+# a control under the same teacher, budget, episode length and ruler.  It has
+# no held-out id, no point-cloud smoke and no cloud viewer.
+if [ "$ROUTE" = MASK ]; then
+  DISTILL_TASK=${DISTILL_TASK:-Mjlab-Pick-Place-PiperX-Distill-Robust}
+  VISION_TASK=${VISION_TASK:-Mjlab-Pick-Place-PiperX-Vision-Robust}
+  HELDOUT_TASK=${HELDOUT_TASK:-}
+  PC_ROUTE=false
+else
+  DISTILL_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Distill
+  VISION_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision
+  HELDOUT_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision-Heldout
+  PC_ROUTE=true
+fi
 LONG_STEPS=${LONG_STEPS:-9000}
 LONG_SEEDS=${LONG_SEEDS:-"101 202 303"}
 VIEWER_STEPS=${VIEWER_STEPS:-3000}
@@ -38,8 +50,12 @@ VIEWER_SEEDS=${VIEWER_SEEDS:-"101 202"}
 cd "$ROOT"
 [ -e "$OUT" ] && { echo "refusing to reuse $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
-ORACLE=$("$MM" run -n "$ENV_NAME" python -c "from piper_push.pc import routes; print('true' if routes.is_oracle('$ROUTE') else 'false')" 2>/dev/null || echo unknown)
-[ "$ORACLE" = true ] || [ "$ORACLE" = false ] || { echo "route $ROUTE unknown to piper_push.pc.routes" >&2; exit 2; }
+if [ "$PC_ROUTE" = true ]; then
+  ORACLE=$("$MM" run -n "$ENV_NAME" python -c "from piper_push.pc import routes; print('true' if routes.is_oracle('$ROUTE') else 'false')" 2>/dev/null || echo unknown)
+  [ "$ORACLE" = true ] || [ "$ORACLE" = false ] || { echo "route $ROUTE unknown to piper_push.pc.routes" >&2; exit 2; }
+else
+  ORACLE=false
+fi
 ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
 [ -n "$ENV_PREFIX" ] || { echo "no micromamba env named $ENV_NAME" >&2; exit 2; }
 export PATH="$(dirname "$MM"):$PATH"
@@ -104,9 +120,16 @@ say "route $ROUTE  tag $TAG  gpu $GPU  oracle_only $ORACLE  teacher $TEACHER  sh
 # -- smoke -------------------------------------------------------------------
 if ! stage_done smoke; then
   stage_begin
-  say "smoke: 8 envs, 2 distillation iterations"
-  $PY scripts/pc/smoke.py --route "$ROUTE" --teacher "$TEACHER" --num-envs 8 --steps 40 \
-    --device "cuda:$GPU" --out "$OUT/smoke.json" >"$OUT/smoke.log" 2>&1 || fail "smoke (see $OUT/smoke.log)"
+  if [ "$PC_ROUTE" = true ]; then
+    say "smoke: 8 envs, 2 distillation iterations"
+    $PY scripts/pc/smoke.py --route "$ROUTE" --teacher "$TEACHER" --num-envs 8 --steps 40 \
+      --device "cuda:$GPU" --out "$OUT/smoke.json" >"$OUT/smoke.log" 2>&1 || fail "smoke (see $OUT/smoke.log)"
+  else
+    say "smoke: 8 envs, 2 distillation iterations on $DISTILL_TASK"
+    $PY scripts/distill.py --task "$DISTILL_TASK" --teacher "$TEACHER" --num-envs 8 --iterations 2 \
+      --episode-length-s "$EPISODE_S" --run-name "${TAG}_smoke" --device "cuda:$GPU" --seed "$SEED" --logger tensorboard \
+      >"$OUT/smoke.log" 2>&1 || fail "smoke (see $OUT/smoke.log)"
+  fi
   mark_done smoke
 fi
 
@@ -166,10 +189,12 @@ if ! stage_done eval; then
       --seed "$s" --device "cuda:$GPU" --sensor measured --out "$OUT/endurance_final_s$s.json" \
       >"$OUT/endurance_final_s$s.log" 2>&1 || say "final endurance seed $s failed"
   done
-  say "held-out objects, seed 101"
-  $PY scripts/accept_s1.py "$HELDOUT_TASK" "$FT" --num-envs "$EVAL_ENVS" --steps 2400 --seed 101 \
-    --device "cuda:$GPU" --sensor measured --label "${TAG}_heldout" --json "$OUT/accept_heldout_s101.json" \
-    >"$OUT/accept_heldout_s101.log" 2>&1 || say "held-out accept exited non-zero"
+  if [ -n "$HELDOUT_TASK" ]; then
+    say "held-out objects, seed 101"
+    $PY scripts/accept_s1.py "$HELDOUT_TASK" "$FT" --num-envs "$EVAL_ENVS" --steps 2400 --seed 101 \
+      --device "cuda:$GPU" --sensor measured --label "${TAG}_heldout" --json "$OUT/accept_heldout_s101.json" \
+      >"$OUT/accept_heldout_s101.log" 2>&1 || say "held-out accept exited non-zero"
+  fi
   $PY scripts/pc/eval_actions.py --checkpoint "$FT" --task "$VISION_TASK" --num-envs "$EVAL_ENVS" --steps 600 \
     --seed 101 --device "cuda:$GPU" --sensor measured --out "$OUT/actions_final_s101.json" \
     >"$OUT/actions_final_s101.log" 2>&1 || say "actions failed"
@@ -203,7 +228,7 @@ if ! stage_done initiation; then
 fi
 
 # -- viewer: frame-by-frame pages (untracked; the README names the frames to look at)
-if ! stage_done viewer; then
+if ! stage_done viewer && [ "$PC_ROUTE" = true ]; then
   stage_begin
   for s in $VIEWER_SEEDS; do
     say "viewer seed $s ($VIEWER_STEPS steps)"
