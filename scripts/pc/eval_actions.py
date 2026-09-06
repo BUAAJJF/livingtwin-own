@@ -73,6 +73,11 @@ def main() -> int:
   if isinstance(obs, tuple):
     obs = obs[0]
   n, dev = a.num_envs, a.device
+  # P2: proposal recall against the true target and the lock's behaviour.
+  gowner = getattr(env, "_pc_grasp_owner", None)
+  cmd = env.command_manager.get_term("pick")
+  recall_hit = recall_n = 0
+  no_cand = 0
   dim = None
   sums = None
   prev_a = None
@@ -112,6 +117,21 @@ def main() -> int:
     gripper_hist += torch.histc(act[:, -1].float(), bins=20, min=-1.0, max=1.0)
     obs, _, dones, _ = wrapped.step(u)
     reset_recurrent(policy, dones)
+    if gowner is not None and gowner.topk is not None and gowner.fresh is not None:
+      # On fresh frames while nothing is held: is there a candidate within 3 cm
+      # (in the plane) of the target object?  That is the proposal recall.
+      fresh = gowner.fresh & ~cmd.grasped
+      if bool(fresh.any()):
+        from piper_push.pc import grasp as _grasp
+        objp = cmd._object_pos_local() if hasattr(cmd, "_object_pos_local") else None
+        if objp is not None:
+          cand = gowner.topk[..., :2]
+          valid = gowner.topk[..., _grasp.I_FEASIBLE] > 0.5
+          d = (cand - objp[:, None, :2]).norm(dim=-1)
+          d = torch.where(valid, d, torch.full_like(d, 9.0))
+          hit = (d.amin(dim=1) < 0.03) & fresh
+          recall_hit += int(hit.sum()); recall_n += int(fresh.sum())
+          no_cand += int((~valid.any(dim=1) & fresh).sum())
     for c in causes:
       flag = tm.get_term(c)
       term_counts[c] += int(flag.sum())
@@ -143,6 +163,16 @@ def main() -> int:
     "nonfinite_action_steps": nonfinite,
     "provenance": evalcfg.provenance(argv=sys.argv, sensor=sensor_prov, weights=loaded),
   }
+  if gowner is not None:
+    out["p2"] = {
+      "proposal_recall_3cm": (recall_hit / recall_n) if recall_n else None,
+      "fresh_unheld_frames": recall_n,
+      "no_candidate_fraction": (no_cand / recall_n) if recall_n else None,
+      "switches_per_env": float(gowner.switches.float().mean()) if gowner.switches is not None else None,
+      "no_candidate_steps_per_env": float(gowner.no_candidate_steps.float().mean()) if gowner.no_candidate_steps is not None else None,
+      "locked_fraction_end": float(gowner._lock_on.float().mean()) if gowner._lock_on is not None else None,
+    }
+    print("p2:", out["p2"])
   f = lambda xs: " ".join(f"{x:.3f}" for x in xs)
   print(f"sat>0.99  {f(out['frac_sat99'])}")
   print(f"sat>0.999 {f(out['frac_sat999'])}")
