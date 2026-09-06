@@ -56,6 +56,7 @@ ENV_KNOBS: tuple[str, ...] = (
   "HELD_PROXY_M",
   "RESET_FULL_RANGE",
   "PIPER_X_URDF",
+  "PIPER_COLD_START_STAGE",
 )
 
 # Environment variables the code reads that are NOT domain knobs (telemetry

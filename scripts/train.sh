@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Train the push policy. Run this inside tmux -- a dropped ssh connection
+# Train a state teacher (PPO). Run this inside tmux -- a dropped ssh connection
 # should not take the run with it.
 #
 #   scripts/train.sh [extra mjlab train flags...]
 #
 # Environment:
-#   TASK        mjlab task id             (default: Mjlab-Push-Cube-PiperX)
+#   TASK        mjlab task id             (default: Mjlab-Pick-Place-PiperX)
 #   MJLAB_ENV   micromamba env name       (default: mjlab)
 #   NUM_ENVS    parallel envs per GPU     (default: 8192)
 #   ITERS       PPO iterations            (default: 500)
@@ -13,7 +13,7 @@
 #   RUN_NAME    wandb / log run name      (default: ppo_baseline)
 set -Eeuo pipefail
 
-TASK=${TASK:-Mjlab-Push-Cube-PiperX}
+TASK=${TASK:-Mjlab-Pick-Place-PiperX}
 MJLAB_ENV=${MJLAB_ENV:-mjlab}
 NUM_ENVS=${NUM_ENVS:-8192}
 ITERS=${ITERS:-500}

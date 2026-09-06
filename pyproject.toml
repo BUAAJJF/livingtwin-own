@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "piper-push"
 version = "0.1.0"
-description = "End-to-end joint-space PPO: AgileX PiPER-X pushes a cube to random goals (mjlab)"
+description = "PiPER-X tabletop pick-and-place: state teacher, vision students, D455 deployment (mjlab)"
 requires-python = ">=3.10,<3.14"
 dependencies = ["mjlab==1.6.0"]
 

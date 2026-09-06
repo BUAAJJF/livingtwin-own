@@ -10,7 +10,7 @@ different table.  Those are the residual gaps, and this is what states them.
 Three questions, in the order they matter.
 
 **Is the rig inside what the policy was trained against?**  Every camera axis
-is compared to the range in ``piper_push.perturb.AXES``, which is the record of
+is compared to ``TRAINED_RANGE`` below, which is the record of
 what training randomised.  Inside it, the calibration is done and nothing needs
 to change.  Outside it, retraining is not optional -- the policy is being asked
 to work at a viewpoint it has never seen, and it will do so confidently.
@@ -24,7 +24,7 @@ is not trusted to stay put.  Both are printed; the choice is not this script's.
 
 **What can the simulator not express at all?**  Three things, and they are
 named rather than rounded away: the camera's roll, its lateral offset, and the
-table's tilt.  ``SessionMismatchCfg`` has no term for any of them, so a rig
+table's tilt.  the simulator has no term for any of them, so a rig
 with a degree of roll cannot be replayed in simulation -- and a number that
 cannot be simulated is the one worth reading, because it is the one no amount
 of training has covered.
@@ -51,7 +51,15 @@ if str(HERE) not in sys.path:
 import mjlab.tasks  # noqa: F401,E402
 
 from piper_push import camera as sim_camera  # noqa: E402
-from piper_push import perturb  # noqa: E402
+
+# What the camera-pose randomisation covered in training, per axis, in the
+# axis's own units.  ``None`` means the quantity was not modelled at all.
+TRAINED_RANGE: dict[str, tuple[float, float] | None] = {
+  "cam_pitch_deg": (-2.0, 2.0),
+  "cam_yaw_deg": (-2.0, 2.0),
+  "cam_pos_x_m": (-0.02, 0.02),
+  "cam_pos_z_m": (-0.02, 0.02),
+}
 
 from hardware.deploy import config  # noqa: E402
 
@@ -101,7 +109,7 @@ def decompose(T_base_cam: np.ndarray) -> dict:
   aim = np.asarray(sim_camera.CAMERA_AIM, dtype=np.float64)
   d = pos - nominal
 
-  # What the simulator can move: x and z.  SessionMismatchCfg has no y term.
+  # What the simulator can move: x and z.  There is no y term.
   posed = nominal + np.array([d[0], 0.0, d[2]])
   ref = aim - posed
   ref /= np.linalg.norm(ref)
@@ -137,12 +145,12 @@ def decompose(T_base_cam: np.ndarray) -> dict:
 
 def _verdict(name: str, value: float, unit: str) -> tuple[str, str]:
   """Where one measured axis stands against what training covered."""
-  ax = perturb.AXES.get(name)
-  if ax is None or ax.trained_range is None:
+  rng = TRAINED_RANGE.get(name)
+  if rng is None:
     return "NOT MODELLED", "the simulator has no term for this"
-  lo, hi = ax.trained_range
+  lo, hi = rng
   if lo <= value <= hi:
-    frac = abs(value - ax.nominal) / max(hi - ax.nominal, ax.nominal - lo, 1e-9)
+    frac = abs(value) / max(hi, -lo, 1e-9)
     return "in distribution", f"{100 * frac:.0f}% of the trained range"
   return "OUT of distribution", f"trained {lo:+g} to {hi:+g} {unit}"
 
@@ -172,7 +180,7 @@ def report(rig: config.Rig, dec: dict) -> dict:
   # The two the parameterisation cannot carry, and the table's tilt below.
   print()
   print(f"  {'cam_pos_y_m':16s} {dec['cam_pos_y_m'] * 1000:+9.2f} mm    "
-        "NOT MODELLED (SessionMismatchCfg offsets x and z only)")
+        "NOT MODELLED (the camera jitter offsets x and z only)")
   print(f"  {'cam_roll_deg':16s} {dec['cam_roll_deg']:+9.2f} deg   "
         "NOT MODELLED (the frame is rebuilt from world up, so roll is zero "
         "by construction)")

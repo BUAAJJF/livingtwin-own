@@ -6,14 +6,14 @@
 #   scripts/play.sh path/to/model_500.pt  # trained policy
 #
 # Environment:
-#   TASK        mjlab task id         (default: Mjlab-Push-Cube-PiperX)
+#   TASK        mjlab task id         (default: Mjlab-Pick-Place-PiperX)
 #   MJLAB_ENV   micromamba env name   (default: mjlab)
 #   NUM_ENVS    envs to render        (default: 4)
 #   DEVICE      torch device          (default: cuda:0)
 #   VIEWER      native | viser | auto (default: auto)
 set -Eeuo pipefail
 
-TASK=${TASK:-Mjlab-Push-Cube-PiperX}
+TASK=${TASK:-Mjlab-Pick-Place-PiperX}
 MJLAB_ENV=${MJLAB_ENV:-mjlab}
 NUM_ENVS=${NUM_ENVS:-4}
 DEVICE=${DEVICE:-cuda:0}

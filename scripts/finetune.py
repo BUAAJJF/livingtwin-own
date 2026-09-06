@@ -33,7 +33,7 @@ from mjlab.utils.os import dump_yaml
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wandb import add_wandb_tags
 
-from piper_push import damping, hidden_plant, latency, perturb, residual
+from piper_push import latency
 from piper_push.checkpoints import as_actor_checkpoint
 
 TASK = "Mjlab-Pick-Place-PiperX-Vision"
@@ -85,11 +85,7 @@ def main() -> int:
                       "the blind spot instead of the behaviour.")
   p.add_argument("--log-root", default="logs/rsl_rl")
   p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
-  perturb.add_mismatch_args(p)
   latency.add_latency_args(p)
-  damping.add_damping_args(p)
-  hidden_plant.add_hidden_target_args(p)
-  residual.add_residual_args(p)
   from piper_push import evalcfg as _evalcfg  # noqa: E402
   _evalcfg.add_action_api_arg(p)
   a = p.parse_args()
@@ -120,59 +116,19 @@ def main() -> int:
     env_cfg.commands["pick"].reshape_on_place = bool(redraw)
     print(f"[INFO] training cadence: redraw_on_place={redraw}")
 
-  # Session-persistent simulator mismatch to TRAIN in.  This is what makes the
-  # Phase WM0 known-parameter reference possible: fine-tune with the target
-  # parameters supplied, to measure what a learned calibration is being
-  # compared against.  It is a reference point and not a ceiling -- WM1-A's
-  # posterior-guided run beat it in both domains.
-  mismatch = perturb.mismatch_from_args(a)
-  applied_mismatch = perturb.apply_session_mismatch(env_cfg, mismatch)
-  if applied_mismatch:
-    print(f"[INFO] training under session mismatch: {applied_mismatch}")
-
-  # Posterior-guided adaptation (Phase WM1): train under a *distribution* over
-  # observation delay rather than a single value.  The oracle above is the
-  # special case q = delta(3); passing --latency-probs is how a method's own
-  # posterior, already mixed with the source prior, gets into the simulator.
+  # Train under a *distribution* over observation delay rather than the task's
+  # own.  A point mass at zero (the default) leaves the config untouched.
   prior = latency.prior_from_args(a)
   applied_prior = latency.apply_latency_prior(env_cfg, prior, seed=a.seed)
   if applied_prior:
     print(f"[INFO] training under latency prior: {prior.probs} "
           f"(mean {prior.mean_lag * latency.STEP_MS:.0f} ms)")
-  if applied_prior and mismatch.obs_latency_steps:
-    p.error("--latency-probs and --obs-latency-steps both set the same axis")
-
-  # Phase WM1-B's axis, installed the same way.  A point mass at nominal
-  # returns {} and leaves the config untouched, so a latency-only run is
-  # byte-identical to what it was before this axis existed.
-  dprior = damping.prior_from_args(a)
-  applied_damping = damping.apply_damping_prior(
-    env_cfg, dprior, seed=getattr(a, "damping_seed", 0) or a.seed)
-  if applied_damping:
-    print(f"[INFO] training under servo-damping prior: {dprior.probs} "
-          f"over {damping.VALUES}")
-  if applied_damping and mismatch.servo_damping_scale != 1.0:
-    p.error("--damping-probs and --servo-damping-scale both set the same axis")
   agent_cfg.max_iterations = a.iterations
   agent_cfg.run_name = a.run_name
   agent_cfg.logger = a.logger
   agent_cfg.algorithm.learning_rate = a.learning_rate
   agent_cfg.algorithm.desired_kl = a.desired_kl
   agent_cfg.algorithm.entropy_coef = a.entropy_coef
-
-  # Phase RA-Sim-0: the structural target and the learned residual, both off
-  # unless explicitly asked for.  They are command-path hooks, so they compose
-  # with the parametric axes above rather than replacing them -- an arm that
-  # trains in "the residual-augmented simulator" is nominal physics plus the
-  # residual, and the oracle arm is nominal physics plus the hidden target.
-  applied_hidden = hidden_plant.apply_hidden_plant(
-    env_cfg, hidden_plant.hidden_from_args(a))
-  if applied_hidden:
-    print(f"[INFO] training under the hidden structural target: {applied_hidden}")
-  applied_residual = residual.apply_residual(
-    env_cfg, residual.residual_from_args(a))
-  if applied_residual:
-    print(f"[INFO] training under the residual: {applied_residual}")
 
   stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
   if a.run_name:

@@ -992,7 +992,7 @@ def test_the_calibration_comes_back_as_the_simulator_s_own_axes():
 def test_the_two_things_the_simulator_cannot_express_are_reported():
   """Roll and lateral offset.
 
-  ``SessionMismatchCfg`` offsets x and z and nothing else, and the camera
+  The camera-pose jitter offsets x and z and nothing else, and the camera
   frame is rebuilt from the world's up on every path, so a rolled mount is not
   representable at all.  Both have to come out of the decomposition as
   themselves rather than being absorbed into an axis that is representable --

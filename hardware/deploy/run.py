@@ -1682,7 +1682,7 @@ class Perception(threading.Thread):
 
   What it costs is latency, and the cost is explicit: the observation the
   policy acts on is one vision period old, which at the measured 28 Hz is 1.8
-  control steps.  That is inside the 2-4 steps ``piper_push.perturb`` calls the
+  control steps.  That is inside the 2-4 steps the deployment notes call the
   hardware range for "a USB depth camera at 30 fps with a copy and a forward
   pass", so it is a delay the policy has already been evaluated against rather
   than a new one.  ``--max-obs-age`` is the ceiling, and the loop holds the arm

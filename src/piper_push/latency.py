@@ -1,90 +1,112 @@
 """Observation latency as a domain parameter, on mjlab's own delay buffer.
 
-Phase WM0 measured this axis through a ring buffer inside the camera
-observation term, and only afterwards found that mjlab already ships the same
-thing: ``ObservationTermCfg.delay_min_lag`` / ``delay_max_lag`` build a
+``ObservationTermCfg.delay_min_lag`` / ``delay_max_lag`` build a
 :class:`~mjlab.utils.buffers.DelayBuffer` and serve the term's output from
-``t - lag``.  WM1 uses the shipped one.  ``perturb.py`` now routes
-``obs_latency_steps`` there too, so there is exactly one implementation in the
-tree; ``tests/test_latency.py`` pins the two to the same output sequence and
-``results/wm1_latency/equivalence/`` carries the empirical re-measurement.
-
-What is added on top of it is *which* lag each environment gets.  mjlab samples
-uniformly on ``[min_lag, max_lag]``; posterior-guided adaptation needs an
-arbitrary categorical, because the adaptation distribution is
-
-    p_adapt(theta) = alpha * q(theta | D_target) + (1 - alpha) * p_source(theta)
-
-and ``q`` is whatever the inference returned.  So the buffer is built with
-``delay_hold_prob=1.0`` -- "keep the previous lag with probability 1", i.e.
-never resample -- and :class:`LatencyScene` writes the lags itself, once per
-episode, before the manager's delay stage runs on that same step's output.
+``t - lag``.  What is added here is *which* lag each environment gets: mjlab
+samples uniformly on ``[min_lag, max_lag]``, the robust task wants an
+arbitrary categorical (``HEAVY_DR_PROFILE["timing"]["observation_latency_probs"]``).
+So the buffer is built with ``delay_hold_prob=1.0`` -- never resample -- and
+:class:`LatencyScene` writes the lags itself, once per episode, before the
+manager's delay stage runs on that same step's output.
 
 The lag is a property of the *plant*, so it is constant within an episode and
 redrawn at the episode boundary.  One control step is 20 ms at the task's
 50 Hz, which is the only place that conversion is written down.
+
+The point-cloud tasks do not use this term: ``piper_push.pc.cloud`` owns its
+own capture cadence and latency ring, reading the same probability vector.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import torch
-
-from piper_push import prior
 
 CONTROL_HZ = 50.0
 STEP_MS = 1000.0 / CONTROL_HZ
 
 LAGS: tuple[int, ...] = (0, 1, 2, 3, 4)
-"""The candidate set.  Zero is the domain the deployed policy was trained in;
-four is 80 ms, past which the WM0 sweep measured the policy as unusable rather
-than degraded (`docs/sim2real_sweep_phase_wm0.md`, section 5)."""
-
-TARGET_LAG = 3
-"""The hidden target for WM1-A: 60 ms.
-
-Named as a single symbol so that "who reads the answer" is greppable.  No
-estimator reads it: it appears only in the code that scores a posterior after
-that posterior has been produced, and in the runners that construct the target
-domain in the first place."""
+"""The candidate set, in control steps.  Four is 80 ms, past which the policy
+was measured as unusable rather than degraded."""
 
 
-class LatencyPrior(prior.CategoricalPrior):
-  """A categorical distribution over :data:`LAGS`, in control steps.
+@dataclasses.dataclass(frozen=True)
+class LatencyPrior:
+  """A categorical distribution over :data:`LAGS`."""
 
-  The algebra -- mixing, temperature-scaled construction from costs,
-  fingerprinting -- is :class:`piper_push.prior.CategoricalPrior`, shared with
-  the servo-damping axis of Phase WM1-B.  What is here is the lag-specific
-  reading of it: the buffer needs a maximum, and a report wants milliseconds.
-  """
+  probs: tuple[float, ...]
 
-  VALUES = LAGS
-  UNIT = "control steps"
+  def __post_init__(self) -> None:
+    if len(self.probs) != len(LAGS):
+      raise ValueError(f"expected {len(LAGS)} probabilities, got {len(self.probs)}")
+    if any(p < 0.0 for p in self.probs):
+      raise ValueError(f"negative probability in {self.probs}")
+    total = sum(self.probs)
+    if not math.isclose(total, 1.0, abs_tol=1e-6):
+      raise ValueError(f"probabilities sum to {total}, not 1")
+
+  @classmethod
+  def point(cls, lag: int) -> "LatencyPrior":
+    if lag not in LAGS:
+      raise ValueError(f"{lag} is not one of {LAGS}")
+    return cls(tuple(1.0 if v == lag else 0.0 for v in LAGS))
+
+  @classmethod
+  def uniform(cls) -> "LatencyPrior":
+    return cls(tuple(1.0 / len(LAGS) for _ in LAGS))
+
+  @property
+  def argmax(self) -> int:
+    return LAGS[max(range(len(LAGS)), key=lambda i: self.probs[i])]
+
+  @property
+  def entropy_bits(self) -> float:
+    return float(-sum(p * math.log2(p) for p in self.probs if p > 0.0))
+
+  @property
+  def mean(self) -> float:
+    return float(sum(p * v for p, v in zip(self.probs, LAGS)))
 
   @property
   def mean_lag(self) -> float:
     return self.mean
 
   @property
+  def support(self) -> tuple[int, ...]:
+    return tuple(v for v, p in zip(LAGS, self.probs) if p > 0.0)
+
+  @property
   def max_lag(self) -> int:
     return int(max(self.support))
 
+  def mass(self, lag: int) -> float:
+    return float(self.probs[LAGS.index(lag)])
+
+  def is_point_at(self, lag: int, tol: float = 1e-9) -> bool:
+    return abs(self.mass(lag) - 1.0) <= tol
+
+  def sample(self, n: int, generator: torch.Generator | None = None,
+             device="cpu") -> torch.Tensor:
+    w = torch.tensor(self.probs, dtype=torch.float64)
+    idx = torch.multinomial(w, n, replacement=True, generator=generator)
+    return torch.tensor(LAGS)[idx].to(device)
+
   def to_json(self) -> dict:
-    d = super().to_json()
-    d["lags"] = list(LAGS)
-    d["mean_lag_steps"] = self.mean
-    d["mean_lag_ms"] = self.mean * STEP_MS
-    return d
+    return {
+      "lags": list(LAGS),
+      "unit": "control steps",
+      "probs": list(self.probs),
+      "argmax": self.argmax,
+      "mean": self.mean,
+      "mean_lag_steps": self.mean,
+      "mean_lag_ms": self.mean * STEP_MS,
+    }
 
 
 P_SOURCE = LatencyPrior.point(0)
-"""The distribution the deployed policy was actually trained under.
-
-Written as ``delta(0)`` because that is what it is: every rollout that produced
-``f3/model_1500`` ran with no observation delay.  Calling it a broad latency
-prior would make the retention half of the gate meaningless -- there would be
-nothing to retain."""
+"""No delay: the nominal task's camera."""
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +115,7 @@ nothing to retain."""
 
 
 class LatencyScene:
-  """The camera term, plus the per-environment lag assignment.
-
-  Wraps the WM0 perturbation term so that the depth axes still compose; with
-  no depth mismatch configured that wrapper is a straight pass-through to
-  ``pick_mdp.camera_scene``.
+  """``pick_mdp.CameraScene`` plus the per-environment lag assignment.
 
   Where the lag write lands in the step: the observation manager runs
   ``func -> noise -> clip -> scale -> nan-check -> delay``, so a lag written
@@ -107,9 +125,9 @@ class LatencyScene:
   """
 
   def __init__(self, cfg, env) -> None:
-    from piper_push.perturb import PerturbedCameraScene
+    from piper_push.tasks.pick_place import mdp as pick_mdp
 
-    self._inner = PerturbedCameraScene(cfg, env)
+    self._inner = pick_mdp.CameraScene(cfg, env)
     probs = tuple(float(x) for x in cfg.params["latency_probs"])
     self._prior = LatencyPrior(probs)
     self._env = env
@@ -117,8 +135,6 @@ class LatencyScene:
       int(cfg.params.get("latency_seed", 0)) ^ 0x1A7E)
     self._lags = self._prior.sample(env.num_envs, self._gen, "cpu").to(env.device)
     self._buffer = None
-
-  # -- lag plumbing ---------------------------------------------------------
 
   def _find_buffer(self):
     """The DelayBuffer the manager built for *this* term.
@@ -154,7 +170,12 @@ class LatencyScene:
     return obs
 
   def reset(self, env_ids=None) -> None:
-    self._inner.reset(env_ids)
+    # The camera term holds a sensor (frozen noise field, per-surface quality
+    # drawn at reset); swallowing the reset would freeze one environment's
+    # fixed-pattern error for the whole run.
+    inner_reset = getattr(self._inner, "reset", None)
+    if callable(inner_reset):
+      inner_reset(env_ids)
     if env_ids is None:
       idx = slice(None)
       n = self._env.num_envs
@@ -163,8 +184,6 @@ class LatencyScene:
       n = len(env_ids)
     if n:
       self._lags[idx] = self._prior.sample(n, self._gen, "cpu").to(self._lags.device)
-
-  # -- for instrumentation --------------------------------------------------
 
   @property
   def lags(self) -> torch.Tensor:
@@ -177,8 +196,7 @@ def apply_latency_prior(env_cfg, prior: LatencyPrior, seed: int = 0) -> dict:
   """Install ``prior`` on the task's camera observation term.
 
   Returns a provenance dict.  A point mass at zero leaves the config untouched
-  and returns ``{}`` -- the nominal path stays byte-identical to the one every
-  earlier result was measured on.
+  and returns ``{}`` -- the nominal path stays byte-identical.
   """
   if prior.is_point_at(0):
     return {}

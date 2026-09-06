@@ -218,7 +218,7 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
     # Distinct in purpose from the four fields above: those are *filters we
     # choose to apply*, these are *ways the real arm differs from the model*.
     # Both are inert at their defaults and neither is set by any training
-    # config; see piper_push.perturb.
+    # config.
 
     latency_steps: int = 0
     """Whole control steps of delay between the policy's command and the
@@ -240,7 +240,7 @@ class RateLimitedJointPositionActionCfg(JointPositionActionCfg):
 
     # -- structural command-path stage (Phase RA-Sim-0) --------------------
     # Everything above is a *parameter*: a scalar the calibration axes in
-    # piper_push.perturb can search over.  This is the slot for a mismatch
+    # a mismatch search can sweep.  This is the slot for a mismatch
     # that is not a scalar -- a per-joint hysteresis, a rate-dependent lag --
     # and for the learned residual that tries to cancel one.  Empty by
     # default, and an empty tuple leaves process_actions byte-for-byte the

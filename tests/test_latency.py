@@ -1,19 +1,11 @@
 """Observation latency: one implementation, and a distribution over it.
 
-Two things have to hold before any WM1 number means anything.
-
-* mjlab's ``DelayBuffer`` must serve the same sequence the Phase WM0 ring
-  buffer served, or the gate thresholds inherited from WM0 -- 42.19 zero-shot,
-  49.72 oracle, 47.46 to pass G2 -- are thresholds on a different experiment.
-  ``test_matches_the_wm0_ring_buffer`` pins that, and
-  ``results/wm1_latency/equivalence/`` carries the in-simulator re-measurement,
-  because agreeing on a toy sequence is necessary and not sufficient.
+* mjlab's ``DelayBuffer`` must serve the sequence a plain ring buffer serves
+  (``test_matches_the_wm0_ring_buffer`` pins that).
 * the per-environment lag must come from the prior that was asked for and
   must not change inside an episode.  A lag that silently resamples every step
   is observation *jitter*, which is a different mismatch with a different
   answer.
-
-Run with:  micromamba run -n mjlab python -m pytest tests -q
 """
 
 from __future__ import annotations
@@ -78,8 +70,7 @@ def test_reset_serves_fresh_frames_not_black_ones():
   Zeros after a reset are a scene the policy has never seen, and it reacts to
   them; both implementations backfill instead.  They differ in the three-step
   transient afterwards -- mjlab ramps the lag up as history refills, the ring
-  buffer held the reset frame -- which is why the empirical re-measurement in
-  results/wm1_latency/equivalence/ exists rather than only this test.
+  buffer held the reset frame.
   """
   buf = DelayBuffer(min_lag=3, max_lag=3, batch_size=2)
   for t in range(10):
@@ -133,38 +124,6 @@ def test_source_prior_is_a_point_mass_at_zero():
   would be a much weaker requirement and G4 would not mean what it says.
   """
   assert latency.P_SOURCE.is_point_at(0)
-
-
-def test_mix_is_the_adaptation_distribution():
-  q = latency.LatencyPrior.point(3)
-  m = q.mix(latency.P_SOURCE, 0.75)
-  assert m.mass(3) == pytest.approx(0.75)
-  assert m.mass(0) == pytest.approx(0.25)
-  assert q.mix(latency.P_SOURCE, 1.0).probs == q.probs
-  with pytest.raises(ValueError):
-    q.mix(latency.P_SOURCE, 1.5)
-
-
-def test_from_scores_prefers_the_cheapest_candidate():
-  """Scores are costs; the posterior has to fall the other way from logits."""
-  q = latency.LatencyPrior.from_scores([5.0, 4.0, 3.0, 0.0, 6.0], temperature=1.0)
-  assert q.argmax == 3
-  hot = latency.LatencyPrior.from_scores([5.0, 4.0, 3.0, 0.0, 6.0], temperature=10.0)
-  assert hot.entropy_bits > q.entropy_bits
-
-
-def test_temperature_only_sharpens_it_does_not_move_the_mode():
-  s = [2.0, 1.0, 0.5, 0.0, 3.0]
-  modes = {latency.LatencyPrior.from_scores(s, temperature=t).argmax
-           for t in (0.1, 1.0, 5.0)}
-  assert modes == {3}
-
-
-def test_fingerprint_deduplicates_identical_adaptation_runs():
-  a = latency.LatencyPrior.from_scores([9, 9, 9, 0, 9], temperature=0.5)
-  b = latency.LatencyPrior.point(3)
-  assert a.fingerprint() == b.fingerprint()
-  assert a.total_variation(b) < 1e-3
 
 
 def test_sampling_follows_the_prior():
@@ -227,18 +186,6 @@ def test_a_prior_with_no_delay_support_is_rejected_by_the_buffer_size():
   assert latency.apply_latency_prior(cfg, latency.LatencyPrior.point(0)) == {}
 
 
-def test_perturb_routes_obs_latency_to_the_native_fields():
-  """One implementation in the tree, and this is the proof of it."""
-  from piper_push import perturb
-
-  cfg = _vision_cfg()
-  perturb.apply_session_mismatch(cfg,
-                                 perturb.SessionMismatchCfg(obs_latency_steps=3))
-  term = cfg.observations["camera"].terms["scene"]
-  assert (term.delay_min_lag, term.delay_max_lag) == (3, 3)
-  assert not hasattr(perturb.PerturbedCameraScene, "_buf")
-
-
 def test_args_round_trip():
   import argparse
 
@@ -281,7 +228,7 @@ def _scene_term(probs, n=4):
             "latency_probs": probs, "latency_seed": 3}
   env = _Env(n)
   t = latency.LatencyScene(_Cfg(params), env)
-  t._inner._inner = lambda e, s, c, *a, **k: e.scene[s].data.depth.reshape(n, -1)
+  t._inner = lambda e, *a, **k: e.scene[k["sensor_name"]].data.depth.reshape(n, -1)
   return t, env, params
 
 
