@@ -49,7 +49,9 @@ brings the numbers back.
   runner loads nothing), `--sensor measured` (a student with the sensor off is
   out of distribution), GRU reset on dones inside `inference_mode`
   (`eval_occlusion.reset_recurrent`), 256 envs, 3 seeds (101/202/303), 2400
-  steps for accept and 1200 no-reset steps for endurance. Quote the median
+  steps for accept and 1200 no-reset steps for endurance (24 s: shorter than the 36 s
+  training episode; `scripts/pc/eval_initiation.py --steps 9000 --episode-length-s 1000000`
+  is the run past the horizon). Quote the median
   with the spread and the late/early ratio beside every placed/min. Read
   `provenance.env_knobs`, `provenance.sensor` and `validity` before comparing
   two JSONs. Perception numbers from one environment are anecdote (6–92%
@@ -79,14 +81,14 @@ brings the numbers back.
 ## Code map
 
 - `src/piper_push/tasks/pick_place/`: `env_cfg.py` (scene, observations, rewards, events, terminations), `mdp.py` (terms, `CameraScene`), `rl_cfg.py`, `robust_cfg.py` (`HEAVY_DR_PROFILE`, measured D455 sensor, latency mixture, `make_robust_env_cfg`), `cold_curriculum.py` + `cold_cfg.py` (capability-gated cold-start teacher, `PIPER_COLD_START_STAGE`), `pc_cfg.py` (point-cloud tasks), `__init__.py` (registrations).
-- `src/piper_push/pc/`: `cloud.py` (measured sensor → base-frame workspace cloud or metric depth, 3-of-5 cadence, 0–4 step latency ring, `vision_meta`), `encoders.py` (PointNet, point-patch transformer, set MLP, depth ResNet-lite), `models.py` (`SetRecurrentModel`, export wrappers), `grasp.py` (analytic top-K grasp candidates + lock for P2).
+- `src/piper_push/pc/`: `routes.py` (route names, base route, target channel, oracle guard), `cloud.py` (measured sensor → base-frame workspace cloud or metric depth, 3-of-5 cadence, 0–4 step latency ring, `vision_meta`, `target_channel`), `encoders.py` (PointNet, point-patch transformer, set MLP, depth ResNet-lite), `models.py` (`SetRecurrentModel`, export wrappers), `grasp.py` (analytic top-K grasp candidates + lock for P2).
 - `src/piper_push/`: `robot.py`, `objects.py`, `shapes.py`, `camera.py`, `depth_noise.py`, `d455_noise.py`, `actions.py`, `squashed.py`, `action_api.py`, `latency.py`, `models.py`, `distill.py`, `checkpoints.py`, `evalcfg.py`, `layout.py` (+90° calibrated layout), `target_process.py`, `runners.py`.
-- `scripts/`: `accept_s1.py`, `eval.sh`, `eval_endurance.py`, `eval_occlusion.py`, `distill.py`, `finetune.py` (`--iterations` is an absolute target when resuming), `train.sh`, `run_v10c.sh` + `v10c_verdict.py` (cold-start teacher from scratch with a declared verdict), `check_export.py`, `export_obs_spec.py`, `student_to_actor.py`, `pc/` (`run_route.sh`, `continue_teacher.sh`, `eval_teacher.sh`, `eval_actions.py`, `smoke.py`, `report_routes.py`, `report_teacher.py`, `bundle.py`, `viewer.py`), mask-line diagnostics (`sight_viewer.py`, `sim_perception_check.py`, `record_vision.py`, `measure_target_gaps.py`, `check_cadence.py`), `rig_to_sim.py`, `fit_object_distribution.py`, `logview.sh`, `pull_results.sh`, `bringup_d455.sh`, `accept_student.sh`.
+- `scripts/`: `accept_s1.py`, `eval.sh`, `eval_endurance.py`, `eval_occlusion.py`, `distill.py`, `finetune.py` (`--iterations` is an absolute target when resuming), `train.sh`, `run_v10c.sh` + `v10c_verdict.py` (cold-start teacher from scratch with a declared verdict), `check_export.py`, `export_obs_spec.py`, `student_to_actor.py`, `pc/` (`run_route.sh`, `launch_gen2.sh`, `continue_teacher.sh`, `eval_teacher.sh`, `eval_actions.py`, `eval_initiation.py` (attempts, waits, stalls, stuck objects, target visibility by phase; the long no-reset run), `diag_bin_settle.py`, `smoke.py`, `report_routes.py`, `report_teacher.py`, `bundle.py`, `viewer.py`), mask-line diagnostics (`sight_viewer.py`, `sim_perception_check.py`, `record_vision.py`, `measure_target_gaps.py`, `check_cadence.py`), `rig_to_sim.py`, `fit_object_distribution.py`, `logview.sh`, `pull_results.sh`, `bringup_d455.sh`, `accept_student.sh`.
 - `hardware/deploy/`: `run.py` (the guarded 50 Hz loop; `--obs pc` for point-cloud bundles), `config.py` + `rig_d455.json` (calibration, hand-eye residual 3.9 mm, table plane), `rectify.py`, `mask.py`, `lifecycle.py`, `target_mask.py`, `sam_tracker.py`/`sam2_predictor.py`/`rgbmap.py`, `yolo_backend.py`, `stereo.py`, `obs.py`, `proprio.py`, `policy.py`, `robot.py` (MIT response flag 0xAD; `piper_sdk.JointMitCtrl` does not move this arm), `sensor.py`, `calibrate.py` + `calibgui.py`, `jointcheck.py`, `scene.py`, `review.py`, `logview.py`, `graspview.py`, `gripcal.py`, `mit.py`, `sysid.py`, `selftest.py`, `pc_obs.py`, `pc_perception.py`, `pc_run.py`. README there is the bring-up order.
 - `hardware/depth_bench/`: the D405/D455 bench and `model/fit_d455_noise.py`.
 - `tests/`: 408 tests; `test_deploy.py` is the deployment stack against the simulator.
 
-Task ids: `Mjlab-Pick-Place-PiperX{,-Robust,-Vision,-Vision-Robust,-Distill,-Distill-Robust}` (+ `-V1` for legacy checkpoints, `-Wrist`, `-Half`/`-ThreeQ` dropout ramps, `-Robust-Cold[-NoSight]`, `-Robust-Cold2[-NoSight]`), and `Mjlab-Pick-Place-PiperX-PC-{P0,P1A,P1B,P2}-{Distill,Vision,Vision-Heldout}`.
+Task ids: `Mjlab-Pick-Place-PiperX{,-Robust,-Vision,-Vision-Robust,-Distill,-Distill-Robust}` (+ `-V1` for legacy checkpoints, `-Wrist`, `-Half`/`-ThreeQ` dropout ramps, `-Robust-Cold[-NoSight]`, `-Robust-Cold2[-NoSight]`), and `Mjlab-Pick-Place-PiperX-PC-{P0,P1A,P1B,P2,P1BZ,P1BT}-{Distill,Vision,Vision-Heldout}` (`P1BZ`/`P1BT` = P1B with a fifth per-point column, zero / oracle target flag; `P1BT` is simulation-only and every bundle and deployment entry point refuses it; `piper_push.pc.routes`).
 
 ## Where history lives
 

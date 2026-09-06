@@ -144,13 +144,13 @@ src/piper_push/
 ├── actions.py, squashed.py, action_api.py           bounded action term, tanh head, the API stamp
 ├── latency.py                                       per-environment observation delay (robust task)
 ├── models.py, distill.py, checkpoints.py, evalcfg.py  recurrent model, DAgger runner, conversion, the evaluation ruler
-├── pc/                                              point-cloud line: cloud.py (capture, cadence, ring), encoders.py, models.py, grasp.py
+├── pc/                                              point-cloud line: routes.py, cloud.py (capture, cadence, ring, target channel), encoders.py, models.py, grasp.py
 └── tasks/pick_place/                                env_cfg, mdp, rl_cfg, robust_cfg (heavy DR), cold_curriculum, pc_cfg, registrations
 scripts/
 ├── accept_s1.py, eval.sh, eval_endurance.py, eval_occlusion.py   the ruler
 ├── distill.py, finetune.py, train.sh, run_v10c.sh, v10c_verdict.py  training
 ├── check_export.py, export_obs_spec.py, student_to_actor.py        export
-├── pc/                                              run_route, continue_teacher, eval_teacher, eval_actions, smoke, reports, bundle, viewer
+├── pc/                                              run_route, launch_gen2, continue_teacher, eval_teacher, eval_actions, eval_initiation, diag_bin_settle, smoke, reports, bundle, viewer
 └── sight_viewer.py, sim_perception_check.py, record_vision.py, rig_to_sim.py   mask-line diagnostics, rig-to-sim check
 hardware/
 ├── deploy/                                          D455 + PiPER-X -> the policy (run.py, calibration, perception, pc_*)
