@@ -1,0 +1,116 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 1800,
+  "counts": {
+    "in_footprint_not_grasped": 77819,
+    "fail_inside_margin": 2484,
+    "fail_below_rim": 8642,
+    "fail_released": 4390,
+    "fail_settled": 57270,
+    "fail_grasp_paid": 3942,
+    "knock_counting": 125,
+    "all_pass": 16832
+  },
+  "envs_gt_3s_in_footprint_unregistered": 188,
+  "envs_gt_20s_in_footprint_unregistered": 1,
+  "bottom_height_mm": {
+    "p10": -10.6718884781003,
+    "p50": 2.041940577328205,
+    "p90": 57.79073387384415
+  },
+  "bin_inner": [
+    0.07,
+    0.08
+  ],
+  "place_margin_m": 0.012,
+  "rim_z": 0.06,
+  "settle_vel_threshold": 0.06,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": null
+    },
+    "argv": [
+      "scripts/pc/diag_bin_settle.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Robust",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:4",
+      "--out",
+      "results/pc/gen2/teacher_v11_20260906T1020/bin_settle_teacher_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 14,
+      "iter": 9399,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": []
+    }
+  },
+  "unsettled_in_bin": {
+    "steps": 54563,
+    "speed_m_s": {
+      "p10": 0.07909895479679108,
+      "p50": 0.2642069160938263,
+      "p90": 1.2200565338134766,
+      "max": 2.588498592376709
+    },
+    "ang_vel_rad_s_p50": 7.163036823272705,
+    "hand_dist_m": {
+      "p10": 0.020394766703248024,
+      "p50": 0.11855544149875641,
+      "p90": 0.2925778925418854
+    },
+    "steps_hand_farther_than_15cm": 23330,
+    "steps_pad_in_contact": 3175,
+    "shape_class_share": {
+      "box": 0.25663912296295166,
+      "cylinder": 0.38093578815460205,
+      "stepped": 0.1286402940750122,
+      "l_shape": 0.13703425228595734,
+      "capped": 0.09675054252147675
+    },
+    "shape_class_base_rate_steps": {
+      "box": 0.33782118558883667,
+      "cylinder": 0.19968749582767487,
+      "stepped": 0.15403428673744202,
+      "l_shape": 0.1817491352558136,
+      "capped": 0.12670789659023285
+    },
+    "half_size_mm_p50": [
+      17.691225051879883,
+      17.37870216369629,
+      24.279455184936523
+    ],
+    "height_over_width_p50": 1.3371533155441284
+  }
+}

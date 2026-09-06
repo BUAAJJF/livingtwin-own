@@ -123,34 +123,40 @@ and 167 resets from the two terminations, all reported.  The jaw command tracks 
 opening within 1 mm except while engaged (24 mm commanded vs 30 measured: the jaw is being asked
 to close and the object is not in it).
 
-**2.5 Teacher-side reference (v10c nosight `model_7400`, the state teacher on the local machine;
-the qualified v11 lives on the training host and is measured there by `launch_gen2.sh`).**
-State task `Mjlab-Pick-Place-PiperX-Robust`, seed 101, 256 envs, same ruler.  v10c is the
-checkpoint v11 was continued from; it failed the 24 s endurance gate by 0.016.
+**2.5 Teacher-side reference: the qualified v11 teacher under the same ruler** (state task
+`Mjlab-Pick-Place-PiperX-Robust`, three seeds, 256 envs, on the training host:
+`results/pc/gen2/teacher_v11_20260906T1020/`, sha256 `d685b548…`).  The local v10c nosight
+`model_7400` (the checkpoint v11 was continued from) gives the same picture at 19.1 placed/min and
+late/early 0.70 (`results/pc/gen2/audit/*teacher_v10c*`).
 
-| | gen-1 P1B student (3 seeds) | v10c teacher (seed 101) |
+| | gen-1 P1B student (3 seeds) | v11 teacher (3 seeds) |
 |---|---|---|
-| placed / min, 36 s | 6.15 | 19.1 |
-| attempts / min; grasps / min | 55.3; 7.0 | 66.0; 21.2 |
-| grasps per attempt; success per grasp | 0.126; 0.88 | 0.32; 0.90 |
-| steps engaged / carrying | 31 % / 2.2 % | 34 % / 6.5 % |
-| stalled step fraction; envs stalled at the end | 0.28; 35 % | 0.155; 22 % |
-| late/early placed, 36 s (raw / live) | 0.33 / 0.34 | 0.70 / 0.70 |
-| late/early attempts, 36 s | 0.85 | 0.81 |
-| 180 s, per 36 s block, placed / min | 6.4 → 1.0 → 0.4 → 0.4 → 0.1 | 19.7 → 11.7 → 7.7 → 4.9 → 3.9 |
-| 180 s, late/early placed / attempts | 0.08 / 0.84 | 0.34 / 0.67 |
-| stuck-object step fraction, 36 s / 180 s | 0.059 / 0.10 | 0.024 / 0.016 |
-| bin-unsettled envs > 3 s (of 256); object speed p50 | 67; 0.10 m/s | 168; 0.22 m/s |
-| `object_lost` / `over_speed` per arm-minute | 0.67 / 0.22 | 0.31 / 0.68 |
+| placed / min, 36 s (raw / live time) | 6.15 / 6.56 | 20.7 [20.2, 20.8] / 20.9 |
+| attempts / min; grasps / min | 55.3; 7.0 | 65.3; 23.8 |
+| grasps per attempt; success per grasp | 0.126; 0.88 | 0.36 [0.35, 0.37]; 0.87 |
+| steps engaged / carrying | 31 % / 2.2 % | 32 % / 7.9 % |
+| jaw commanded while engaged (measured) | 24.8 mm (30.5) | 17.3 mm |
+| stalled step fraction; envs stalled at the end | 0.28; 35 % | 0.19 [0.18, 0.20]; 31 % |
+| late/early placed, 36 s (raw / live) | 0.33 / 0.34 | 0.78 [0.78, 0.80] / 0.78 |
+| late/early attempts, 36 s | 0.85 | 0.83 |
+| 180 s, per 36 s block, placed / min (seed 101) | 6.4 → 1.0 → 0.4 → 0.4 → 0.1 | 20.5 → 12.2 → 8.1 → 6.5 → 4.9 |
+| 180 s, late/early placed / attempts; last 36 s over first 36 s | 0.08 / 0.84; 0.01 | 0.41 / 0.51; 0.24 |
+| 180 s, stalled step fraction | 0.46 | 0.50 |
+| stuck-object step fraction, 36 s / 180 s | 0.059 / 0.10 | 0.010 / 0.014 |
+| bin-unsettled envs > 3 s (of 256, seed 101); object speed p50 | 67; 0.10 m/s | 188; 0.26 m/s |
+| drops per 36 s run; `object_lost` per arm-minute | 60; 0.67 | 83; 0.38 |
 
-*Facts:* (i) once the hand is within 90 mm, the teacher converts to a secure grasp 2.5× as often as
-the student, and once grasped both place about 90 % of the time -- the student's deficit is
+*Facts:* (i) once the hand is within 90 mm, the teacher converts to a secure grasp 2.9× as often as
+the student (0.36 vs 0.126 grasps per attempt) and commands the jaw to 17 mm where the student
+commands 25 mm; once grasped both place about 87-88 % of the time -- the student's deficit is
 **at the grasp**, not before it and not after it.  (ii) The teacher itself decays past its
-horizon: 19.7 → 3.9 placed/min over 180 s, stalls rising to 40 % of steps, attempts late/early
-0.67.  A student distilled from it cannot be expected to hold up where its labels do not, so the
-long run scores E0 and E2 **against the v11 teacher's own long run** (measured on the host by the
-launcher), not against 1.0.  (iii) The bin artefact hits the teacher in more environments (it
-releases faster: 0.22 m/s) but for less time (2.4 % of steps): it is not what separates them.
+horizon: 20.5 → 4.9 placed/min over 180 s, the last 36 s at a quarter of the first, stalls at
+half of all steps, attempts late/early 0.51.  A student distilled from it cannot be expected to
+hold up where its labels do not, so the long run scores E0 and E2 **against this row**, not
+against 1.0; and the 24 s endurance number the gate uses (v11: 0.858) is a different, shorter
+quantity from the 36 s late/early here (0.78).  (iii) The bin artefact hits the teacher in more
+environments (it releases faster, 0.26 m/s) but for far less time (1 % of steps): it is not what
+separates them.
 
 **2.6 What the audit rules out and what it leaves.**  Ruled out as *the* cause of the gen-1
 decay: a hidden "which object" (one object); a missing target *channel in the reward* (the
@@ -158,7 +164,8 @@ command is the same everywhere); the teacher's gripper latch (jaw open in every 
 evaluation defect (three seeds within 4 %, live-time rates, terminations counted); the bin
 artefact (6 % of steps).  Left, and now measurable per phase: the student rarely closes on an
 object it is next to, with the object present in the cloud as ~11 points (p50 5, absent on 29 %
-of frames) at that moment; and a horizon decay shared with the teacher.  E0 (fixed cadence,
+of frames) at that moment; and a horizon decay the teacher shares (its own last-36-s rate is a
+quarter of its first).  E0 (fixed cadence,
 same everything) says how much of the gen-1 number was the cadence bug; E2 (the same 5-11 points
 flagged) says whether *knowing which of the points are the object* is what the grasp is missing.
 
