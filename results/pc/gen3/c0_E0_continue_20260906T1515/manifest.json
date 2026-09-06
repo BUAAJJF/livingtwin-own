@@ -1,0 +1,4 @@
+{"resume": "logs/rsl_rl/piperx_pc_p1bz_vision/2026-09-06_11-36-43_pc_gen2_P1BZ_20260906T1020_finetune/model_799.pt", "resume_sha256": "aac0d2427ecaa4e5bcdf54dfccc568101de487b94885004c340d35e0cb5b238b", "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision", "iterations_target": 1600, "gpu": 4,
+ "seed": 42, "vision_envs": 512, "episode_s": 36.0, "eval_envs": 256, "eval_seeds": "101 202 303",
+ "code_commit_local": "6bb1f09", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068", "started": "2026-09-06T15:16:03+00:00", "host": "shen-teacher-26",
+ "env_knobs": {"OBJECT_ASTRAY_TERMINATE": "unset(default on)"}}

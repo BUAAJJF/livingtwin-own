@@ -1,0 +1,172 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_vision_robust/2026-09-06_16-31-45_pc_gen3_R1_MASK_20260906T1515_finetune/model_799.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision-Robust",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 600,
+  "bounded": true,
+  "action_dim": 7,
+  "frac_sat99": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "frac_sat999": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mean_abs_u": [
+    0.8132411332925161,
+    0.19149523866673313,
+    0.5470847706496715,
+    0.2684929673870405,
+    0.18775396858652435,
+    0.19786478521923226,
+    0.7294451703627904
+  ],
+  "max_abs_u": [
+    1.5385758876800537,
+    1.2561006546020508,
+    1.0014413595199585,
+    1.418294072151184,
+    1.106111764907837,
+    1.0386853218078613,
+    2.225597858428955
+  ],
+  "mean_abs_da": [
+    0.02976221109247566,
+    0.052222174093226756,
+    0.03520925640935492,
+    0.07994467996446437,
+    0.095350769116778,
+    0.08551577956902363,
+    0.042065672893605764
+  ],
+  "mean_abs_da_all": 0.060010077591275586,
+  "jaw_cmd_mm_mean": 38.61674888059497,
+  "jaw_meas_mm_mean": 37.555026327754604,
+  "jaw_cmd_mm_last100": 39.29269179701805,
+  "jaw_meas_mm_last100": 39.08764809370041,
+  "jaw_end_mm_median": 40.808406829833984,
+  "jaw_end_mm_p10": 35.03327178955078,
+  "gripper_action_hist20": [
+    0.004908854141831398,
+    0.007389322854578495,
+    0.00598958320915699,
+    0.005143229383975267,
+    0.004680989775806665,
+    0.00524088554084301,
+    0.005592447705566883,
+    0.006126302294433117,
+    0.00696614570915699,
+    0.007988281548023224,
+    0.009778645820915699,
+    0.012317708693444729,
+    0.01910807378590107,
+    0.03458984196186066,
+    0.08018229156732559,
+    0.19599609076976776,
+    0.3318033814430237,
+    0.2326953113079071,
+    0.02350260503590107,
+    0.0
+  ],
+  "terminations": {
+    "over_speed": 7,
+    "object_lost": 25,
+    "object_astray": 35,
+    "nan": 0,
+    "time_out": 0
+  },
+  "terminations_per_arm_minute": {
+    "over_speed": 0.13671875,
+    "object_lost": 0.48828125,
+    "object_astray": 0.68359375,
+    "nan": 0.0,
+    "time_out": 0.0
+  },
+  "safe_env_fraction": 0.88671875,
+  "safe_env_fraction_def": "environments with no over_speed and no object_lost termination over the whole rollout",
+  "nonfinite_action_steps": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 2,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/pc/eval_actions.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_vision_robust/2026-09-06_16-31-45_pc_gen3_R1_MASK_20260906T1515_finetune/model_799.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Vision-Robust",
+      "--num-envs",
+      "256",
+      "--steps",
+      "600",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen3_R1_MASK_20260906T1515/actions_final_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 24,
+      "iter": 799,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": []
+    }
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_vision_robust/2026-09-06_16-31-45_pc_gen3_R1_MASK_20260906T1515_finetune/model_799.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Vision-Robust",
+  "num_envs": 256,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 0.625,
+  "held_fraction": 0.002265625,
+  "joint_speed_rad_s": {
+    "mean": 1.3412166833877563,
+    "p95": 2.165492057800293,
+    "p99": 2.478212594985962,
+    "max": 3.2541897296905518,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.07503226399421692,
+  "all": {
+    "n": 76800,
+    "visible_mean": 0.6294635416666667,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.1173046875,
+    "occluded_by": {
+      "fingers": 0.128796875,
+      "gripper_base": 0.015046006944444445,
+      "arm": 5.295138888888889e-05,
+      "other": 0.226640625
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 76626,
+      "visible_mean": 0.6302142875786287,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.11596586015190666,
+      "occluded_by": {
+        "fingers": 0.12791306693115478,
+        "gripper_base": 0.015034061545689453,
+        "arm": 5.307162929901948e-05,
+        "other": 0.2267855123152281
+      }
+    },
+    "holding": {
+      "n": 174,
+      "visible_mean": 0.29885057471264365,
+      "visible_median": 0.3,
+      "blocked_rate": 0.7068965517241379,
+      "occluded_by": {
+        "fingers": 0.518007662835249,
+        "gripper_base": 0.020306513409961684,
+        "arm": 0.0,
+        "other": 0.16283524904214558
+      }
+    }
+  },
+  "engaged": {
+    "n": 64109,
+    "visible_mean": 0.6150660073728598,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.13314823191751549,
+    "occluded_by": {
+      "fingers": 0.1485293276555034,
+      "gripper_base": 0.016823430927534876,
+      "arm": 4.159582377929256e-06,
+      "other": 0.21957707446172403
+    }
+  },
+  "reach_m": {
+    "mean": 0.10625555366277695,
+    "engaged_fraction": 0.8370182291666667
+  },
+  "seed": 101,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 2,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_occlusion.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_vision_robust/2026-09-06_16-31-45_pc_gen3_R1_MASK_20260906T1515_finetune/model_799.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Vision-Robust",
+      "--num-envs",
+      "256",
+      "--steps",
+      "300",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen3_R1_MASK_20260906T1515/occlusion_final_s101.json"
+    ]
+  }
+}

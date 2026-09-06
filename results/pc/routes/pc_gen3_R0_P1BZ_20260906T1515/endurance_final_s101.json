@@ -1,0 +1,90 @@
+{
+  "placed_per_min": [
+    11.25,
+    18.1640625,
+    15.703125,
+    15.9375,
+    15.46875,
+    13.4765625,
+    12.65625,
+    14.0625,
+    11.484375,
+    11.71875,
+    11.484375,
+    11.1328125
+  ],
+  "early_per_min": 15.0,
+  "late_per_min": 12.08984375,
+  "late_over_early": 0.8059895833333334,
+  "started_envs": 96,
+  "stopped_envs": 65,
+  "survivor_fraction": 0.32291666666666663,
+  "survivor_placements_last": 1.064516129032258,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 28.585918247699738,
+  "jaw_mm_running": 27.69787237048149,
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1bz_vision/2026-09-06_17-57-19_pc_gen3_R0_P1BZ_20260906T1515_finetune/model_799.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1bz_vision/2026-09-06_17-57-19_pc_gen3_R0_P1BZ_20260906T1515_finetune/model_799.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:4",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen3_R0_P1BZ_20260906T1515/endurance_final_s101.json"
+    ]
+  }
+}
