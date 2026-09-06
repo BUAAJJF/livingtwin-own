@@ -262,6 +262,23 @@ def test_carry_anchors_from_the_depth_mask_and_publishes_it_that_frame():
   assert np.array_equal(r.mask, m), "on the anchor frame they are the same mask"
 
 
+def test_carry_falls_back_to_current_depth_when_sam_is_withheld():
+  """A SAM rejection must not erase the chooser's valid current mask.
+
+  The watchdog only establishes that SAM's propagated mask is unsafe.  The
+  depth stack independently selected this frame's mask and remains the target
+  authority, so holding the arm here is both unnecessary and observably worse.
+  """
+  t = _tracker([blob(112, 112)])
+  depth_mask = blob(40, 40)
+  t.carry(IMG, depth_mask, ALL_DEPTH)
+  r = t.carry(IMG, depth_mask, ALL_DEPTH)
+  assert r.state is State.UNCERTAIN
+  assert np.array_equal(r.mask, depth_mask)
+  assert r.reason.startswith("depth fallback after jumped")
+  assert t.report()["depth_fallbacks"] == 1
+
+
 def test_carry_keeps_propagating_while_the_depth_stack_has_nothing():
   """The gap the tracker exists for: the segmenter loses the object as the
   hand arrives -- 7% of frames within 30 mm, measured -- and SAM carries it."""
@@ -298,10 +315,14 @@ def test_carry_does_not_re_anchor_when_the_two_disagree():
   mask: it is exactly as likely to be the segmenter picking up a bystander."""
   t = _tracker([blob(32, 32)] * 4)
   t.carry(IMG, blob(32, 32), ALL_DEPTH)
+  depth_mask = blob(100, 100, r=6)
   for _ in range(3):
-    t.carry(IMG, blob(100, 100, r=6), ALL_DEPTH, reanchor_frames=1,
-            reanchor_iou=0.5)
+    r = t.carry(IMG, depth_mask, ALL_DEPTH, reanchor_frames=1,
+                reanchor_iou=0.5)
+    assert np.array_equal(r.mask, depth_mask), \
+      "the depth chooser must overrule a disagreeing SAM mask for this frame"
   assert t.p.anchored == 1
+  assert t.report()["depth_fallbacks"] == 3
 
 
 def test_carry_recovers_from_lost_when_the_depth_stack_offers_a_target():
@@ -370,3 +391,34 @@ def test_anchor_trimming_releases_full_resolution_prompt_tensors():
   assert set(pred.state["output_dict_per_obj"][0]["cond_frame_outputs"]) == kept
   assert set(pred.state["mask_inputs_per_obj"][0]) == kept
   assert set(pred.state["point_inputs_per_obj"][0]) == kept
+
+
+def test_predictor_warmup_exercises_both_paths_then_clears_state_and_timings():
+  pred = Sam2StreamingPredictor.__new__(Sam2StreamingPredictor)
+  pred.timing = type("OldTiming", (), {
+    "preprocess_ms": [1.0], "anchor_ms": [2.0], "infer_ms": [3.0]})()
+  calls = []
+
+  def anchor(image, target):
+    calls.append(("anchor", image.shape, target.shape, int(target.sum())))
+
+  def propagate(image):
+    calls.append(("propagate", image.shape))
+
+  def reset():
+    calls.append(("reset",))
+
+  pred.anchor = anchor
+  pred.propagate = propagate
+  pred.reset = reset
+  pred.warmup((48, 64))
+
+  assert calls == [
+    ("anchor", (48, 64), (48, 64), 81),
+    ("propagate", (48, 64)),
+    ("reset",),
+  ]
+  assert pred.warmup_ms >= 0.0
+  assert pred.timing.preprocess_ms == []
+  assert pred.timing.anchor_ms == []
+  assert pred.timing.infer_ms == []

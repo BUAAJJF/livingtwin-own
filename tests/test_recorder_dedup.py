@@ -104,3 +104,50 @@ def test_the_hold_path_agrees_with_the_command_path(tmp_path):
             {"frame_index": 12}, frame=_Frame(12))
   images = _drain(rec)
   assert len(images) == 2, "frames 11 and 12, once each"
+
+
+def test_visual_perception_arrays_stay_out_of_json_and_are_saved(tmp_path):
+  rec = run_mod._Recorder(str(tmp_path / "recorded"), queue_size=8,
+                          compress=False)
+  frame = _Frame(4)
+  frame.rgb = np.full((4, 4, 3), 33, np.uint8)
+  frame.ir = np.full((4, 4), 11, np.uint8)
+  frame.ir_right = np.full((4, 4), 22, np.uint8)
+  frame.detection_labels = np.array(
+    [[0, 0, 0, 0], [0, 2, 2, 0], [0, 2, 2, 0], [0, 0, 0, 0]], np.int32)
+  frame.source_mask = frame.detection_labels > 0
+  frame.sam_raw_mask = frame.detection_labels > 0
+  frame.sam_rgb_mask = frame.detection_labels > 0
+  frame.detection_rgb_labels = frame.detection_labels
+  frame.policy_depth = np.full((4, 4), 0.8, np.float32)
+  frame.policy_mask = np.ones((2, 3), bool)
+  frame.detections = [{"label": 2, "n_px": 4, "top_z": 0.03,
+                       "centroid_base": [0.1, 0.2, 0.03],
+                       "bbox": [1, 1, 2, 2]}]
+  frame.mask_state = "tracking"
+  frame.sensor_meta = {"depth_frame_number": 101,
+                       "color_frame_number": 101}
+  rec.write(frame.depth, frame.gray, _fb(), np.zeros(7), 2,
+            extra={"frame_index": 4}, frame=frame)
+  rec.close()
+
+  meta = json.loads((rec.dir / "meta.json").read_text())
+  control = json.loads((rec.dir / "control.json").read_text())
+  assert "_frame_arrays" not in meta[0]
+  assert "_frame_arrays" not in control[0]
+  assert meta[0]["mask_state"] == "tracking"
+  assert meta[0]["sensor"]["color_frame_number"] == 101
+  with np.load(rec.dir / "000000.npz") as saved:
+    assert int(saved["schema_version"]) == 3
+    assert set(("rgb", "ir_left", "ir_right",
+                "detection_labels_shape", "detection_labels_run_start",
+                "detection_labels_run_length", "detection_labels_run_value",
+                "detection_rgb_labels_shape", "sam_rgb_mask_bits",
+                "sam_rgb_mask_shape", "source_mask_bits",
+                "source_mask_shape")).issubset(saved.files)
+    assert not set(("sensor_depth", "sam_raw_mask", "policy_mask")) \
+      & set(saved.files)
+    source = np.unpackbits(saved["source_mask_bits"], count=16,
+                           bitorder="little").reshape(4, 4)
+    assert source.sum() == 4
+    assert saved["detection_labels_run_value"].tolist() == [2, 2]

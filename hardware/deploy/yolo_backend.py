@@ -78,13 +78,12 @@ with this exact value in the bars and a different one is a different input."""
 
 
 def _as_three_channel(img: np.ndarray) -> np.ndarray:
-  """The deployment's image is the sensor's mono frame, ``(H, W)`` uint8.
+  """Accept a gray compatibility image or the deployment's raw BGR image.
 
-  Which is the right image for this: the D405 is passive stereo, so the frame
-  the network reads is the frame the matcher failed on, and it is there
-  whatever the depth did.  Channel order is moot because all three are the same
-  -- and it has to be, since ``autolabel.py`` writes single-channel PNGs that
-  ``cv2.imread`` expands the same way at training time.
+  ONNX preprocessing below converts OpenCV/RealSense BGR to model RGB. Older
+  checkpoints were trained from single-channel depth-aligned images expanded
+  to three channels; code compatibility does not make those weights adapted
+  to the new raw-colour input domain.
   """
   a = np.asarray(img)
   if a.ndim == 2:

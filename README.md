@@ -158,6 +158,32 @@ more objects in the bin than any other, and it ended not because the policy
 failed but because the log writer could not keep up. Its arguments, with the
 fixes that landed after it:
 
+For an A/B run that changes **only the target carrier to SAM2.1**, keep the
+best run's perception and policy recipe: stereo depth, no target lifecycle,
+and no held-target reconstruction.  `--no-record-compress` is the sole
+operational difference; it prevents the recorder from ending a good run and
+does not change the camera tensor.  Start with 20 seconds so one failed reach
+does not turn into repeated contact:
+
+```bash
+micromamba run -n mjlab python -m hardware.deploy.run \
+    --policy hardware/deploy/policies/d455_v4_final \
+    --camera d455 --mask depth --policy-device cpu \
+    --record recordings/sam21_v4best_try1 --seconds 20 \
+    --home-first --command-rate-scale 0.6 \
+    --target-tracker sam21 --depth-source stereo \
+    --no-record-compress --allow-legacy-action-api
+```
+
+Do not add `--target-lifecycle`, `--held-target-radius`, or `--depth-bias` to
+that A/B run: each may be useful, but each changes another input or state
+transition and makes the comparison inconclusive.  SAM is warmed and reset
+before the control loop begins, so CUDA's roughly 245 ms first-anchor cost is
+paid while the arm is holding, not on the first real target observation.
+
+The newer full-stack recipe is below.  It is a separate experiment rather
+than a reproduction of `v4_stereo_try3`:
+
 ```bash
 micromamba run -n mjlab python -m hardware.deploy.run \
     --policy hardware/deploy/policies/d455_v4_final \
@@ -166,16 +192,18 @@ micromamba run -n mjlab python -m hardware.deploy.run \
     --home-first --command-rate-scale 0.6 \
     --target-lifecycle --held-target-radius 0.045 \
     --target-tracker sam21 --depth-source sensor \
-    --no-record-compress
+    --no-record-compress --allow-legacy-action-api
 ```
 
-For the first SAM2.1 run, keep ``--depth-source sensor``.  On the recorded
-rig data, eager BF16 SAM plus the depth stack runs at about 20 Hz and has about
-100 ms p95 capture-to-control age; adding FoundationStereo to the same serial
-GPU path has not passed that latency budget.  Do not add
-``--sam-vos-optimized``: the installed torch 2.13/SAM2.1 combination fails on
-its first propagated frame, and ``run.py`` refuses the flag; eager SAM is the
-verified deployment path.
+For the lower-latency SAM2.1 recipe, keep ``--depth-source sensor``.  A live
+D455 `--no-arm` measurement of the A/B command above (FoundationStereo plus
+eager BF16 SAM) ran perception at 14.4 Hz: compute p50/p95 was 67.8/80.1 ms and
+capture-to-command age p50/p95/p99 was 118.9/158.8/180.5 ms, with nine stale
+holds in ten seconds.  It is below the 200 ms watchdog on most frames, but is
+outside the policy's typical 40--80 ms delay range; treat it as a diagnostic
+reproduction, not the default.  Do not add ``--sam-vos-optimized``: the
+installed torch 2.13/SAM2.1 combination fails on its first propagated frame,
+and ``run.py`` refuses the flag; eager SAM is the verified deployment path.
 
 **Before pressing enter.** Keep the physical emergency stop in hand, clear the
 workspace, and use a directory that does not exist yet -- `run.py` refuses real

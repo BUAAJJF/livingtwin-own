@@ -57,6 +57,7 @@ import threading                                           # noqa: E402
 import sys                                                 # noqa: E402
 import time                                                # noqa: E402
 
+import cv2                                                 # noqa: E402
 import numpy as np                                         # noqa: E402
 
 from . import config, lifecycle, mask, obs, proprio, rectify, robot  # noqa: E402
@@ -378,6 +379,20 @@ class Rates:
 
 
 def build(a):
+  """Build the deployment stack and close partial resources on any failure."""
+  resources = []
+  try:
+    return _build(a, resources)
+  except BaseException:
+    for resource in reversed(resources):
+      try:
+        resource.close()
+      except Exception:
+        pass
+    raise
+
+
+def _build(a, resources):
   """Everything the loop needs, and a clear error for whatever is missing."""
   spec = json.loads(pathlib.Path(proprio.SPEC_FILE).read_text())
   # The action mapping comes from the POLICY's exported spec when it has one:
@@ -417,28 +432,9 @@ def build(a):
       and rig.table_normal_base is None):
     raise SystemExit(
       f"{rig_path} has no table_normal_base; refusing calibrated-plane safety")
-
-  reader = None
-  if a.replay:
-    reader = _Replay(a.replay)
-    print(f"replaying {reader.n} frames from {a.replay}")
-  elif not a.dry_run:
-    from . import sensor
-    reader = sensor.Reader(serial=a.serial, backend=camera,
-                           stereo=(a.depth_source == "stereo"))
-    reader.wait_for_first()
-    if (rig.serial and reader.serial
-        and str(rig.serial) != str(reader.serial)):
-      reader.close()
-      raise SystemExit(
-        f"{rig_path} belongs to camera {rig.serial}, connected {camera.upper()} "
-        f"is {reader.serial}; refusing to mix calibration and images")
-    rig.K = reader.K              # the camera's own, not the stored one
-    rig.serial = reader.serial
-
-  reproj = rectify.Reprojector(rig, device=a.device)
-  segmenter = _segmenter(a, rig, reproj)
-  tracker = mask.TargetTracker()
+  # Pure compatibility checks happen before starting the camera or opening
+  # CAN.  A legacy policy must be acknowledged explicitly; failing this check
+  # must not leave a RealSense reader thread behind.
   builder = proprio.ProprioBuilder()
   mapper = robot.ActionMapper(
     action_spec_source, dt=1.0 / config.CONTROL_HZ,
@@ -450,8 +446,46 @@ def build(a):
         f"squashed={mapper.squashed}")
   mapper.max_step *= float(getattr(a, "command_rate_scale", 1.0))
 
+  reader = None
+  if a.replay:
+    reader = _Replay(a.replay)
+    resources.append(reader)
+    print(f"replaying {reader.n} frames from {a.replay}")
+  elif not a.dry_run:
+    from . import sensor
+    reader = sensor.Reader(serial=a.serial, backend=camera,
+                           stereo=(a.depth_source == "stereo"))
+    resources.append(reader)
+    reader.wait_for_first()
+    if (rig.serial and reader.serial
+        and str(rig.serial) != str(reader.serial)):
+      raise SystemExit(
+        f"{rig_path} belongs to camera {rig.serial}, connected {camera.upper()} "
+        f"is {reader.serial}; refusing to mix calibration and images")
+    rig.K = reader.K              # the camera's own, not the stored one
+    rig.serial = reader.serial
+
+  reproj = rectify.Reprojector(rig, device=a.device)
+  rgb_mapper = None
+  needs_rgb = (a.mask in ("yolo", "fused")
+               or getattr(a, "target_tracker", "depth") == "sam21")
+  if needs_rgb and reader is not None:
+    from .rgbmap import RgbDepthMapper
+    if not isinstance(reader.meta, dict):
+      raise RuntimeError(
+        "visual replay needs camera.json from a new RGB recording")
+    rgb_mapper = RgbDepthMapper(reader.meta)
+    if reader.latest() is None or reader.latest().rgb is None:
+      raise RuntimeError(
+        "visual detection requires synchronized raw RGB from the D455")
+    reader.rgb_mapper = rgb_mapper
+    print("vision image: synchronized raw RGB; masks projected to depth grid")
+  segmenter = _segmenter(a, rig, reproj, rgb_mapper=rgb_mapper)
+  tracker = mask.TargetTracker()
+
   arm = (robot.DryRunArm(spec) if (a.dry_run or a.no_arm or a.replay)
          else robot.PiperArm(a.can))
+  resources.append(arm)
   arm.connect()
   real_arm = isinstance(arm, robot.PiperArm)
   if isinstance(arm, robot.PiperArm):
@@ -589,7 +623,7 @@ def _check_policy_matches_spec(policy_path, spec: dict) -> None:
         "against the spec being used.  scripts/bringup_d455.sh writes one.")
 
 
-def _segmenter(a, rig, reproj):
+def _segmenter(a, rig, reproj, rgb_mapper=None):
   """Build the mask backend the flags asked for.
 
   Separate from ``setup`` because there are now three of them and the choice
@@ -607,7 +641,12 @@ def _segmenter(a, rig, reproj):
     cfg = dataclasses.replace(cfg, conf=float(a.yolo_conf))
   yolo_seg = mask.YoloSegmenter(
     a.yolo_weights, rig, reproj, yolo_cfg=cfg,
-    device=getattr(a, "yolo_device", None) or "cuda:0")
+    device=getattr(a, "yolo_device", None) or "cuda:0",
+    image_mapper=rgb_mapper)
+  if rgb_mapper is not None:
+    print("WARNING: YOLO now receives raw RGB. The bundled D455 checkpoint "
+          "was trained on depth-aligned grayscale; retrain or validate it "
+          "before relying on YOLO as the target source.")
   if a.mask == "yolo":
     return yolo_seg
   return mask.FusedSegmenter(depth_seg, yolo_seg)
@@ -720,9 +759,11 @@ def main() -> int:
                       "never takes the grasp site below 13.2 mm where the arm "
                       "reaches -41 mm -- so 0.019 is the measured value and 0 "
                       "(the default) leaves the pipeline as it was")
-  p.add_argument("--record-queue", type=int, default=512,
+  p.add_argument("--record-queue", type=int, default=64,
                  help="camera frames the log writer may fall behind by before "
-                      "the run stops rather than continue unlogged")
+                      "the run stops rather than continue unlogged. Full RGB, "
+                      "IR, depth and compact detections are about 3 MB/frame, "
+                      "so the default bounds backlog memory near 200 MB")
   p.add_argument("--no-record-compress", action="store_true",
                  help="store frames uncompressed.  zlib on the writer thread "
                       "is what ended three of today's runs, and it ends the "
@@ -982,6 +1023,7 @@ def main() -> int:
       (writer.dir / "run.json").write_text(json.dumps({
         "stop_reason": "startup_failure: " + repr(e),
         "args": vars(a),
+        "recording": writer.report(),
       }, indent=2) + "\n")
     raise
 
@@ -1020,6 +1062,10 @@ def main() -> int:
     # Save the calibration beside its images, then record the first measured
     # state immediately after connection and safe measured-pose preload.
     rig.save(writer.dir / "rig.json")
+    if (reader is not None and hasattr(reader, "meta")
+        and isinstance(reader.meta, dict)):
+      (writer.dir / "camera.json").write_text(
+        json.dumps(reader.meta, indent=2) + "\n")
     writer.event(robot.feedback(st, mapper.previous), last_action, 0,
                  "connected_enabled")
 
@@ -1084,15 +1130,25 @@ def main() -> int:
       # checkpoint, and a depth-only run must not pay for either.
       from .sam2_predictor import Sam2StreamingPredictor
       from .sam_tracker import SamTargetTracker
+      from .rgbmap import MappedSamPredictor
       kw = {} if a.sam_checkpoint is None else {"checkpoint": a.sam_checkpoint}
       pred = Sam2StreamingPredictor(
         device=(f"cuda:{a.yolo_device}"
                 if str(a.yolo_device or "").isdigit() else "cuda"),
         vos_optimized=bool(a.sam_vos_optimized),
         **kw)
-      sam = SamTargetTracker(pred)
-      print(f"target: SAM2.1 carrying the depth stack's choice "
-            f"(loaded in {pred.load_s:.1f} s).  The depth segmenter still "
+      warm = reader.latest()
+      if warm is None or warm.rgb is None:
+        raise RuntimeError("cannot warm RGB SAM2.1 without a raw colour frame")
+      pred.warmup(warm.rgb.shape[:2])
+      rgb_mapper = getattr(reader, "rgb_mapper", None)
+      if rgb_mapper is None:
+        raise RuntimeError("RGB SAM2.1 has no colour/depth projector")
+      mapped_pred = MappedSamPredictor(pred, rgb_mapper)
+      sam = SamTargetTracker(mapped_pred)
+      print(f"target: SAM2.1 on raw RGB, carrying the depth stack's choice "
+            f"(loaded in {pred.load_s:.1f} s, warmed in "
+            f"{pred.warmup_ms:.0f} ms).  The depth segmenter still "
             f"chooses the instance; SAM only carries it, and the watchdog "
             f"withholds rather than publishes when it disagrees.")
       if lc is None:
@@ -1393,7 +1449,9 @@ def main() -> int:
       ms = (time.time() - t0) * 1000
       if writer is not None and frame is not None:
         logged_fb = robot.feedback(st, command)
-        writer.write(_logged_depth(frame), frame.gray, logged_fb,
+        # The compact v3 log stores only camera-native inputs. Foundation
+        # depth, aligned gray and policy tensors are reproducible products.
+        writer.write(frame.depth, None, logged_fb,
                      last_action, label,
                      extra={
                        "frame_index": _frame_index(frame),
@@ -1410,7 +1468,7 @@ def main() -> int:
                          float(command_interval)
                          if command_interval is not None else None),
                        "mapping_dt_s": float(map_dt),
-                     })
+                     }, frame=frame)
       rates.note(ms, budget_ms)
       overrun_streak = overrun_streak + 1 if ms > budget_ms else 0
       if overrun_streak >= a.max_overrun_streak:
@@ -1469,6 +1527,7 @@ def main() -> int:
         "args": vars(a),
         "rates": rates.report(),
         "perception": perception_report,
+        "recording": writer.report(),
         "final_feedback": final,
       }, indent=2) + "\n")
     print("\n" + rates.summary())
@@ -1519,6 +1578,29 @@ def _logged_depth(frame):
   return frame.depth if d is None else d
 
 
+def _encode_binary_mask(out: dict, name: str, value) -> None:
+  mask_value = np.asarray(value, dtype=bool)
+  out[f"{name}_shape"] = np.asarray(mask_value.shape, dtype=np.uint16)
+  out[f"{name}_bits"] = np.packbits(
+    mask_value.reshape(-1), bitorder="little")
+
+
+def _encode_sparse_labels(out: dict, name: str, value) -> None:
+  labels = np.asarray(value)
+  if np.max(labels, initial=0) > 255 or np.min(labels, initial=0) < 0:
+    raise ValueError(f"{name} labels do not fit uint8")
+  flat = labels.astype(np.uint8, copy=False).reshape(-1)
+  bounds = np.flatnonzero(np.r_[True, flat[1:] != flat[:-1], True])
+  starts = bounds[:-1]
+  lengths = np.diff(bounds)
+  values = flat[starts]
+  keep = values != 0
+  out[f"{name}_shape"] = np.asarray(labels.shape, dtype=np.uint16)
+  out[f"{name}_run_start"] = starts[keep].astype(np.uint32)
+  out[f"{name}_run_length"] = lengths[keep].astype(np.uint32)
+  out[f"{name}_run_value"] = values[keep]
+
+
 class Perception(threading.Thread):
   """Segmentation and resampling, on their own thread, at their own rate.
 
@@ -1551,6 +1633,7 @@ class Perception(threading.Thread):
                depth_bias: float = 0.0, lifecycle=None, sam=None):
     super().__init__(daemon=True, name="perception")
     self.reader = reader
+    self.rgb_mapper = getattr(reader, "rgb_mapper", None)
     # Held by THIS thread and nobody else: it owns a TensorRT context and CUDA
     # buffers, and the control loop must never touch it.
     self.stereo = stereo
@@ -1716,7 +1799,7 @@ class Perception(threading.Thread):
       # (the object was let go) is visible as an edge below.
       self._was_holding = (self.lifecycle.holding
                            if self.lifecycle is not None else False)
-      seg = self.segmenter(raw_depth, rgb=frame.gray, arm=arm_spheres)
+      seg = self.segmenter(raw_depth, rgb=frame.rgb, arm=arm_spheres)
       label = self.tracker.update(seg, self.kin.site_pos)
       if self.lifecycle is not None:
         jaws_closed = (q.size > 6 and self.gripper_closed_m > 0
@@ -1724,6 +1807,8 @@ class Perception(threading.Thread):
         label = self.lifecycle.update(label, jaws_closed, loaded)
       payload = (mask.full_mask(seg, label, self.segmenter.decimate)
                  if label else None)
+      sam_raw = None
+      sam_rgb_raw = None
       self.stage_ms["segment_and_select"].append(
         (time.perf_counter() - stage_t) * 1000.0)
 
@@ -1745,12 +1830,23 @@ class Perception(threading.Thread):
                         if self.lifecycle is not None else False)
         if self.lifecycle is not None and self._was_holding and not carrying_now:
           self.sam.reset("placed")
+          # The released object is no longer the next target.  Reset both
+          # carriers on the same edge so the depth tracker cannot spend its
+          # lost window trying to associate the next object with the old one.
+          self.tracker.clear()
         chosen = (payload.astype(bool) if payload is not None
                   else np.zeros(raw_depth.shape, bool))
         arm_img = (self.segmenter.arm_image_mask(
                      raw_depth, arm_spheres, self.kin.site_pos)
                    if hasattr(self.segmenter, "arm_image_mask") else None)
-        rep = self.sam.carry(frame.gray, chosen, raw_depth > 0, arm_img)
+        if frame.rgb is None or self.rgb_mapper is None:
+          raise RuntimeError("RGB SAM frame/projector disappeared")
+        # RealSense supplies BGR; SAM2 was trained and normalized as RGB.
+        sam_image = np.ascontiguousarray(frame.rgb[..., ::-1])
+        self.sam.p.set_depth(raw_depth)
+        rep = self.sam.carry(sam_image, chosen, raw_depth > 0, arm_img)
+        sam_raw = rep.raw
+        sam_rgb_raw = self.sam.p.last_rgb_mask
         self.sam_state = rep.state.value + (f" ({rep.reason})"
                                             if rep.reason else "")
         payload = (rep.mask.astype(np.int32)
@@ -1794,6 +1890,30 @@ class Perception(threading.Thread):
         self._first_finished = finished
       self._last_finished = finished
       target_available = bool(np.asarray(target).any())
+      # Optional recording telemetry. The controller never reads it; the
+      # recorder copies it only after the physical command has been sent.
+      # Saving it here is the only way an offline viewer can show the actual
+      # SAM/depth arbitration rather than infer it from gray plus depth.
+      frame.detection_labels = np.asarray(seg.labels)
+      rgb_labels = getattr(self.segmenter, "rgb_labels", None)
+      if rgb_labels is None:
+        rgb_labels = getattr(
+          getattr(self.segmenter, "yolo", None), "rgb_labels", None)
+      frame.detection_rgb_labels = rgb_labels
+      frame.source_mask = (None if payload is None else np.asarray(payload))
+      frame.sam_raw_mask = (None if sam_raw is None else np.asarray(sam_raw))
+      frame.sam_rgb_mask = (
+        None if sam_rgb_raw is None else np.asarray(sam_rgb_raw))
+      frame.policy_mask = np.asarray(target)
+      frame.detections = [{
+        "label": int(inst.label),
+        "n_px": int(inst.n_px),
+        "centroid_base": np.asarray(inst.centroid_base).tolist(),
+        "top_z": (float(inst.top_z)
+                  if np.isfinite(float(inst.top_z)) else None),
+        "bbox": [int(x) for x in inst.bbox],
+      } for inst in seg.instances]
+      frame.mask_state = self.sam_state if self.sam is not None else "depth"
       with self._lock:
         # Safety uses capture time; publish time only measures queueing.
         self._out = (camera, published_at, frame, label, held_over,
@@ -1827,6 +1947,8 @@ class Perception(threading.Thread):
     }
     if self.sam is not None:
       out["sam"] = self.sam.report()
+    if self.rgb_mapper is not None:
+      out["rgb_depth_projection"] = self.rgb_mapper.report()
     return out
 
   def summary(self) -> str:
@@ -1860,8 +1982,11 @@ class _Replay:
   def __init__(self, path: str, fps: float = config.D405_FPS,
                loop: bool = True):
     self.dir = pathlib.Path(path)
-    self.meta = json.loads((self.dir / "meta.json").read_text())
-    self.n = len(self.meta)
+    self.records = json.loads((self.dir / "meta.json").read_text())
+    camera_file = self.dir / "camera.json"
+    self.meta = (json.loads(camera_file.read_text())
+                 if camera_file.exists() else None)
+    self.n = len(self.records)
     self.fps = float(fps)
     self.loop = loop
     self.t0 = time.time()
@@ -1886,10 +2011,28 @@ class _Replay:
     k = int((time.time() - self.t0) * self.fps)
     k = k % self.n if self.loop else min(k, self.n - 1)
     if k != self._i:
-      rec = self.meta[k]
-      f = np.load(self.dir / f"{rec['i']:06d}.npz")
-      self._frame = sensor.Frame(depth=f["depth"].astype(np.float32) / 10000.0,
-                                 gray=f["gray"], stamp=time.time(), index=k)
+      rec = self.records[k]
+      frame_file = rec.get("frame_file") or f"{rec['i']:06d}.npz"
+      with np.load(self.dir / frame_file, allow_pickle=False) as f:
+        def optional(name):
+          return np.asarray(f[name]) if name in f else None
+        # In a FoundationStereo log, depth is the policy product and
+        # sensor_depth is the original D455 measurement. Replay starts from
+        # the latter and recomputes FoundationStereo from the raw IR pair.
+        sensor_depth = optional("sensor_depth")
+        depth = (f["depth"] if sensor_depth is None else sensor_depth)
+        rgb = optional("rgb")
+        ir_left = optional("ir_left")
+        gray = optional("gray")
+        if gray is None:
+          gray = (cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
+                  if rgb is not None else ir_left)
+        if gray is None:
+          gray = np.zeros(np.asarray(depth).shape, dtype=np.uint8)
+        self._frame = sensor.Frame(
+          depth=np.asarray(depth, dtype=np.float32) / 10000.0,
+          gray=gray, rgb=rgb, ir=ir_left, ir_right=optional("ir_right"),
+          stamp=time.time(), index=k, sensor_meta=rec.get("sensor"))
       self._i = k
     return self._frame
 
@@ -1900,11 +2043,11 @@ class _Replay:
 class _Recorder:
   """Asynchronous full-resolution replay log plus 50 Hz control metadata."""
 
-  def __init__(self, path: str, queue_size: int = 512,
+  def __init__(self, path: str, queue_size: int = 64,
                compress: bool = True):
     # Compression is where a successful run goes to die, which is worth
     # spelling out because the coupling is backwards from what it looks like.
-    # ``savez_compressed`` runs zlib on 1.2 MB per camera frame on the writer
+    # ``savez_compressed`` runs zlib on every raw stream and mask on the writer
     # thread.  While the policy is holding, that thread has the CPU to itself
     # and keeps up; the moment the policy starts *working*, inference takes the
     # cores, the writer falls behind, and the queue fills.  Measured today:
@@ -1912,9 +2055,9 @@ class _Recorder:
     # commands and 1433 frames with 1086 commands both hit the ceiling.  The
     # better the run, the sooner it is cut off.
     #
-    # Uncompressed costs disk -- about 1.2 MB per frame against roughly a
-    # quarter of that -- and costs the writer almost nothing.  For a 60 s run
-    # that is a couple of gigabytes, which is the cheaper of the two.
+    # Uncompressed compact v3 costs about 2.96 MB per D455/SAM frame in the
+    # synthetic throughput test and costs the writer almost nothing. At 15
+    # perception Hz a 60 s run is roughly 2.7 GB.
     self.compress = bool(compress)
     self.dir = pathlib.Path(path)
     if self.dir.exists() and any(self.dir.iterdir()):
@@ -1927,11 +2070,14 @@ class _Recorder:
     self._error = None
     self._closed = False
     self._queue = queue.Queue(maxsize=max(1, int(queue_size)))
+    self._queue_high_water = 0
+    self._enqueue_copy_ms = []
     self._thread = threading.Thread(target=self._worker, daemon=True,
                                     name="deployment-log-writer")
     self._thread.start()
 
-  def write(self, depth, gray, fb, action, label, extra=None) -> None:
+  def write(self, depth, gray, fb, action, label, extra=None,
+            frame=None) -> None:
     if self._closed:
       raise RuntimeError("recording is already closed")
     if self._error is not None:
@@ -1961,22 +2107,18 @@ class _Recorder:
       return
     if idx is not None:
       self._last_frame = int(idx)
+    started = time.perf_counter()
     i = self.n
     self.n += 1
     rec["i"] = i
     rec["frame_file"] = f"{i:06d}.npz"
-    item = (
-      rec,
-      np.asarray(depth, dtype=np.float32).copy(),
-      (np.asarray(gray).copy() if gray is not None
-       else np.zeros((1, 1), np.uint8)),
-    )
-    try:
-      self._queue.put_nowait(item)
-    except queue.Full as e:
-      raise RuntimeError(
-        f"recording queue full at {self.n}; refusing an unlogged run") from e
-    self.control.append(dict(rec))
+    self._attach_visuals(rec, frame)
+    item = (rec, np.asarray(depth, dtype=np.float32).copy(),
+            (np.asarray(gray).copy() if gray is not None
+             else np.zeros((1, 1), np.uint8)))
+    self._put_frame(item, started)
+    self.control.append({k: v for k, v in rec.items()
+                         if not k.startswith("_")})
 
   def _record(self, fb, action, label, event, extra=None) -> dict:
     rec = {"control_i": len(self.control), "t": time.time(),
@@ -2018,14 +2160,64 @@ class _Recorder:
       raise RuntimeError("recording is already closed")
     rec = self._record(fb, action, label, event, extra)
     if frame is not None and int(frame.index) != self._last_frame:
+      started = time.perf_counter()
       self._last_frame = int(frame.index)
       rec["i"] = self.n
       rec["frame_file"] = f"{self.n:06d}.npz"
       self.n += 1
-      self._queue.put((rec, _logged_depth(frame).copy(), frame.gray.copy()))
-      self.control.append(rec)
+      self._attach_visuals(rec, frame)
+      self._put_frame(
+        (rec, np.asarray(frame.depth, dtype=np.float32).copy(), None), started)
+      self.control.append({k: v for k, v in rec.items()
+                           if not k.startswith("_")})
       return
     self.control.append(rec)
+
+  def _put_frame(self, item, started: float) -> None:
+    """Enqueue without ever making the 50 Hz control path wait for disk."""
+    try:
+      self._queue.put_nowait(item)
+    except queue.Full as e:
+      raise RuntimeError(
+        f"recording queue full at {self.n}; refusing an unlogged run") from e
+    self._queue_high_water = max(self._queue_high_water, self._queue.qsize())
+    self._enqueue_copy_ms.append((time.perf_counter() - started) * 1000.0)
+
+  @staticmethod
+  def _attach_visuals(rec: dict, frame) -> None:
+    """Attach raw sensor inputs and compact, non-reproducible detections."""
+    if frame is None:
+      return
+    arrays = {}
+    for name, dtype in (("rgb", np.uint8),
+                        ("ir_left", np.uint8), ("ir_right", np.uint8)):
+      attr = "ir" if name == "ir_left" else name
+      value = getattr(frame, attr, None)
+      if value is not None:
+        arrays[name] = np.asarray(value, dtype=dtype).copy()
+    for name in ("detection_labels", "detection_rgb_labels"):
+      value = getattr(frame, name, None)
+      if value is not None:
+        _encode_sparse_labels(arrays, name, value)
+    # Keep SAM's native output and the accepted source mask. The depth-grid
+    # SAM intermediate and policy mask are deterministic projections of these
+    # inputs and calibration, so recording them only duplicates data.
+    for name in ("sam_rgb_mask", "source_mask"):
+      value = getattr(frame, name, None)
+      if value is not None:
+        _encode_binary_mask(arrays, name, value)
+    if arrays:
+      # Removed by _worker before rec is appended to JSON metadata.
+      rec["_frame_arrays"] = arrays
+    detections = getattr(frame, "detections", None)
+    if detections is not None:
+      rec["detections"] = detections
+    state = getattr(frame, "mask_state", None)
+    if state is not None:
+      rec["mask_state"] = str(state)
+    sensor_meta = getattr(frame, "sensor_meta", None)
+    if sensor_meta is not None:
+      rec["sensor"] = dict(sensor_meta)
 
   def _worker(self) -> None:
     while True:
@@ -2036,12 +2228,16 @@ class _Recorder:
         rec, depth, gray = item
         if self._error is None:
           try:
+            arrays = rec.pop("_frame_arrays", {})
             save = np.savez_compressed if self.compress else np.savez
-            save(
-              self.dir / f"{rec['i']:06d}.npz",
-              depth=(depth * 10000).astype(np.uint16),
-              gray=gray,
-            )
+            payload = {
+              "schema_version": np.asarray(3, dtype=np.uint8),
+              "depth": (depth * 10000).astype(np.uint16),
+              **arrays,
+            }
+            if gray is not None:
+              payload["gray"] = gray
+            save(self.dir / f"{rec['i']:06d}.npz", **payload)
             self.meta.append(rec)
           except Exception as e:
             self._error = e
@@ -2062,6 +2258,22 @@ class _Recorder:
           f"{len(self.control)} control events to {self.dir}")
     if self._error is not None:
       raise RuntimeError(f"recording worker failed: {self._error}")
+
+  def report(self) -> dict:
+    files = list(self.dir.glob("*.npz"))
+    size = sum(path.stat().st_size for path in files)
+    return {
+      "schema_version": 3,
+      "camera_frames": int(len(self.meta)),
+      "control_events": int(len(self.control)),
+      "compression": bool(self.compress),
+      "queue_capacity_frames": int(self._queue.maxsize),
+      "queue_high_water_frames": int(self._queue_high_water),
+      "enqueue_copy_ms": _timing_stats(self._enqueue_copy_ms),
+      "bytes": int(size),
+      "mb_per_camera_frame": (
+        None if not files else float(size / len(files) / 1e6)),
+    }
 
 
 class Viewer(threading.Thread):

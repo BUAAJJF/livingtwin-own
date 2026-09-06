@@ -2171,3 +2171,65 @@ def test_a_perception_thread_failure_is_raised_in_the_control_thread():
   assert perception._stopping.is_set()
   with pytest.raises(RuntimeError, match="perception thread failed"):
     perception.latest()
+
+
+def test_build_closes_partial_resources_in_reverse_order(monkeypatch):
+  from hardware.deploy import run
+
+  events = []
+
+  class Resource:
+    def __init__(self, name):
+      self.name = name
+
+    def close(self):
+      events.append(self.name)
+
+  def fail(_args, resources):
+    resources.extend([Resource("camera"), Resource("arm")])
+    raise RuntimeError("startup failed")
+
+  monkeypatch.setattr(run, "_build", fail)
+  with pytest.raises(RuntimeError, match="startup failed"):
+    run.build(object())
+  assert events == ["arm", "camera"]
+
+
+def test_action_api_is_checked_before_the_camera_starts():
+  import inspect
+
+  from hardware.deploy import run
+
+  src = inspect.getsource(run._build)
+  assert src.index("robot.ActionMapper(") < src.index("sensor.Reader(")
+
+
+def test_replay_restores_raw_streams_and_starts_from_native_depth(tmp_path):
+  import json
+
+  from hardware.deploy import run
+
+  (tmp_path / "meta.json").write_text(json.dumps([{
+    "i": 0, "frame_file": "000000.npz",
+    "sensor": {"depth_frame_number": 17, "color_frame_number": 17},
+  }]))
+  camera = {"depth_intrinsics": {"width": 4, "height": 3}}
+  (tmp_path / "camera.json").write_text(json.dumps(camera))
+  np.savez(
+    tmp_path / "000000.npz",
+    depth=np.full((3, 4), 8000, np.uint16),
+    sensor_depth=np.full((3, 4), 6500, np.uint16),
+    gray=np.full((3, 4), 3, np.uint8),
+    rgb=np.full((3, 4, 3), 4, np.uint8),
+    ir_left=np.full((3, 4), 5, np.uint8),
+    ir_right=np.full((3, 4), 6, np.uint8),
+  )
+
+  replay = run._Replay(str(tmp_path), loop=False)
+  frame = replay.latest()
+  assert replay.meta == camera
+  assert frame.depth.mean() == pytest.approx(0.65)
+  assert frame.rgb.shape == (3, 4, 3)
+  assert frame.ir.mean() == 5
+  assert frame.ir_right.mean() == 6
+  assert frame.sensor_meta["color_frame_number"] == 17

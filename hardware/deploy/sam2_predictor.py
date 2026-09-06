@@ -152,6 +152,7 @@ class Sam2StreamingPredictor:
     self.state = None
     self._anchor_idx = -1
     self.vos_optimized = bool(vos_optimized)
+    self.warmup_ms: float | None = None
 
   # -- the Predictor protocol ---------------------------------------------
 
@@ -167,6 +168,31 @@ class Sam2StreamingPredictor:
     if self.state is None or not self.state["images"]:
       raise RuntimeError("cannot re-anchor SAM before a frame has been pushed")
     self._anchor_at(self.state["num_frames"] - 1, mask)
+
+  def warmup(self, image_shape: tuple[int, int]) -> None:
+    """Pay CUDA's one-time cost before a real target starts the policy.
+
+    The first real ``add_new_mask`` on this rig takes about 245 ms while later
+    anchors take only a few milliseconds.  That cold start used to land after
+    the control loop had begun, so the first usable observation immediately
+    tripped the stale-frame hold.  Exercise both the prompt and propagation
+    paths on an empty synthetic image, reset every tracking datum, and reset
+    the timing counters so the run report contains real frames only.
+    """
+    h, w = map(int, image_shape)
+    if h <= 0 or w <= 0:
+      raise ValueError("SAM warmup image dimensions must be positive")
+    image = np.zeros((h, w), dtype=np.uint8)
+    target = np.zeros((h, w), dtype=bool)
+    cy, cx = h // 2, w // 2
+    target[max(0, cy - 4):min(h, cy + 5),
+           max(0, cx - 4):min(w, cx + 5)] = True
+    t0 = time.perf_counter()
+    self.anchor(image, target)
+    self.propagate(image)
+    self.reset()
+    self.warmup_ms = (time.perf_counter() - t0) * 1000.0
+    self.timing = Timing()
 
   def _anchor_at(self, idx: int, mask: np.ndarray) -> None:
     t0 = time.perf_counter()
@@ -313,6 +339,7 @@ class Sam2StreamingPredictor:
             "vos_optimized": self.vos_optimized, "bf16": self.bf16,
             "hole_filling": self.hole_filling,
             "load_s": round(self.load_s, 2), "image_size": self.size,
+            "warmup_ms": self.warmup_ms,
             "memory_frames": self.memory_frames,
             "max_anchors": self.max_anchors,
             "retained_prompt_frames": prompts,

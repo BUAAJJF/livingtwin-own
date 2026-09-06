@@ -804,7 +804,7 @@ class YoloSegmenter:
   def __init__(self, weights: str, rig: "config.Rig", reproj,
                cfg: SegmenterCfg | None = None, conf: float | None = None,
                device: str = "cuda:0", yolo_cfg: "YoloCfg | None" = None,
-               bin_footprint=None):
+               bin_footprint=None, image_mapper=None):
     self.rig = rig
     self.reproj = reproj
     self.cfg = cfg or SegmenterCfg()
@@ -823,6 +823,8 @@ class YoloSegmenter:
     self.plane_sigma = 0.0
     self.noise_per_m = 0.0
     self.n_unplaced = 0
+    self.image_mapper = image_mapper
+    self.rgb_labels = None
     """How many of the last frame's instances were positioned from the plane
     rather than from their own depth.  This is the number that says whether the
     backend is earning its place: if it is zero, the depth segmenter would have
@@ -883,7 +885,16 @@ class YoloSegmenter:
     self.rejected = []
     self.n_unplaced = 0
 
-    masks = self.detector(rgb, (h, w))
+    if getattr(self, "image_mapper", None) is None:
+      masks = self.detector(rgb, (h, w))
+      rgb_masks = None
+    else:
+      # Detect in the complete, unaligned RGB image. Only the resulting masks
+      # cross into the left/depth coordinate system.
+      rgb_masks = self.detector(rgb)
+      masks = self.image_mapper.rgb_masks_to_depth(rgb_masks, depth)
+    self.rgb_labels = (None if rgb_masks is None else
+                       np.zeros(rgb_masks.shape[1:], dtype=np.int32))
     if masks.shape[0] == 0:
       return Segmentation(labels=out, instances=instances)
 
@@ -912,7 +923,7 @@ class YoloSegmenter:
     row[src] = np.arange(src.shape[0])
     origin = self.reproj.camera_origin_base(self.rig)
 
-    for m in masks:
+    for mask_i, m in enumerate(masks):
       flat = m.reshape(-1)
       area = int(flat.sum())
       if area < c.min_area_px or area > c.max_area_px:
@@ -956,6 +967,8 @@ class YoloSegmenter:
 
       label = len(instances) + 1
       out[m] = label
+      if self.rgb_labels is not None:
+        self.rgb_labels[rgb_masks[mask_i]] = label
       ys, xs = np.nonzero(m)
       instances.append(Instance(
         label=label, n_px=area, centroid_base=centroid, top_z=top,
@@ -1090,6 +1103,7 @@ class FusedSegmenter:
     labels = labels[:depth.shape[0], :depth.shape[1]].astype(np.int32).copy()
     instances = list(seg_d.instances)
     self.n_from_yolo = 0
+    self.yolo.rgb_labels = None
 
     if rgb is None:
       return Segmentation(labels=labels, instances=instances)

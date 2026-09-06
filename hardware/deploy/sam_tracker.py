@@ -159,6 +159,10 @@ class SamTargetTracker:
     that SAM ran -- ``anchors=3, rejections=7`` says nothing about whether the
     policy saw its target more often, and on a recording the renderer's truth
     does not exist to compare against."""
+    self.depth_fallbacks = 0
+    """Frames where a current depth target overruled rejected or disagreeing
+    SAM output.  This is the other half of the integration's value: SAM fills
+    depth gaps but may never erase or replace the chooser's current target."""
 
   # -- lifecycle ----------------------------------------------------------
 
@@ -245,9 +249,10 @@ class SamTargetTracker:
       SAM's by ``reanchor_iou`` and at least ``reanchor_frames`` have passed.
       That is the one moment a new anchor is known not to be drift.
 
-    Returned ``mask`` is what may be published: SAM's, or -- on the frame an
-    anchor is taken -- the depth mask that defined it, because on that frame
-    they are the same thing by construction.
+    Returned ``mask`` is what may be published: SAM's when its watchdog
+    accepts it, otherwise the current depth mask when one exists.  A rejected
+    SAM mask must not erase an independently confirmed depth observation --
+    depth is the chooser in this design.  With neither, nothing is published.
 
     This lives here rather than in the caller because it has two callers that
     must not differ: ``run.py`` on the arm and ``scripts/sim_perception_check``
@@ -256,9 +261,9 @@ class SamTargetTracker:
     rep = self.step(image, depth_valid, arm_mask)
     published = rep.mask
     if depth_mask is not None and depth_mask.any():
-      stale = (rep.frames_since_anchor >= reanchor_frames
-               and published is not None
-               and _iou(published, depth_mask) >= reanchor_iou)
+      agreement = (published is not None
+                   and _iou(published, depth_mask) >= reanchor_iou)
+      stale = rep.frames_since_anchor >= reanchor_frames and agreement
       if self.state in (State.UNINITIALIZED, State.LOST) or stale:
         refresh = getattr(self.p, "reanchor", None)
         if stale and callable(refresh):
@@ -271,6 +276,33 @@ class SamTargetTracker:
         self._count(depth_mask, depth_mask)
         return Report(depth_mask, self.state, "anchored", 0,
                       int(depth_mask.sum()), raw=rep.raw)
+      if published is None:
+        # The watchdog rejected SAM, not the depth segmenter.  The old code
+        # returned ``rep`` here and turned a valid current depth target into an
+        # empty policy mask.  On hardware that produced 12.36 seconds of
+        # hold_no_target while an offline replay found the same ~379 px depth
+        # instance in every frame.  Keep SAM uncertain, so it still has to
+        # recover or re-anchor, but do not discard the authoritative fallback.
+        self.depth_fallbacks += 1
+        self._count(depth_mask, depth_mask)
+        return Report(depth_mask, rep.state,
+                      f"depth fallback after {rep.reason}",
+                      rep.frames_since_anchor, int(depth_mask.sum()),
+                      raw=rep.raw)
+      if not agreement:
+        # SAM can remain confidently locked to the previous object after it
+        # was placed.  Its own watchdog sees a stable, plausible mask, but the
+        # current depth chooser identifies a different target.  Publishing
+        # SAM here reverses this module's contract and can project to an empty
+        # policy mask for the rest of the run.  Use depth for this frame but do
+        # not re-anchor: lifecycle, or later genuine agreement, owns that state
+        # transition.
+        self.depth_fallbacks += 1
+        self._count(depth_mask, depth_mask)
+        return Report(depth_mask, rep.state,
+                      "depth fallback after SAM/depth disagreement",
+                      rep.frames_since_anchor, int(depth_mask.sum()),
+                      raw=rep.raw)
     self._count(rep.mask, depth_mask)
     return rep
 
@@ -317,6 +349,7 @@ class SamTargetTracker:
       "frames": int(self.frames),
       "published": int(self.published),
       "rescued": int(self.rescued),
+      "depth_fallbacks": int(self.depth_fallbacks),
       "rejections": dict(self.rejections),
     }
     predictor_report = getattr(self.p, "report", None)
@@ -331,7 +364,8 @@ class SamTargetTracker:
             f"published {self.published}/{self.frames} "
             f"({100 * self.published / n:.0f}%), of which {self.rescued} "
             f"({100 * self.rescued / n:.0f}% of frames) had no depth mask at "
-            f"all  rejections[{bad}]")
+            f"all, {self.depth_fallbacks} used the current depth fallback  "
+            f"rejections[{bad}]")
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:

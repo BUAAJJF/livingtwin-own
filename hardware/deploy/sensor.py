@@ -58,6 +58,12 @@ class Frame:
   depth-aligned colour stream."""
   stamp: float
   index: int
+  rgb: np.ndarray | None = None
+  """Synchronized raw BGR frame from the independent colour imager.
+
+  It has never been aligned through depth. YOLO and SAM use this image and
+  their masks are projected back to the left/depth grid afterwards.
+  """
   policy_depth: np.ndarray | None = None
   """The depth the POLICY was given, when that is not ``depth``.
 
@@ -83,6 +89,30 @@ class Frame:
   which is what a calibration target is made of.  ``ir`` has neither problem
   and its intrinsics are the depth intrinsics, so a pose measured in it needs
   no further transform to mean something in the depth frame."""
+  detection_labels: np.ndarray | None = None
+  """Detector instance labels on its native grid, attached by perception.
+
+  This and the fields below are optional recording telemetry.  They are never
+  read by the control path; keeping them on the camera frame lets the
+  asynchronous recorder preserve exactly what perception produced without
+  running the detector a second time on the control thread.
+  """
+  detection_rgb_labels: np.ndarray | None = None
+  """Accepted YOLO instances on the original RGB grid, when YOLO is active."""
+  source_mask: np.ndarray | None = None
+  """Final sensor-grid target mask after SAM/depth arbitration."""
+  sam_raw_mask: np.ndarray | None = None
+  """Unfiltered SAM output before watchdog and depth fallback."""
+  sam_rgb_mask: np.ndarray | None = None
+  """Unfiltered SAM output on the original colour-imager grid."""
+  policy_mask: np.ndarray | None = None
+  """Final target mask on the policy's 168x224 camera grid."""
+  detections: list[dict] | None = None
+  """JSON-safe instance boxes and 3-D measurements for log overlays."""
+  mask_state: str | None = None
+  """Per-frame mask source/state, e.g. depth or SAM watchdog state."""
+  sensor_meta: dict | None = None
+  """RealSense device timestamps and frame numbers for each raw stream."""
 
 
 class Reader:
@@ -125,6 +155,8 @@ class Reader:
         else:
           depth, gray, ir = self._stream.read3()
           ir_right = None
+        rgb = getattr(self._stream, "raw_color", None)
+        sensor_meta = getattr(self._stream, "frame_meta", None)
         self._errors = 0
       except Exception:
         self._errors += 1
@@ -147,9 +179,11 @@ class Reader:
         continue
       index += 1
       with self._lock:
-        self._frame = Frame(depth=depth, gray=gray, ir=ir,
+        self._frame = Frame(depth=depth, gray=gray, rgb=rgb, ir=ir,
                             ir_right=ir_right,
-                            stamp=time.time(), index=index)
+                            stamp=time.time(), index=index,
+                            sensor_meta=(None if sensor_meta is None else
+                                         dict(sensor_meta)))
 
   def latest(self) -> Frame | None:
     with self._lock:

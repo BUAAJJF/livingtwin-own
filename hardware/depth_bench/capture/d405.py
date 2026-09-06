@@ -210,12 +210,37 @@ class Stream:
                    if self.gray_source == "aligned_color" else None)
     self._filters = _post(args)
 
-    intr = profile.get_stream(rs.stream.depth).as_video_stream_profile() \
-      .get_intrinsics()
+    depth_profile = profile.get_stream(
+      rs.stream.depth).as_video_stream_profile()
+    intr = depth_profile.get_intrinsics()
     self.K = np.array([[intr.fx, 0.0, intr.ppx],
                        [0.0, intr.fy, intr.ppy],
                        [0.0, 0.0, 1.0]], dtype=np.float64)
     self.dist = np.array(intr.coeffs, dtype=np.float64)
+    self.raw_color = None
+    self.frame_meta = None
+
+    def intrinsics_json(value):
+      return {
+        "width": int(value.width), "height": int(value.height),
+        "fx": float(value.fx), "fy": float(value.fy),
+        "ppx": float(value.ppx), "ppy": float(value.ppy),
+        "model": str(value.model),
+        "coeffs": [float(x) for x in value.coeffs],
+      }
+
+    color_intrinsics = None
+    depth_to_color = None
+    if self.gray_source == "aligned_color":
+      color_profile = profile.get_stream(
+        rs.stream.color).as_video_stream_profile()
+      cintr = color_profile.get_intrinsics()
+      extr = depth_profile.get_extrinsics_to(color_profile)
+      color_intrinsics = intrinsics_json(cintr)
+      depth_to_color = {
+        "rotation": [float(x) for x in extr.rotation],
+        "translation": [float(x) for x in extr.translation],
+      }
 
     di = dev.get_info
     self.meta = {
@@ -228,6 +253,9 @@ class Stream:
       "resolution": [args.width, args.height],
       "fps": args.fps,
       "gray_source": self.gray_source,
+      "depth_intrinsics": intrinsics_json(intr),
+      "color_intrinsics": color_intrinsics,
+      "depth_to_color": depth_to_color,
       "preset": args.preset,
       "depth_units_m": self._scale,
       "filters": bool(getattr(args, "filters", False)),
@@ -263,8 +291,26 @@ class Stream:
   def read3(self) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """The aligned pair, plus the raw left infrared frame if it was enabled."""
     raw = self._pipe.wait_for_frames()
+    self.raw_color = None
+    self.frame_meta = {}
     ir = None
     self._right = None
+    # These device-clock stamps cannot be subtracted from host time, but they
+    # prove that saved RGB/depth/IR arrays came from the same frameset and show
+    # drops or skew after a USB/reset problem.
+    for name, stream_frame in (
+        ("depth", raw.get_depth_frame()),
+        ("color", (raw.get_color_frame()
+                   if self.gray_source == "aligned_color" else None)),
+        ("ir_left", raw.get_infrared_frame(1) if self.infrared else None),
+        ("ir_right", raw.get_infrared_frame(2) if self.stereo else None)):
+      if stream_frame:
+        self.frame_meta[f"{name}_frame_number"] = int(
+          stream_frame.get_frame_number())
+        self.frame_meta[f"{name}_timestamp_ms"] = float(
+          stream_frame.get_timestamp())
+        self.frame_meta[f"{name}_timestamp_domain"] = str(
+          stream_frame.get_frame_timestamp_domain())
     if self.infrared:
       f = raw.get_infrared_frame(1)
       if f:
@@ -286,6 +332,12 @@ class Stream:
                * self._scale)
       return depth, ir, ir
 
+    original_color = raw.get_color_frame()
+    if not original_color:
+      raise RuntimeError("no raw colour frame")
+    # Preserve the synchronized, unaligned BGR image for visual models.
+    # Alignment below returns a different frame whose holes depend on depth.
+    self.raw_color = np.asanyarray(original_color.get_data()).copy()
     frames = self._align.process(raw)
     d = frames.get_depth_frame()
     for f in self._filters:
