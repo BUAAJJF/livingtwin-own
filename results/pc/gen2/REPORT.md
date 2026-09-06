@@ -328,3 +328,75 @@ environment and E0's 12.8 stays NO-GO.  Every future training run -- teacher and
 under the termination, which for the first time charges −300 for knocking the object out instead
 of leaving it there; the mask-line control of section 4 and the next teacher should both be
 trained under it, and the results before `ad49e04` are the old environment's, kept as they are.
+
+## 6. Round 3 (2026-09-06/07): recipes under the astray termination, and the long-run mechanism
+
+All runs: v11 teacher, seed 42, 512 envs, `--sensor measured`, the astray termination on (commit
+`6bb1f09` and after), tags `pc_gen3_*_20260906T1515` under `results/pc/routes/` and
+`results/pc/gen3/`.  Gate in this environment: 70 % of the v11 teacher's 27.6 placed/min = **19.4**,
+late/early ≥ 0.85.
+
+**6.1 Results (three evaluation seeds; 180 s = three seeds, blocks from seed 101).**
+
+| recipe | distill / PPO, episode | placed/min (accept) | success | endurance l/e | 36 s ruler: grasps per attempt, stalled, astray/min, jaw engaged | 180 s placed/min; blocks |
+|---|---|---|---|---|---|---|
+| teacher v11 (reference) | - | 27.6 | 0.93 | - | 0.398, 0.014, 1.73, 13.6 mm | 27.7; 27 → 28 → 28 → 28 → 27 |
+| R0 P1BZ, the standard recipe | 1500 / 800, 36 s | 12.1 [11.4, 12.2] | 0.831 | 0.81 [0.76, 0.89] | 0.228, 0.138, 2.58, 18.7 mm | 6.8; 12 → 8 → 6 → 5 → 4 |
+| **R2 P1BZ, budget × 2** | 3000 / 1600, 36 s | **18.1 [17.8, 18.2]** | **0.911** | **0.94 [0.93, 1.02]** | 0.330, 0.103, 1.81, 18.2 mm | 10.6; 18 → 13 → 9 → 8 → 6 |
+| R3 P1BZ, 12 s episodes | 1500 / 800, 12 s | 13.8 [12.7, 13.8] | 0.874 | 0.84 [0.83, 0.88] | 0.253, 0.136, 1.98, 16.2 mm | 6.6; 14 → 9 → 6 → 4.5 → 3.5 |
+| C0 E0 continued (+800 PPO here) | (1500 / 800) + 800 | 13.9 [13.8, 14.3] | 0.879 | 0.82 [0.78, 0.98] | 0.289, 0.128, 2.40, 17.0 mm | 6.4; 14 → 8.5 → 4.7 → 3 → 1.6 |
+| R1 MASK (depth + target mask), same recipe | 1500 / 800, 36 s | 0.34 [0.31, 0.38] | 0.088 | 0.35 | 0.005, 0.30, 0.32, 37.8 mm | 0.07 |
+
+Distilled students before PPO (seed 101, same environment): R0 8.9, R2 13.3, R3 11.1, R1 4.2 placed/min.
+
+*Facts.*  (i) **Budget is the one lever that moved the level**: × 2 gives +50 % placed/min, success
+0.91, and the first late/early above 0.85 (0.94); it is 1.3 placed/min under the throughput gate.
+(ii) Continued PPO under the reset (C0) teaches the jaw (25 → 17 mm commanded while engaged, the
+teacher's 14-17) and fewer knock-outs (3.4 → 2.4 astray per minute) for +8 % throughput.
+(iii) Short episodes help the distilled student (+24 %) and not the final policy.  (iv) The
+mask-line control **collapsed in PPO** (reward −3.3 → +2.0 while placements 1.0 → 0.15 per
+episode; final jaw 38 mm, never closing): with a weak start (success 0.36) the −300 termination
+made not engaging the best policy.  Its number is a recipe failure, not a representation verdict;
+the distilled students (4.2 vs 8.9-13.3) are the only comparable pair and favour the cloud.
+
+**6.2 The 180 s decay: what it is and what it is not** (`results/pc/gen3/hidden_reset/`,
+`results/pc/gen3/crop/`, all on E0 = gen-2 P1BZ, seed 101, 256 envs).
+
+| E0, 180 s no-reset | placed/min | per 36 s block | late/early |
+|---|---|---|---|
+| plain | 6.2 | 12.7 → 7.6 → 5.3 → 3.0 → 2.5 | 0.33 |
+| hidden state reset every 36 s / on every placement / every 12 s | 6.3 / 6.1 / 6.6 | 13.2 → 3.0 / 12.8 → 2.1 / 13.0 → 3.4 | 0.34 / 0.31 / 0.40 |
+| **whole environment reset every 36 s** | **12.9** | **12.6 → 12.4 → 12.3 → 12.8 → 14.2** | **1.01** |
+
+Not the GRU (resets do nothing), not the arm posture as such (R2's outside-box fraction is flat at
+0.52 while it decays), not the object class mix (stepped 0.21 → 0.26).  The trace of every
+environment (`long_E0_trace_s101.npz`) says what a stall is: the object inside the sector, on the
+table, still; the hand 9-18 cm away at 11 cm height, jaw open; and **on 99 % of the fresh frames
+the object has zero pixels at full resolution** -- invisible, not unsampled (the hand is on the
+camera-object line in only 8 % of those frames).  By object height:
+
+| object centre above the table | share of loose frames (180 s) | target px at 10 mm cut | frames with 0 px | at 6 mm cut: px / 0-px frames | upright |
+|---|---|---|---|---|---|
+| < 12 mm | 40 % | 0.9 | 95 % | 8.8 / 56 % | 95 % |
+| 12-15 mm | 27 % | 4.1 | 81 % | 16.8 / 33 % | 77 % |
+| 15-20 mm | 12 % | 25 | 27 % | 35 / 12 % | 64 % |
+| 20-30 mm | 12 % | 41-49 | 7-10 % | 50 / 8 % | 73 % |
+| > 30 mm | 8 % | 70-97 | 3-4 % | 86 / 3 % | 74 % |
+
+The shortest objects of the distribution (upright, ~24 mm tall) survive the 10 mm-above-plane
+cut on almost no frame under the measured D455 noise at 1.2 m.  A camera policy never goes for
+what it cannot see; such an object sits inside the sector (no astray reset) until the time-out
+-- which the long run does not have -- so they **accumulate**: 42 → 63 → 74 → 81 → 86 % of loose
+frames are a low object by the fifth block.  That is the decay, for every cloud recipe; the state
+teacher is flat because it does not look.  The rig has the same physics (a 25 mm box at 1.2 m was
+what defeated the mask segmenter, `docs/hardware_lessons.md`), so this is not a simulator artefact.
+
+Lowering the cut to 6 mm halves the invisible frames for 3.5 % more table pixels (survivors 1303 →
+1349 per frame); at 4 mm, 7 % more.  E0, never trained for it, already stalls less under the 6 mm
+cut (0.103 → 0.040) and places 14.2 instead of 13.4.  Route **P1BZ6** = P1BZ with the 6 mm cut
+(`piper_push.pc.routes.crop_z_min`; the deployment applies the same height above the calibrated
+plane).
+
+**6.3 Running now** (results follow in section 7): R4 P1BZ with `RESET_FULL_RANGE=1` in training;
+R5 the same with 120 s training episodes; R7 P1BZ6 + full-range resets; R8 P1BZ6 + full-range
+resets + budget × 2 -- the candidate for the gate.
