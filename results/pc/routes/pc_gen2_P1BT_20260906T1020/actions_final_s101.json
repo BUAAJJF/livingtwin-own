@@ -1,0 +1,169 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1bt_vision/2026-09-06_11-29-46_pc_gen2_P1BT_20260906T1020_finetune/model_799.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BT-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 600,
+  "bounded": true,
+  "action_dim": 7,
+  "frac_sat99": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.3020833333333334e-05
+  ],
+  "frac_sat999": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mean_abs_u": [
+    0.6510175038377445,
+    0.18101929968843858,
+    0.4903422958652179,
+    0.37220052118102714,
+    0.23023436777293685,
+    0.1382509932667017,
+    0.5746581963449717
+  ],
+  "max_abs_u": [
+    1.7559009790420532,
+    1.2619106769561768,
+    1.412146806716919,
+    1.318365454673767,
+    1.132114052772522,
+    0.8139481544494629,
+    2.699187994003296
+  ],
+  "mean_abs_da": [
+    0.05088032647743448,
+    0.06504928347077811,
+    0.06293915997637134,
+    0.07913832371441869,
+    0.0906682236552338,
+    0.05724971321021177,
+    0.07110642623747132
+  ],
+  "mean_abs_da_all": 0.06814735096313135,
+  "jaw_cmd_mm_mean": 25.458779522838693,
+  "jaw_meas_mm_mean": 26.9468293349928,
+  "jaw_cmd_mm_last100": 26.101968232542276,
+  "jaw_meas_mm_last100": 27.9577424377203,
+  "jaw_end_mm_median": 27.856033325195312,
+  "jaw_end_mm_p10": 16.550899505615234,
+  "gripper_action_hist20": [
+    0.0973307266831398,
+    0.042298175394535065,
+    0.025110676884651184,
+    0.019622396677732468,
+    0.017070312052965164,
+    0.015188802033662796,
+    0.01949869841337204,
+    0.04146484285593033,
+    0.06502604484558105,
+    0.06801432371139526,
+    0.06669270992279053,
+    0.07110676914453506,
+    0.08348307013511658,
+    0.09316406399011612,
+    0.09441406279802322,
+    0.07837890833616257,
+    0.05811198055744171,
+    0.03411458432674408,
+    0.009902344085276127,
+    6.510416824312415e-06
+  ],
+  "terminations": {
+    "over_speed": 25,
+    "object_lost": 66,
+    "nan": 0,
+    "time_out": 0
+  },
+  "terminations_per_arm_minute": {
+    "over_speed": 0.48828125,
+    "object_lost": 1.2890625,
+    "nan": 0.0,
+    "time_out": 0.0
+  },
+  "safe_env_fraction": 0.69921875,
+  "safe_env_fraction_def": "environments with no over_speed and no object_lost termination over the whole rollout",
+  "nonfinite_action_steps": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/pc/eval_actions.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1bt_vision/2026-09-06_11-29-46_pc_gen2_P1BT_20260906T1020_finetune/model_799.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1BT-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "600",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen2_P1BT_20260906T1020/actions_final_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 56,
+      "iter": 799,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": []
+    }
+  }
+}

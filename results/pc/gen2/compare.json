@@ -1,0 +1,550 @@
+{
+ "e0": {
+  "rows": {
+   "accept placed/min": {
+    "median": 7.011719226837158,
+    "min": 6.4453125,
+    "max": 7.1337890625,
+    "n": 3
+   },
+   "accept success": {
+    "median": 0.8003533482551575,
+    "min": 0.7692307829856873,
+    "max": 0.8014354109764099,
+    "n": 3
+   },
+   "accept drop rate": {
+    "median": 0.11408132314682007,
+    "min": 0.10448314249515533,
+    "max": 0.11898839473724365,
+    "n": 3
+   },
+   "accept trips/h": {
+    "median": 12.01171875,
+    "min": 11.42578125,
+    "max": 14.0625,
+    "n": 3
+   },
+   "endurance l/e (24 s)": {
+    "median": 0.4546979865771812,
+    "min": 0.4160958904109589,
+    "max": 0.5063091482649842,
+    "n": 3
+   },
+   "endurance jaw stopped mm": {
+    "median": 31.2658054754138,
+    "min": 31.25621657818556,
+    "max": 31.68397769331932,
+    "n": 3
+   },
+   "ini placed/min": {
+    "median": 6.959635416666667,
+    "min": 6.705729166666667,
+    "max": 7.28515625,
+    "n": 3
+   },
+   "ini placed/min live": {
+    "median": 7.4867458685162145,
+    "min": 7.403059452077768,
+    "max": 7.957427643586887,
+    "n": 3
+   },
+   "ini attempts/min": {
+    "median": 43.802083333333336,
+    "min": 40.501302083333336,
+    "max": 44.08854166666667,
+    "n": 3
+   },
+   "ini grasps/min": {
+    "median": 8.248697916666668,
+    "min": 8.001302083333334,
+    "max": 8.548177083333334,
+    "n": 3
+   },
+   "ini grasps per attempt": {
+    "median": 0.19515457788347207,
+    "min": 0.1814825753101004,
+    "max": 0.20366500562610515,
+    "n": 3
+   },
+   "ini success per grasp": {
+    "median": 0.8437253354380426,
+    "min": 0.8380797396257119,
+    "max": 0.8522467631378522,
+    "n": 3
+   },
+   "ini l/e placed": {
+    "median": 0.38831168831168833,
+    "min": 0.33373063170441003,
+    "max": 0.39755766621438265,
+    "n": 3
+   },
+   "ini l/e placed live": {
+    "median": 0.4025594685359203,
+    "min": 0.3539452831522897,
+    "max": 0.4269309063709658,
+    "n": 3
+   },
+   "ini l/e attempts": {
+    "median": 0.5996195910603899,
+    "min": 0.5630653266331659,
+    "max": 0.6758228161346201,
+    "n": 3
+   },
+   "ini wait after success p50 s": {
+    "median": 0.4,
+    "min": 0.4,
+    "max": 0.4,
+    "n": 3
+   },
+   "ini stalled fraction": {
+    "median": 0.3774370659722222,
+    "min": 0.3347981770833333,
+    "max": 0.3803211805555556,
+    "n": 3
+   },
+   "ini envs stalled at end": {
+    "median": 0.546875,
+    "min": 0.4453125,
+    "max": 0.5546875,
+    "n": 3
+   },
+   "ini stuck-object fraction": {
+    "median": 0.08448350694444444,
+    "min": 0.07040581597222222,
+    "max": 0.09419487847222222,
+    "n": 3
+   },
+   "ini engaged fraction": {
+    "median": 0.27162977430555557,
+    "min": 0.239765625,
+    "max": 0.28475260416666665,
+    "n": 3
+   },
+   "ini carry fraction": {
+    "median": 0.02830078125,
+    "min": 0.02750217013888889,
+    "max": 0.029694010416666666,
+    "n": 3
+   },
+   "ini jaw cmd engaged mm": {
+    "median": 24.944257736206055,
+    "min": 23.196292877197266,
+    "max": 26.142866134643555,
+    "n": 3
+   },
+   "ini target pts engaged": {
+    "median": 9.390681385408206,
+    "min": 8.839061328725526,
+    "max": 9.988050153145133,
+    "n": 3
+   },
+   "ini zero-target frames engaged": {
+    "median": 0.3472118108935673,
+    "min": 0.34400841578225494,
+    "max": 0.34945757955248424,
+    "n": 3
+   },
+   "ini drops": {
+    "median": 81.0,
+    "min": 79.0,
+    "max": 82.0,
+    "n": 3
+   },
+   "ini object_lost/min": {
+    "median": 0.64453125,
+    "min": 0.5924479166666667,
+    "max": 0.6575520833333334,
+    "n": 3
+   },
+   "long placed/min": {
+    "median": 1.6653645833333333,
+    "min": 1.5794270833333333,
+    "max": 1.7981770833333333,
+    "n": 3
+   },
+   "long placed/min live": {
+    "median": 1.8602463844703123,
+    "min": 1.8510455177128626,
+    "max": 2.0356621675404503,
+    "n": 3
+   },
+   "long l/e placed": {
+    "median": 0.09083728278041074,
+    "min": 0.0475020475020475,
+    "max": 0.10172570390554042,
+    "n": 3
+   },
+   "long l/e attempts": {
+    "median": 0.6351736868602115,
+    "min": 0.5615679971426021,
+    "max": 0.6564938442864574,
+    "n": 3
+   },
+   "long stalled fraction": {
+    "median": 0.5963138020833333,
+    "min": 0.5915425347222222,
+    "max": 0.6018111979166667,
+    "n": 3
+   },
+   "long stuck-object fraction": {
+    "median": 0.11666232638888889,
+    "min": 0.10476128472222222,
+    "max": 0.14673784722222222,
+    "n": 3
+   },
+   "long last36/first36": {
+    "median": 0.013999999999999999,
+    "min": 0.006066734074823054,
+    "max": 0.019693654266958426,
+    "n": 3
+   },
+   "long blocks placed/min (s101)": [
+    6.44,
+    1.48,
+    0.72,
+    0.31,
+    0.04
+   ]
+  },
+  "manifest": {
+   "tag": "pc_gen2_P1BZ_20260906T1020",
+   "route": "P1BZ",
+   "oracle_only": false,
+   "gpu": 4,
+   "teacher": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt",
+   "teacher_sha256": "d685b54821593f724714c4969bda6d7ca8a11e7fe6aa85f4c5a5c4555e19367a",
+   "code_commit_local": "5eb6d76",
+   "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+   "seed": 42,
+   "vision_envs": 512,
+   "distill_iters": 1500,
+   "finetune_iters": 800,
+   "episode_s": 36.0,
+   "eval_envs": 256,
+   "eval_seeds": "101 202 303",
+   "long_steps": 9000,
+   "long_seeds": "101 202 303",
+   "viewer_steps": 3000,
+   "viewer_seeds": "101 202",
+   "budget": {
+    "steps_per_env_per_iter": 32,
+    "distill_env_steps": 24576000,
+    "finetune_env_steps": 13107200,
+    "distill_gradient_length": 16,
+    "distill_optimizer_updates": 3000,
+    "finetune_optimizer_updates": 16000,
+    "finetune_epochs_x_minibatches": "5x4"
+   },
+   "distill_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ-Distill",
+   "vision_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision",
+   "heldout_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision-Heldout",
+   "gpu_name": "NVIDIA RTX 6000D",
+   "started": "2026-09-06T10:20:48+00:00",
+   "host": "shen-teacher-26"
+  },
+  "timing": {
+   "smoke": 17,
+   "distill": 4341,
+   "distill_eval": 192,
+   "finetune": 3088,
+   "eval": 800,
+   "initiation": 1440,
+   "viewer": 163,
+   "export": 15
+  }
+ },
+ "e2": {
+  "rows": {
+   "accept placed/min": {
+    "median": 8.828125,
+    "min": 8.588868141174316,
+    "max": 9.262696266174316,
+    "n": 3
+   },
+   "accept success": {
+    "median": 0.8232323527336121,
+    "min": 0.8185404539108276,
+    "max": 0.8378250598907471,
+    "n": 3
+   },
+   "accept drop rate": {
+    "median": 0.10699588805437088,
+    "min": 0.0943339392542839,
+    "max": 0.11219359189271927,
+    "n": 3
+   },
+   "accept trips/h": {
+    "median": 14.94140625,
+    "min": 14.355469703674316,
+    "max": 16.406251907348633,
+    "n": 3
+   },
+   "endurance l/e (24 s)": {
+    "median": 0.616551724137931,
+    "min": 0.5674846625766872,
+    "max": 0.6461949265687583,
+    "n": 3
+   },
+   "endurance jaw stopped mm": {
+    "median": 29.075201600790024,
+    "min": 26.533901691436768,
+    "max": 29.21894658356905,
+    "n": 3
+   },
+   "ini placed/min": {
+    "median": 9.010416666666668,
+    "min": 8.990885416666668,
+    "max": 9.674479166666668,
+    "n": 3
+   },
+   "ini placed/min live": {
+    "median": 9.31771105670294,
+    "min": 9.293509348467346,
+    "max": 10.005453847655858,
+    "n": 3
+   },
+   "ini attempts/min": {
+    "median": 47.005208333333336,
+    "min": 45.859375,
+    "max": 47.67578125,
+    "n": 3
+   },
+   "ini grasps/min": {
+    "median": 10.44921875,
+    "min": 10.3515625,
+    "max": 11.236979166666668,
+    "n": 3
+   },
+   "ini grasps per attempt": {
+    "median": 0.22229916897506924,
+    "min": 0.21712412945514134,
+    "max": 0.24503123225440093,
+    "n": 3
+   },
+   "ini success per grasp": {
+    "median": 0.8623052959501558,
+    "min": 0.8609501738122828,
+    "max": 0.8685534591194969,
+    "n": 3
+   },
+   "ini l/e placed": {
+    "median": 0.4786324786324786,
+    "min": 0.46137566137566133,
+    "max": 0.5086294416243654,
+    "n": 3
+   },
+   "ini l/e placed live": {
+    "median": 0.4915722239297417,
+    "min": 0.46855073394968816,
+    "max": 0.5080653404659471,
+    "n": 3
+   },
+   "ini l/e attempts": {
+    "median": 0.6579126103690287,
+    "min": 0.6578645235361653,
+    "max": 0.6699857752489331,
+    "n": 3
+   },
+   "ini wait after success p50 s": {
+    "median": 0.44,
+    "min": 0.44,
+    "max": 0.45,
+    "n": 3
+   },
+   "ini stalled fraction": {
+    "median": 0.3457747395833333,
+    "min": 0.33488715277777775,
+    "max": 0.3502365451388889,
+    "n": 3
+   },
+   "ini envs stalled at end": {
+    "median": 0.5,
+    "min": 0.46875,
+    "max": 0.515625,
+    "n": 3
+   },
+   "ini stuck-object fraction": {
+    "median": 0.032979600694444444,
+    "min": 0.032562934027777775,
+    "max": 0.033079427083333335,
+    "n": 3
+   },
+   "ini engaged fraction": {
+    "median": 0.30957248263888887,
+    "min": 0.28985677083333333,
+    "max": 0.31145833333333334,
+    "n": 3
+   },
+   "ini carry fraction": {
+    "median": 0.03627387152777778,
+    "min": 0.0359375,
+    "max": 0.039188368055555554,
+    "n": 3
+   },
+   "ini jaw cmd engaged mm": {
+    "median": 24.099185943603516,
+    "min": 22.51157569885254,
+    "max": 24.134126663208008,
+    "n": 3
+   },
+   "ini target pts engaged": {
+    "median": 11.099198699338055,
+    "min": 10.598341025321192,
+    "max": 11.302006755414267,
+    "n": 3
+   },
+   "ini zero-target frames engaged": {
+    "median": 0.3058251216165648,
+    "min": 0.29051787613515506,
+    "max": 0.3098827081639763,
+    "n": 3
+   },
+   "ini drops": {
+    "median": 81.0,
+    "min": 79.0,
+    "max": 82.0,
+    "n": 3
+   },
+   "ini object_lost/min": {
+    "median": 0.56640625,
+    "min": 0.48828125,
+    "max": 0.6575520833333334,
+    "n": 3
+   },
+   "long placed/min": {
+    "median": 2.6119791666666665,
+    "min": 2.3697916666666665,
+    "max": 2.6875,
+    "n": 3
+   },
+   "long placed/min live": {
+    "median": 2.723498387533274,
+    "min": 2.4712703506397693,
+    "max": 2.7981242806421043,
+    "n": 3
+   },
+   "long l/e placed": {
+    "median": 0.06556530717604545,
+    "min": 0.06370543541788427,
+    "max": 0.07675791733762748,
+    "n": 3
+   },
+   "long l/e attempts": {
+    "median": 0.5566957414058491,
+    "min": 0.520656779661017,
+    "max": 0.565531641503373,
+    "n": 3
+   },
+   "long stalled fraction": {
+    "median": 0.5932469618055556,
+    "min": 0.581078125,
+    "max": 0.6226519097222222,
+    "n": 3
+   },
+   "long stuck-object fraction": {
+    "median": 0.04094704861111111,
+    "min": 0.03953515625,
+    "max": 0.041063368055555556,
+    "n": 3
+   },
+   "long last36/first36": {
+    "median": 0.01582931865106676,
+    "min": 0.008438818565400843,
+    "max": 0.02094240837696335,
+    "n": 3
+   },
+   "long blocks placed/min (s101)": [
+    8.7,
+    2.06,
+    0.62,
+    0.28,
+    0.18
+   ]
+  },
+  "manifest": {
+   "tag": "pc_gen2_P1BT_20260906T1020",
+   "route": "P1BT",
+   "oracle_only": true,
+   "gpu": 5,
+   "teacher": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt",
+   "teacher_sha256": "d685b54821593f724714c4969bda6d7ca8a11e7fe6aa85f4c5a5c4555e19367a",
+   "code_commit_local": "5eb6d76",
+   "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+   "seed": 42,
+   "vision_envs": 512,
+   "distill_iters": 1500,
+   "finetune_iters": 800,
+   "episode_s": 36.0,
+   "eval_envs": 256,
+   "eval_seeds": "101 202 303",
+   "long_steps": 9000,
+   "long_seeds": "101 202 303",
+   "viewer_steps": 3000,
+   "viewer_seeds": "101 202",
+   "budget": {
+    "steps_per_env_per_iter": 32,
+    "distill_env_steps": 24576000,
+    "finetune_env_steps": 13107200,
+    "distill_gradient_length": 16,
+    "distill_optimizer_updates": 3000,
+    "finetune_optimizer_updates": 16000,
+    "finetune_epochs_x_minibatches": "5x4"
+   },
+   "distill_task": "Mjlab-Pick-Place-PiperX-PC-P1BT-Distill",
+   "vision_task": "Mjlab-Pick-Place-PiperX-PC-P1BT-Vision",
+   "heldout_task": "Mjlab-Pick-Place-PiperX-PC-P1BT-Vision-Heldout",
+   "gpu_name": "NVIDIA RTX 6000D",
+   "started": "2026-09-06T10:20:53+00:00",
+   "host": "shen-teacher-26"
+  },
+  "timing": {
+   "smoke": 15,
+   "distill": 3903,
+   "distill_eval": 210,
+   "finetune": 3120,
+   "eval": 827,
+   "initiation": 1493,
+   "viewer": 163,
+   "export": 13
+  }
+ },
+ "rule": {
+  "ini grasps per attempt": {
+   "separated": true,
+   "rel_diff": 0.13909277141223592,
+   "clear": false
+  },
+  "ini l/e placed": {
+   "separated": true,
+   "rel_diff": 0.23259869079267056,
+   "clear": false
+  },
+  "ini l/e placed live": {
+   "separated": true,
+   "rel_diff": 0.2211170332610841,
+   "clear": false
+  },
+  "accept placed/min": {
+   "separated": true,
+   "rel_diff": 0.2590528391682599,
+   "clear": false
+  },
+  "ini placed/min": {
+   "separated": true,
+   "rel_diff": 0.2946679139382602,
+   "clear": false
+  },
+  "long l/e placed": {
+   "separated": false,
+   "rel_diff": -0.27821148795762146,
+   "clear": false
+  },
+  "grasps per attempt worse": {
+   "separated": false,
+   "rel_diff": 0.13909277141223592,
+   "clear": false
+  }
+ },
+ "verdict": "E2 ~ E0 -> next: the mask-line control (same teacher, budget, 36 s, fixed cadence)"
+}

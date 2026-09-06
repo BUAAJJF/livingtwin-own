@@ -1,0 +1,464 @@
+[
+ {
+  "dir": "results/pc/routes/pc_gen2_P1BZ_20260906T1020",
+  "route": "P1BZ",
+  "gpu": 4,
+  "teacher_sha256": "d685b54821593f72",
+  "distill_iters": 1500,
+  "finetune_iters": 800,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointPatchEncoder"
+  },
+  "infer_ms_single_env": 2.7779780980199575,
+  "learn_s_per_iter_8env": 1.625431313063018,
+  "fresh_fraction": 0.590625,
+  "student_placed": 3.9697265625,
+  "student_success": 0.6501403450965881,
+  "student_loe": 0.4016393442622951,
+  "final_placed": [
+   7.011719226837158,
+   6.4453125,
+   7.1337890625
+  ],
+  "final_success": [
+   0.8014354109764099,
+   0.7692307829856873,
+   0.8003533482551575
+  ],
+  "final_drops": [
+   0.11408132314682007,
+   0.11898839473724365,
+   0.10448314249515533
+  ],
+  "final_trips": [
+   12.01171875,
+   14.0625,
+   11.42578125
+  ],
+  "final_loe": [
+   0.4546979865771812,
+   0.4160958904109589,
+   0.5063091482649842
+  ],
+  "final_early": [
+   11.640625,
+   11.40625,
+   12.3828125
+  ],
+  "final_late": [
+   5.29296875,
+   4.74609375,
+   6.26953125
+  ],
+  "final_jaw_stopped": [
+   31.25621657818556,
+   31.2658054754138,
+   31.68397769331932
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 6.81640625,
+  "heldout_success": 0.7760000228881836,
+  "mean_abs_da": 0.06613140126866626,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.734375,
+  "jaw_end_mm": 31.37931251525879,
+  "object_lost_per_min": 1.09375,
+  "over_speed_per_min": 0.4296875,
+  "p2": null,
+  "approach_blocked": 0.18755296242272695,
+  "engaged_blocked": 0.20702844343011706,
+  "export": "OK onnx 3.576e-07 jit 1.192e-07",
+  "oracle_only": false,
+  "ini_attempts_per_min": [
+   43.802083333333336,
+   44.08854166666667,
+   40.501302083333336
+  ],
+  "ini_success_per_attempt": [
+   0.16631985731272295,
+   0.15209686946249262,
+   0.1718373251888764
+  ],
+  "ini_placed_per_min": [
+   7.28515625,
+   6.705729166666667,
+   6.959635416666667
+  ],
+  "ini_loe_attempts": [
+   0.5996195910603899,
+   0.6758228161346201,
+   0.5630653266331659
+  ],
+  "ini_wait_success_p50": [
+   0.4,
+   0.4,
+   0.4
+  ],
+  "ini_wait_success_p90": [
+   0.58,
+   0.6,
+   0.58
+  ],
+  "ini_first_attempt_p50": [
+   0.54,
+   0.52,
+   0.54
+  ],
+  "ini_stalled_fraction": [
+   0.3803211805555556,
+   0.3347981770833333,
+   0.3774370659722222
+  ],
+  "ini_stalls_per_min": [
+   1.34765625,
+   1.2434895833333335,
+   1.3606770833333335
+  ],
+  "ini_target_pts_approach_re": [
+   9.696770980327052,
+   12.777707501109631,
+   13.615476755952995
+  ],
+  "ini_target_pts_approach_first": [
+   11.91030738522954,
+   11.538345464228653,
+   10.236041086291467
+  ],
+  "ini_target_pts_engaged": [
+   9.988050153145133,
+   8.839061328725526,
+   9.390681385408206
+  ],
+  "ini_zero_target_approach_re": [
+   0.4362289366647298,
+   0.3372614292055038,
+   0.3078829433510254
+  ],
+  "ini_drops": [
+   79,
+   82,
+   81
+  ],
+  "long_seconds": [
+   180.0,
+   180.0,
+   180.0
+  ],
+  "long_placed_per_min": [
+   1.7981770833333333,
+   1.6653645833333333,
+   1.5794270833333333
+  ],
+  "long_attempts_per_min": [
+   24.877604166666668,
+   25.375,
+   22.770833333333332
+  ],
+  "long_loe_placed": [
+   0.09083728278041074,
+   0.0475020475020475,
+   0.10172570390554042
+  ],
+  "long_loe_attempts": [
+   0.6564938442864574,
+   0.6351736868602115,
+   0.5615679971426021
+  ],
+  "long_stalled_fraction": [
+   0.6018111979166667,
+   0.5963138020833333,
+   0.5915425347222222
+  ],
+  "long_resets": [
+   199,
+   168,
+   168
+  ],
+  "long_terminations": [
+   {
+    "object_lost": 152,
+    "over_speed": 47,
+    "nan": 0,
+    "time_out": 0
+   },
+   {
+    "object_lost": 131,
+    "over_speed": 37,
+    "nan": 0,
+    "time_out": 0
+   },
+   {
+    "object_lost": 131,
+    "over_speed": 37,
+    "nan": 0,
+    "time_out": 0
+   }
+  ],
+  "long_last36_over_first36": [
+   0.006066734074823054,
+   0.013999999999999999,
+   0.019693654266958426
+  ],
+  "timing_s": {
+   "smoke": 17,
+   "distill": 4341,
+   "distill_eval": 192,
+   "finetune": 3088,
+   "eval": 800,
+   "initiation": 1440,
+   "viewer": 163,
+   "export": 15
+  },
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": true,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.09818940836433886,
+   "not_oracle": true,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_gen2_P1BT_20260906T1020",
+  "route": "P1BT",
+  "gpu": 5,
+  "teacher_sha256": "d685b54821593f72",
+  "distill_iters": 1500,
+  "finetune_iters": 800,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointPatchEncoder"
+  },
+  "infer_ms_single_env": 3.0648138374090195,
+  "learn_s_per_iter_8env": 1.1315618834923953,
+  "fresh_fraction": 0.6,
+  "student_placed": 7.3388671875,
+  "student_success": 0.7629757523536682,
+  "student_loe": 0.582905982905983,
+  "final_placed": [
+   8.828125,
+   8.588868141174316,
+   9.262696266174316
+  ],
+  "final_success": [
+   0.8185404539108276,
+   0.8232323527336121,
+   0.8378250598907471
+  ],
+  "final_drops": [
+   0.11219359189271927,
+   0.10699588805437088,
+   0.0943339392542839
+  ],
+  "final_trips": [
+   14.355469703674316,
+   16.406251907348633,
+   14.94140625
+  ],
+  "final_loe": [
+   0.616551724137931,
+   0.5674846625766872,
+   0.6461949265687583
+  ],
+  "final_early": [
+   14.16015625,
+   12.734375,
+   14.62890625
+  ],
+  "final_late": [
+   8.73046875,
+   7.2265625,
+   9.453125
+  ],
+  "final_jaw_stopped": [
+   29.075201600790024,
+   29.21894658356905,
+   26.533901691436768
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 8.0517578125,
+  "heldout_success": 0.7950907349586487,
+  "mean_abs_da": 0.06814735096313135,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.69921875,
+  "jaw_end_mm": 27.856033325195312,
+  "object_lost_per_min": 1.2890625,
+  "over_speed_per_min": 0.48828125,
+  "p2": null,
+  "approach_blocked": 0.15640786562199924,
+  "engaged_blocked": 0.20089817810318406,
+  "export": "OK onnx 2.980e-07 jit 1.937e-07",
+  "oracle_only": true,
+  "ini_attempts_per_min": [
+   47.67578125,
+   47.005208333333336,
+   45.859375
+  ],
+  "ini_success_per_attempt": [
+   0.18858391369657243,
+   0.19168975069252078,
+   0.21095968199886428
+  ],
+  "ini_placed_per_min": [
+   8.990885416666668,
+   9.010416666666668,
+   9.674479166666668
+  ],
+  "ini_loe_attempts": [
+   0.6579126103690287,
+   0.6578645235361653,
+   0.6699857752489331
+  ],
+  "ini_wait_success_p50": [
+   0.44,
+   0.44,
+   0.45
+  ],
+  "ini_wait_success_p90": [
+   0.66,
+   0.68,
+   0.68
+  ],
+  "ini_first_attempt_p50": [
+   0.5,
+   0.5,
+   0.51
+  ],
+  "ini_stalled_fraction": [
+   0.3502365451388889,
+   0.3457747395833333,
+   0.33488715277777775
+  ],
+  "ini_stalls_per_min": [
+   1.2369791666666667,
+   1.2369791666666667,
+   1.1653645833333335
+  ],
+  "ini_target_pts_approach_re": [
+   14.260434072886381,
+   16.91224098547887,
+   14.051690005834793
+  ],
+  "ini_target_pts_approach_first": [
+   11.557086337436989,
+   15.324589349993794,
+   13.021592608526417
+  ],
+  "ini_target_pts_engaged": [
+   10.598341025321192,
+   11.099198699338055,
+   11.302006755414267
+  ],
+  "ini_zero_target_approach_re": [
+   0.35873313307125404,
+   0.35038342307064774,
+   0.33226014837042595
+  ],
+  "ini_drops": [
+   82,
+   81,
+   79
+  ],
+  "long_seconds": [
+   180.0,
+   180.0,
+   180.0
+  ],
+  "long_placed_per_min": [
+   2.3697916666666665,
+   2.6875,
+   2.6119791666666665
+  ],
+  "long_attempts_per_min": [
+   25.3828125,
+   27.653645833333332,
+   26.16796875
+  ],
+  "long_loe_placed": [
+   0.06370543541788427,
+   0.06556530717604545,
+   0.07675791733762748
+  ],
+  "long_loe_attempts": [
+   0.565531641503373,
+   0.5566957414058491,
+   0.520656779661017
+  ],
+  "long_stalled_fraction": [
+   0.6226519097222222,
+   0.581078125,
+   0.5932469618055556
+  ],
+  "long_resets": [
+   196,
+   194,
+   180
+  ],
+  "long_terminations": [
+   {
+    "object_lost": 145,
+    "over_speed": 51,
+    "nan": 0,
+    "time_out": 0
+   },
+   {
+    "object_lost": 156,
+    "over_speed": 38,
+    "nan": 0,
+    "time_out": 0
+   },
+   {
+    "object_lost": 136,
+    "over_speed": 44,
+    "nan": 0,
+    "time_out": 0
+   }
+  ],
+  "long_last36_over_first36": [
+   0.02094240837696335,
+   0.01582931865106676,
+   0.008438818565400843
+  ],
+  "timing_s": {
+   "smoke": 15,
+   "distill": 3903,
+   "distill_eval": 210,
+   "finetune": 3120,
+   "eval": 827,
+   "initiation": 1493,
+   "viewer": 163,
+   "export": 13
+  },
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": true,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.07632743362831858,
+   "not_oracle": false,
+   "deployable": false
+  }
+ }
+]

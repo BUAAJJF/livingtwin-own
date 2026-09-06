@@ -1,6 +1,6 @@
 # yf/pc second generation -- why the first-generation student stops starting, and E0 / E2
 
-Status: **audit complete, E0 / E2 scheduled (blocked on the training host's VPN)**.  Every number carries the
+Status: **complete** (audit, E0 / E2 run on 2026-09-06, decision in section 4).  Every number carries the
 commit, the checkpoint hash, the sensor setting and the budget it was measured under.  Facts,
 hypotheses and open questions are labelled as such.
 
@@ -169,59 +169,119 @@ quarter of its first).  E0 (fixed cadence,
 same everything) says how much of the gen-1 number was the cadence bug; E2 (the same 5-11 points
 flagged) says whether *knowing which of the points are the object* is what the grasp is missing.
 
-## 3. E0 (P1BZ) and E2 (P1BT)
+## 3. E0 (P1BZ) and E2 (P1BT): the results
 
-**Status: not yet run.**  The training host `shen-teacher` is reachable only through the MotionPro
-VPN, which was logged out for the whole of this session (`VPN Status: unknown`; the ssh proxy times
-out).  The qualified v11 teacher exists only on the host, so neither route can be trained here.
-Everything else is in place and smoke-tested locally (both routes: cloud 512 × 5, the zero column
-exactly 0, the oracle column flagging ~48 of 512 points on the smoke's start frames, two
-distillation iterations with a finite loss; `results/pc/gen2/audit/smoke_P1B{Z,T}.json`).
+Both ran on shen-teacher (RTX 6000D, GPUs 4 and 5) from 10:20 to 13:08 UTC on 2026-09-06, code
+`5eb6d76`, tags `pc_gen2_P1BZ_20260906T1020` and `pc_gen2_P1BT_20260906T1020` under
+`results/pc/routes/`; the launcher, the manifests and `timing.jsonl` record everything below.
+Both smokes passed with the cloud 512 × 5, the zero column exactly 0 and the oracle column flagging
+51 of 512 points on the start frames.  Controls, identical by construction and by manifest: teacher
+`d685b548…` (v11), training seed 42, 512 envs, distill 1500 iterations (24.6 M env steps, 3000
+optimizer updates at gradient length 16) + PPO 800 (13.1 M env steps, 16 000 updates), episode
+36 s, the same cloud, encoder (PointPatchEncoder, 930 638 parameters), GRU, reward, curriculum, DR,
+sensor and latency; no dropout at either stage.  Wall time E0 / E2: distill 72 / 65 min (E0 shared
+its GPU with the teacher reference for the first 25 min), fine-tune 51 / 52 min, evaluation 13 / 14
+min, initiation + long runs 24 / 25 min, viewer 3 / 3 min, export 15 / 13 s.  E2's export is a
+graph-consistency check only (`export/ORACLE_ONLY`; the bundle and every deployment entry point
+refuse the route).
 
-One command launches the pair and the teacher reference, once the host answers:
+**3.1 The accept / endurance ruler (three evaluation seeds, 256 envs, `--sensor measured`).**
 
-```bash
-bash scripts/pc/launch_gen2.sh          # rsync named paths; refuse unless >= 2 of GPUs 4-7 are idle; launch
-```
+| final policy | E0 P1BZ (zero column) | E2 P1BT (oracle flag) | gen-1 P1B (bug cadence) | gate |
+|---|---|---|---|---|
+| placed / min | 7.01 [6.45, 7.13] | 8.83 [8.59, 9.26] | 6.42 [6.24, 6.57] | ≥ 13.5 |
+| success | 0.800 [0.769, 0.801] | 0.823 [0.819, 0.838] | 0.784 | |
+| drop rate | 0.114 | 0.107 | 0.11 | |
+| trips / h | 12.0 [11.4, 14.1] | 14.9 [14.4, 16.4] | 7.3-13.2 | |
+| endurance (24 s) late/early | 0.45 [0.42, 0.51] | 0.62 [0.57, 0.65] | 0.47 | ≥ 0.85 |
+| held-out (capped) placed / success | 6.82 / 0.776 | 8.05 / 0.795 | 6.33 / 0.74 | > 0 |
+| actions: |Δa|, sat > 0.999, non-finite, safe-env fraction | 0.066, 0, 0, 0.73 | 0.068, 0, 0, 0.70 | 0.034-0.07 | |
+| occlusion, approach / engaged | 0.188 / 0.207 | 0.156 / 0.201 | | |
+| export | OK (onnx 3.6e-7, jit 1.2e-7) | OK (onnx 3.0e-7, jit 1.9e-7) | OK | agree |
+| distilled student (seed 101): placed / min, success, l/e | 3.97, 0.650, 0.40 | 7.34, 0.763, 0.58 | 4.57, 0.673, 0.49 | |
+| gate | **NO-GO** (throughput, late/early) | **NO-GO** (and oracle-only) | NO-GO | |
 
-It writes `results/pc/routes/pc_gen2_P1BZ_<stamp>/`, `pc_gen2_P1BT_<stamp>/` and
-`results/pc/gen2/teacher_v11_<stamp>/` on the host (stages: smoke → distill 1500 → distill eval →
-finetune 800 → 3-seed accept/endurance/held-out/actions/occlusion → initiation × 3 seeds + 180 s × 3
-seeds → viewer pages → export; `timing.jsonl` per stage).  A poller started in this session retries
-the host every minute for 12 h and runs the launcher when it answers
-(`results/pc/gen2/launch_attempts.log`).  Bring the numbers back with
-`scripts/pull_results.sh pc/routes` and `scripts/pull_results.sh pc/gen2`, then
-`python scripts/pc/report_routes.py results/pc/routes/pc_gen2_* --teacher-placed 19.3`.
-Expected wall time from the gen-1 P1B timings on the same host: ~65 min distill, ~50 min
-fine-tune, ~50 min of evaluation -- about 3 h for the pair in parallel.
+**3.2 The initiation ruler (36 s, three seeds) and the 180 s no-reset run (three seeds).**
 
-Controls common to both (from `manifest.json` of each route directory): teacher above; seed 42;
-512 environments; distill 1500 iterations (32 steps/env/iter = 24.6 M env steps, 3000 optimizer
-updates at gradient length 16) + PPO 800 iterations (13.1 M env steps, 16 000 updates, 5 epochs x 4
-minibatches); episode 36 s; same cloud (512 x 5), encoder, GRU, reward, curriculum, DR, sensor,
-latency; evaluation seeds 101 / 202 / 303; no dropout at either stage (see the audit).  E0's fifth
-column is constant zero; E2's is the oracle target flag.  E2 is oracle-only: `manifest.oracle_only`,
-`export/ORACLE_ONLY`, `bundle.py` and every deployment entry point refuse it.
+| | E0 P1BZ | E2 P1BT | teacher v11 | gen-1 P1B |
+|---|---|---|---|---|
+| placed / min (raw / live time) | 6.96 / 7.49 | 9.01 / 9.32 | 20.7 / 20.9 | 6.15 / 6.56 |
+| attempts / min → grasps / min | 43.8 → 8.3 | 47.0 → 10.5 | 65.3 → 23.8 | 55.3 → 7.0 |
+| grasps per attempt | 0.195 [0.181, 0.204] | 0.222 [0.217, 0.245] | 0.359 [0.353, 0.368] | 0.126 |
+| success per grasp | 0.844 | 0.862 | 0.870 | 0.880 |
+| late/early placed (raw / live) | 0.39 [0.33, 0.40] / 0.40 | 0.48 [0.46, 0.51] / 0.49 | 0.78 / 0.78 | 0.33 / 0.34 |
+| late/early attempts | 0.60 | 0.66 | 0.83 | 0.85 |
+| wait from a placement to the next attempt, p50 | 0.40 s | 0.44 s | 0.36 s | 0.44 s |
+| stalled step fraction; envs stalled at the end | 0.38; 55 % | 0.35; 50 % | 0.19; 30 % | 0.28; 35 % |
+| stuck-object step fraction | 0.084 | 0.033 | 0.010 | 0.059 |
+| steps engaged / carrying | 27 % / 2.8 % | 31 % / 3.6 % | 32 % / 7.9 % | 31 % / 2.2 % |
+| jaw commanded while engaged | 24.9 mm | 24.1 mm | 17.3 mm | 24.8 mm |
+| target points while engaged; zero-target frames | 9.4; 35 % | 11.1; 31 % | - | 10.7; 29 % |
+| distilled student: grasps per attempt, l/e, jaw engaged | 0.106, 0.31, 31.1 mm | 0.152, 0.41, 27.5 mm | | |
+| 180 s: placed / min (raw / live) | 1.67 [1.58, 1.80] / 1.86 | 2.61 [2.37, 2.69] / 2.72 | 10.4 / 10.6 | 1.64 / 1.82 |
+| 180 s: per 36 s block (seed 101) | 6.4 → 1.5 → 0.7 → 0.3 → 0.04 | 8.7 → 2.1 → 0.6 → 0.3 → 0.2 | 20.5 → 12.2 → 8.1 → 6.5 → 4.9 | 6.4 → 1.0 → 0.4 → 0.4 → 0.1 |
+| 180 s: last 36 s over first 36 s; late/early attempts | 0.01; 0.64 | 0.02; 0.56 | 0.24; 0.51 | 0.01; 0.84 |
+| 180 s: stalled / stuck-object step fraction | 0.60 / 0.12 | 0.59 / 0.04 | 0.50 / 0.01 | 0.46 / 0.10 |
 
-## 4. Decision rule (pre-registered) and the next priority
+Frame-by-frame pages (untracked, 36-38 MB each, in the route directories): E0
+`viewer_final_s101.html` -- a success cycle at frames 116-197, a 16 s stall at frames 1202-2000;
+E0 `viewer_final_s202.html` -- six placements, first cycle at frames 12-97, no stall in 60 s; E2
+`viewer_final_s101.html` -- eleven placements, first cycle at frames 2-85; E2 `viewer_final_s202.html`
+-- six placements, first cycle at frames 20-99.  In the E2 pages the flagged points are drawn in
+magenta: on the frames where the hand is at the object they are 5-11 points on the object's top
+and near face, and on roughly a third of those frames there are none.  Keys `n`/`p` step between
+attempts, `s` jumps to the next stall.
 
-Read E0 and E2 on the same rows as section 2.5, three evaluation seeds each, the training seed
-matched (42); the 180 s numbers against the v11 teacher's own 180 s run.  "Clearly better" means
-the three-seed intervals do not overlap and the difference is at least 30 % of E0's value.
+**3.3 Reading (facts first).**
 
-| outcome | next priority |
-|---|---|
-| E2 clearly better than E0 in grasps per attempt and late/early (raw and live) | a deployable target selection + persistence for the cloud (a per-point target flag the robot can produce: tracker/detector on the existing points, teacher/student target kept consistent); two more training seeds first |
-| E2 ≈ E0 (within the intervals) | the mask-line control: the same teacher, budget, 36 s and cadence fix with the depth+mask observation, to split "representation" from "recipe" |
-| E0 already close to the gate (≥ 13.5 placed/min, late/early ≥ 0.85) | quantify the recovery against gen-1 P1B; decide whether a target mechanism is needed at all |
-| neither, and E0's per-phase profile still shows the grasp deficit of section 2 with attempts intact | only then budget × 2 or a 12 s-episode control, one at a time |
+1. *The cadence bug was not the gen-1 number.*  E0 -- the gen-1 P1B recipe on the fixed hold --
+   scores 7.0 placed/min against gen-1's 6.4, late/early 0.45 against 0.47, on the same ruler.
+   The fix changed the shape (fewer attempts, 44 vs 55 per minute; more grasps per attempt, 0.195
+   vs 0.126; more stall) and not the level.
+2. *The oracle flag moves every row in the same direction and none of them far.*  E2 over E0:
+   placed/min +26 % (accept) / +29 % (36 s ruler), grasps per attempt +14 %, late/early +38 %
+   (24 s) / +23 % (36 s, raw and live), stalls -8 %; intervals separated on all of them; no row
+   reaches the pre-registered 30 % on the three rows the rule names.  Over 180 s both collapse to
+   the same floor (last 36 s at 1-2 % of the first) while the teacher holds a quarter.
+3. *With a perfect label on the points, the student still does not close.*  E2 commands the jaw
+   to 24 mm where the teacher commands 17 mm, converts 0.22 of its approaches into grasps against
+   the teacher's 0.36, and carries 3.6 % of the time against 7.9 %.  Knowing *which* of the 512
+   points are the object is therefore not what the grasp is missing; it is worth about a quarter
+   of the gap in throughput and none of the gap in jaw behaviour.
+4. *What the flag did buy is consistent with what it can see.*  It is present on 5-11 points and
+   absent on a third of the frames at the grasp moment (occlusion by the hand, not sampling); the
+   improvement is of the size a partial signal would give.
 
-Independent of the outcome, two environment-side findings from the audit are queued for the round
-after (they change the task and would re-qualify the teacher, so not this round): the bin-settle
-artefact (2.3) and the fact that the teacher's own placement rate falls fivefold over 180 s (2.5),
-which bounds what any student can be asked to hold.
+*Hypotheses the numbers are consistent with, not established:* (a) the object's geometry at
+1.2 m through the measured D455 noise is too coarse in the sampled cloud for the closing decision
+(a 25-45 mm object as ~10 displaced points), so the student regresses to a half-closed jaw
+whatever the label says -- a representation-precision problem the mask line's 224×168 depth crop
+does not have to the same degree; (b) the recipe (v11 labels, 36 s episodes, this budget) sets a
+ceiling that the mask observation would hit too.  These two are exactly what the pre-registered
+"E2 ≈ E0" branch separates.
 
-**The single next priority, on today's evidence: run the E0 / E2 pair** -- it is built, tested,
-smoke-tested and scheduled, and it is the one experiment that turns the audit's remaining
-hypothesis (the grasp is missed because the ~11 target points are not recognised as the object)
-into a measurement.  Blocked only by the VPN login on this machine.
+## 4. Decision
+
+**Outcome under the pre-registered rule: E2 ≈ E0** (every row better for E2, intervals separated,
+no named row at or above 30 %).  Section 3.3 gives the stronger statement the rule does not: even
+the oracle target label leaves the grasp deficit and the horizon collapse in place.
+
+**The single next priority: the mask-line control under the identical recipe** -- the depth +
+target-mask observation (`Mjlab-Pick-Place-PiperX-Distill-Robust` / `-Vision-Robust` at the
+fixed cadence), distilled from the same v11 teacher with the same seed, budget, 36 s episodes,
+evaluation seeds and the initiation ruler.  It is one run on one GPU (about 2.5 h by the timings
+above) and it splits the two remaining hypotheses: a mask student at 15-25 placed/min with the
+teacher's jaw command says the point-cloud *representation* is what is lost (then the work is
+density/precision on the cloud side -- more points on the object, finer sampling near the hand,
+a wrist view -- not a target channel); a mask student at 7-9 says the *recipe* is the ceiling
+(then the work is the teacher's own horizon behaviour and the budget, before any observation
+change).  Not first: budget × 2, shorter episodes, a new encoder, a new teacher -- each would
+move the number without saying which of the two it moved.
+
+Queued for the round after, because they change the environment and re-qualify the teacher:
+the bin-settle artefact (2.3; ~1 % of the teacher's steps, 3-8 % of the students') and the
+teacher's own fivefold decay over 180 s (2.5), which caps every student's long run.
+
+Deployment: nothing changes.  E0 is NO-GO on the gate (7.0 < 13.5 placed/min, late/early 0.45 <
+0.85); E2 is oracle-only and can never be a candidate.  `d455_v4_final` stays the rollback; the
+gen-1 P1B bundle stays shadow-only.
