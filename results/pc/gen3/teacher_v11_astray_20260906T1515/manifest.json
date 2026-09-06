@@ -1,0 +1,3 @@
+{"teacher": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt", "teacher_sha256": "d685b54821593f724714c4969bda6d7ca8a11e7fe6aa85f4c5a5c4555e19367a", "task": "Mjlab-Pick-Place-PiperX-Robust", "gpu": 4, "seeds": "101 202 303",
+ "long_steps": 9000, "code_commit_local": "6bb1f09", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+ "started": "2026-09-06T15:16:01+00:00", "host": "shen-teacher-26"}
