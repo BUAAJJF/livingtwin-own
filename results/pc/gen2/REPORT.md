@@ -1,6 +1,6 @@
 # yf/pc second generation -- why the first-generation student stops starting, and E0 / E2
 
-Status: **in progress**.  Sections are filled as the numbers arrive; every number carries the
+Status: **audit complete, E0 / E2 scheduled (blocked on the training host's VPN)**.  Every number carries the
 commit, the checkpoint hash, the sensor setting and the budget it was measured under.  Facts,
 hypotheses and open questions are labelled as such.
 
@@ -123,13 +123,70 @@ and 167 resets from the two terminations, all reported.  The jaw command tracks 
 opening within 1 mm except while engaged (24 mm commanded vs 30 measured: the jaw is being asked
 to close and the object is not in it).
 
-**2.5 Teacher-side reference.**  _pending chain 3: the local v10c nosight 7400 state teacher
-(unqualified, same task family) under the same ruler, so that attempts, success per attempt, stalls
-and the bin artefact have a teacher number beside the student's._
+**2.5 Teacher-side reference (v10c nosight `model_7400`, the state teacher on the local machine;
+the qualified v11 lives on the training host and is measured there by `launch_gen2.sh`).**
+State task `Mjlab-Pick-Place-PiperX-Robust`, seed 101, 256 envs, same ruler.  v10c is the
+checkpoint v11 was continued from; it failed the 24 s endurance gate by 0.016.
+
+| | gen-1 P1B student (3 seeds) | v10c teacher (seed 101) |
+|---|---|---|
+| placed / min, 36 s | 6.15 | 19.1 |
+| attempts / min; grasps / min | 55.3; 7.0 | 66.0; 21.2 |
+| grasps per attempt; success per grasp | 0.126; 0.88 | 0.32; 0.90 |
+| steps engaged / carrying | 31 % / 2.2 % | 34 % / 6.5 % |
+| stalled step fraction; envs stalled at the end | 0.28; 35 % | 0.155; 22 % |
+| late/early placed, 36 s (raw / live) | 0.33 / 0.34 | 0.70 / 0.70 |
+| late/early attempts, 36 s | 0.85 | 0.81 |
+| 180 s, per 36 s block, placed / min | 6.4 → 1.0 → 0.4 → 0.4 → 0.1 | 19.7 → 11.7 → 7.7 → 4.9 → 3.9 |
+| 180 s, late/early placed / attempts | 0.08 / 0.84 | 0.34 / 0.67 |
+| stuck-object step fraction, 36 s / 180 s | 0.059 / 0.10 | 0.024 / 0.016 |
+| bin-unsettled envs > 3 s (of 256); object speed p50 | 67; 0.10 m/s | 168; 0.22 m/s |
+| `object_lost` / `over_speed` per arm-minute | 0.67 / 0.22 | 0.31 / 0.68 |
+
+*Facts:* (i) once the hand is within 90 mm, the teacher converts to a secure grasp 2.5× as often as
+the student, and once grasped both place about 90 % of the time -- the student's deficit is
+**at the grasp**, not before it and not after it.  (ii) The teacher itself decays past its
+horizon: 19.7 → 3.9 placed/min over 180 s, stalls rising to 40 % of steps, attempts late/early
+0.67.  A student distilled from it cannot be expected to hold up where its labels do not, so the
+long run scores E0 and E2 **against the v11 teacher's own long run** (measured on the host by the
+launcher), not against 1.0.  (iii) The bin artefact hits the teacher in more environments (it
+releases faster: 0.22 m/s) but for less time (2.4 % of steps): it is not what separates them.
+
+**2.6 What the audit rules out and what it leaves.**  Ruled out as *the* cause of the gen-1
+decay: a hidden "which object" (one object); a missing target *channel in the reward* (the
+command is the same everywhere); the teacher's gripper latch (jaw open in every phase); an
+evaluation defect (three seeds within 4 %, live-time rates, terminations counted); the bin
+artefact (6 % of steps).  Left, and now measurable per phase: the student rarely closes on an
+object it is next to, with the object present in the cloud as ~11 points (p50 5, absent on 29 %
+of frames) at that moment; and a horizon decay shared with the teacher.  E0 (fixed cadence,
+same everything) says how much of the gen-1 number was the cadence bug; E2 (the same 5-11 points
+flagged) says whether *knowing which of the points are the object* is what the grasp is missing.
 
 ## 3. E0 (P1BZ) and E2 (P1BT)
 
-_pending: launched on shen-teacher when the VPN comes back (`results/pc/gen2/launch_attempts.log`)._
+**Status: not yet run.**  The training host `shen-teacher` is reachable only through the MotionPro
+VPN, which was logged out for the whole of this session (`VPN Status: unknown`; the ssh proxy times
+out).  The qualified v11 teacher exists only on the host, so neither route can be trained here.
+Everything else is in place and smoke-tested locally (both routes: cloud 512 × 5, the zero column
+exactly 0, the oracle column flagging ~48 of 512 points on the smoke's start frames, two
+distillation iterations with a finite loss; `results/pc/gen2/audit/smoke_P1B{Z,T}.json`).
+
+One command launches the pair and the teacher reference, once the host answers:
+
+```bash
+bash scripts/pc/launch_gen2.sh          # rsync named paths; refuse unless >= 2 of GPUs 4-7 are idle; launch
+```
+
+It writes `results/pc/routes/pc_gen2_P1BZ_<stamp>/`, `pc_gen2_P1BT_<stamp>/` and
+`results/pc/gen2/teacher_v11_<stamp>/` on the host (stages: smoke → distill 1500 → distill eval →
+finetune 800 → 3-seed accept/endurance/held-out/actions/occlusion → initiation × 3 seeds + 180 s × 3
+seeds → viewer pages → export; `timing.jsonl` per stage).  A poller started in this session retries
+the host every minute for 12 h and runs the launcher when it answers
+(`results/pc/gen2/launch_attempts.log`).  Bring the numbers back with
+`scripts/pull_results.sh pc/routes` and `scripts/pull_results.sh pc/gen2`, then
+`python scripts/pc/report_routes.py results/pc/routes/pc_gen2_* --teacher-placed 19.3`.
+Expected wall time from the gen-1 P1B timings on the same host: ~65 min distill, ~50 min
+fine-tune, ~50 min of evaluation -- about 3 h for the pair in parallel.
 
 Controls common to both (from `manifest.json` of each route directory): teacher above; seed 42;
 512 environments; distill 1500 iterations (32 steps/env/iter = 24.6 M env steps, 3000 optimizer
@@ -139,6 +196,25 @@ latency; evaluation seeds 101 / 202 / 303; no dropout at either stage (see the a
 column is constant zero; E2's is the oracle target flag.  E2 is oracle-only: `manifest.oracle_only`,
 `export/ORACLE_ONLY`, `bundle.py` and every deployment entry point refuse it.
 
-## 4. Decision
+## 4. Decision rule (pre-registered) and the next priority
 
-_pending_
+Read E0 and E2 on the same rows as section 2.5, three evaluation seeds each, the training seed
+matched (42); the 180 s numbers against the v11 teacher's own 180 s run.  "Clearly better" means
+the three-seed intervals do not overlap and the difference is at least 30 % of E0's value.
+
+| outcome | next priority |
+|---|---|
+| E2 clearly better than E0 in grasps per attempt and late/early (raw and live) | a deployable target selection + persistence for the cloud (a per-point target flag the robot can produce: tracker/detector on the existing points, teacher/student target kept consistent); two more training seeds first |
+| E2 ≈ E0 (within the intervals) | the mask-line control: the same teacher, budget, 36 s and cadence fix with the depth+mask observation, to split "representation" from "recipe" |
+| E0 already close to the gate (≥ 13.5 placed/min, late/early ≥ 0.85) | quantify the recovery against gen-1 P1B; decide whether a target mechanism is needed at all |
+| neither, and E0's per-phase profile still shows the grasp deficit of section 2 with attempts intact | only then budget × 2 or a 12 s-episode control, one at a time |
+
+Independent of the outcome, two environment-side findings from the audit are queued for the round
+after (they change the task and would re-qualify the teacher, so not this round): the bin-settle
+artefact (2.3) and the fact that the teacher's own placement rate falls fivefold over 180 s (2.5),
+which bounds what any student can be asked to hold.
+
+**The single next priority, on today's evidence: run the E0 / E2 pair** -- it is built, tested,
+smoke-tested and scheduled, and it is the one experiment that turns the audit's remaining
+hypothesis (the grasp is missed because the ~11 target points are not recognised as the object)
+into a measurement.  Blocked only by the VPN login on this machine.

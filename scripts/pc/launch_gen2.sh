@@ -47,6 +47,13 @@ if [ "$#" -lt "$N" ]; then
 fi
 if [ "${DRY:-0}" = 1 ]; then echo "DRY: would launch $ROUTES on GPUs $*"; exit 0; fi
 
+# The v11 teacher under the initiation ruler (36 s x 3 seeds, 180 s, the bin-settle
+# diagnostic), so the routes' long runs are read against the teacher's own horizon decay.
+# Evaluation only, 256 envs; it shares the first route's GPU.
+TREF="results/pc/gen2/teacher_v11_${STAMP}"
+ssh "$HOST" "cd $RROOT && OUT=$TREF TEACHER=$TEACHER GPU=$1 COMMIT=$COMMIT \
+  nohup setsid bash scripts/pc/teacher_ref.sh >/dev/null 2>&1 < /dev/null & sleep 1; echo teacher reference started on GPU $1 into $TREF"
+
 for r in $ROUTES; do
   gpu=$1; shift
   tag="pc_gen2_${r}_${STAMP}"
