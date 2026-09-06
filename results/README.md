@@ -20,6 +20,15 @@ Inside a `results/<campaign>/<run_tag>/`, a pipeline script (`scripts/pc/run_rou
 - `export/` — the graphs; `scripts/pc/bundle.py` copies them into a bundle. Ignored.
 - `*_checkpoint.txt`, `*_run.txt` — the paths on the training host the stage used. Tracked.
 
+Environment epochs (read `provenance.env_knobs` before comparing across them):
+
+- before 2026-09-05: Action API v1 (`-V1` task ids);
+- 2026-09-05 → `ad49e04` (2026-09-06 evening): Action API v2, an object knocked out of the
+  spawn sector stays there for the rest of the episode;
+- from `ad49e04`: the `object_astray` termination ends such an episode after 1 s
+  (`OBJECT_ASTRAY_TERMINATE=0` reproduces the epoch before).  The same checkpoint reads
+  differently across the last two epochs (`results/pc/gen2/REPORT.md` section 5).
+
 Rules that came from being bitten:
 
 - A run directory is written once. A fix is a new commit and a new tag, never an edit in place.

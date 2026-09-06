@@ -287,3 +287,44 @@ teacher's own fivefold decay over 180 s (2.5), which caps every student's long r
 Deployment: nothing changes.  E0 is NO-GO on the gate (7.0 < 13.5 placed/min, late/early 0.45 <
 0.85); E2 is oracle-only and can never be a candidate.  `d455_v4_final` stays the rollback; the
 gen-1 P1B bundle stays shadow-only.
+
+## 5. Environment change (2026-09-06 evening): the object-astray termination
+
+Watching E0 in the viewer, the user saw that most stalls are the object lying outside the working
+sector, and decided such an episode should be penalised and reset rather than continue.  Measured
+first (`results/pc/gen2/audit/object_location_{E0,teacher_v10c}_s101.json`, 256 envs × 36 s):
+during stalls the object is outside the SPAWN sector on 86 % of E0's stalled steps and 99.7 % of the
+teacher's, median 7-8 cm past the edge (p90 37 cm); it earned the per-step `object_astray` penalty
+and nothing ended the episode.  Commit `ad49e04` adds the termination `object_astray`
+(`mdp.ObjectAstray`): loose, outside the spawn sector by more than 3 cm, for 1 s -- the dwell spares
+the nudge of a grasp -- ends the episode with the existing −300 `terminated` penalty.
+`OBJECT_ASTRAY_TERMINATE=0` reproduces the old environment; the knob is in `provenance.env_knobs`.
+**Every number in sections 1-4 was measured without it.**
+
+The same checkpoints, re-measured under it (nothing retrained; 256 envs, three seeds at 36 s, one at 180 s):
+
+| | E0 P1BZ, old env | E0 P1BZ, astray termination | v10c teacher, old env (s101) | v10c teacher, astray termination |
+|---|---|---|---|---|
+| placed / min, 36 s | 6.96 [6.71, 7.29] | **12.8 [12.3, 13.3]** | 19.1 | **26.8 [26.7, 27.2]** |
+| attempts / min → grasps / min | 43.8 → 8.2 | 56.8 → 15.4 | 66.0 → 21.2 | 78.4 → 30.3 |
+| success per attempt | 0.166 | 0.229 | 0.290 | 0.347 |
+| late/early placed, 36 s | 0.39 | 0.80 [0.70, 0.84] | 0.70 | 1.04 [1.01, 1.06] |
+| stalled step fraction | 0.38 | 0.11 | 0.155 | 0.018 |
+| astray terminations per arm-minute | - | 3.4 | - | 1.9 |
+| drops per run; `object_lost`; `over_speed` | 81; 99; 31 | 164; 152; 54 | 71; 47; 104 | 110; 44; 127 |
+| 180 s, per 36 s block | 6.4 → 1.5 → 0.7 → 0.3 → 0.04 | 12.7 → 7.6 → 5.3 → 3.0 → 2.5 | 19.7 → 11.7 → 7.7 → 4.9 → 3.9 | **27.5 → 28.9 → 27.3 → 26.7 → 25.9** |
+| 180 s, late/early; stalled fraction | 0.09; 0.60 | 0.33; 0.25 | 0.34; 0.40 | 0.94; 0.04 |
+
+*Facts:* (i) The teacher's "horizon decay" of section 2.5 was the environment, not the teacher:
+with the astray reset it places 27/min flat for three minutes.  (ii) For E0 the reset removes the
+dead time (36 s late/early 0.39 → 0.80, placed/min 7.0 → 12.8) but its own decay over 180 s
+remains (12.7 → 2.5), and it knocks the object out of the sector every 18-35 s -- 3.4 astray
+terminations per arm-minute against the teacher's 1.9.  (iii) Drops and `object_lost` roughly
+double per run because there are twice as many cycles; success per grasp is unchanged.
+
+*What this changes:* the gate's teacher reference moves (v10c 19.1 → 26.8; v11 to be re-measured
+on the host when the VPN is back), so "70 % of the teacher" is ~19 placed/min in the new
+environment and E0's 12.8 stays NO-GO.  Every future training run -- teacher and student -- runs
+under the termination, which for the first time charges −300 for knocking the object out instead
+of leaving it there; the mask-line control of section 4 and the next teacher should both be
+trained under it, and the results before `ad49e04` are the old environment's, kept as they are.
