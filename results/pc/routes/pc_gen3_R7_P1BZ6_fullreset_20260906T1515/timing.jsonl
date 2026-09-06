@@ -3,3 +3,6 @@
 {"stage": "distill_eval", "started": 1788731791, "finished": 1788732044, "seconds": 253, "gpu": 4}
 {"stage": "finetune", "started": 1788732044, "finished": 1788735483, "seconds": 3439, "gpu": 4}
 {"stage": "eval", "started": 1788735483, "finished": 1788736432, "seconds": 949, "gpu": 4}
+{"stage": "initiation", "started": 1788736432, "finished": 1788738421, "seconds": 1989, "gpu": 4}
+{"stage": "viewer", "started": 1788738421, "finished": 1788738585, "seconds": 164, "gpu": 4}
+{"stage": "export", "started": 1788738585, "finished": 1788738598, "seconds": 13, "gpu": 4}
