@@ -446,8 +446,13 @@ def _build(a, resources):
     bundle_manifest = policy_spec_path.with_name("manifest.json")
     pc_route = (json.loads(bundle_manifest.read_text()).get("route")
                 if bundle_manifest.exists() else None)
-    if pc_route not in ("P0", "P1A", "P1B", "P2"):
-      raise SystemExit(f"{bundle_manifest} does not name a route (P0/P1A/P1B/P2)")
+    from piper_push.pc import routes as pc_routes
+    if pc_route not in pc_routes.ROUTES:
+      raise SystemExit(f"{bundle_manifest} does not name a route ({'/'.join(pc_routes.ROUTES)})")
+    try:
+      pc_routes.check_deployable(pc_route)   # oracle-only routes never drive the arm
+    except ValueError as e:
+      raise SystemExit(str(e))
     builder = proprio.ProprioBuilder(policy_spec_path)
   else:
     builder = proprio.ProprioBuilder()

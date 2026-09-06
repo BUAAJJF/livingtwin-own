@@ -13,6 +13,12 @@ target channel, an object pose or an instance label.  The critic is the state
 critic, unchanged.  The student and the actor are the same network, so a
 distillation checkpoint is a fine-tuning initialisation.
 
+Second generation (``piper_push.pc.routes``): P1BZ and P1BT are P1B with a
+fifth per-point column -- always zero, or the renderer's label of the
+commanded object on the points the cloud already has.  Same encoder, same
+widths, same everything else; P1BT is oracle-only and is refused by the
+bundle and by every deployment entry point.
+
 Held-out objects: the ``capped`` shape class (12% of the trained
 distribution) is never drawn in training; the ``-Heldout`` ids draw only it.
 """
@@ -28,11 +34,13 @@ from mjlab.tasks.registry import register_mjlab_task
 from piper_push import camera, objects
 from piper_push.distill import PickPlaceDistillationRunner, RslRlDistillationAlgorithmCfg, RslRlDistillationRunnerCfg
 from piper_push.pc import cloud, grasp
+from piper_push.pc import routes as pc_routes
 from piper_push.runners import PickPlaceOnPolicyRunner
 from piper_push.tasks.pick_place.rl_cfg import _distribution_cfg, pick_place_ppo_runner_cfg
 from piper_push.tasks.pick_place.robust_cfg import make_robust_env_cfg
 
-ROUTES = ("P0", "P1A", "P1B", "P2")
+ROUTES = pc_routes.ROUTES
+ORACLE_ROUTES = pc_routes.ORACLE_ROUTES
 NUM_POINTS = 512
 HELDOUT_CLASS = "capped"
 _MODEL = "piper_push.pc.models:SetRecurrentModel"
@@ -56,12 +64,13 @@ def shape_weights(split: str) -> tuple[float, ...] | None:
 
 
 def actor_groups(route: str) -> tuple[str, ...]:
-  if route == "P2":
+  if pc_routes.base_route(route) == "P2":
     return ("proprio", "grasp_locked", "grasp_topk", "vision_meta")
   return ("proprio", "camera", "vision_meta")
 
 
 def encoder_cfg(route: str) -> dict:
+  route = pc_routes.base_route(route)
   if route == "P0":
     return {"camera": {"type": "depthresnet", "out_dim": 256}}
   if route == "P1A":
@@ -76,6 +85,7 @@ def encoder_cfg(route: str) -> dict:
 def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
   if route not in ROUTES:
     raise ValueError(f"route must be one of {ROUTES}")
+  base = pc_routes.base_route(route)
   cfg = make_robust_env_cfg(play=play, vision=True)
   old = cfg.observations["camera"].terms["scene"]
   params = dict(old.params)
@@ -91,7 +101,8 @@ def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
     "scenery_dr": bool(params.get("scenery_dr", False)),
     "latency_probs": latency,
     "augment": not play,
-    "mode": "depth" if route == "P0" else "cloud",
+    "mode": "depth" if base == "P0" else "cloud",
+    "target_channel": pc_routes.target_channel(route),
   }
   # The ``camera`` group keeps its name and its ``scene`` term so that
   # evalcfg.apply_sensor and robust_cfg address the sensor the same way.
@@ -104,7 +115,7 @@ def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
       obs["vision_meta"] = ObservationGroupCfg(
         terms={"meta": ObservationTermCfg(func=cloud.vision_meta)},
         enable_corruption=False, concatenate_terms=True)
-      if route == "P2":
+      if base == "P2":
         obs["grasp_topk"] = ObservationGroupCfg(
           terms={"topk": ObservationTermCfg(func=grasp.GraspCandidates, params={"command_name": "pick"})},
           enable_corruption=False, concatenate_terms=True)
@@ -153,7 +164,7 @@ def pc_distill_runner_cfg(route: str, max_iterations: int = 3000) -> RslRlDistil
     teacher=ppo.actor,
     algorithm=RslRlDistillationAlgorithmCfg(
       num_learning_epochs=1,
-      gradient_length=8 if route == "P0" else 16,
+      gradient_length=8 if pc_routes.base_route(route) == "P0" else 16,
       learning_rate=5.0e-4,
       class_name="piper_push.distill:BoundedDistillation",
       max_grad_norm=1.0,

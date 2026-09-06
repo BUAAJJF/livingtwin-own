@@ -11,6 +11,10 @@
                          auxiliary objective: the timebox did not cover the
                          official implementation, so P1b is "point-patch
                          transformer, no reconstruction loss", not PointPatchRL.
+                         Columns beyond the fourth (x, y, z, valid) are per-point
+                         features and enter the patch mini-PointNet beside the
+                         local coordinates; with four columns the module is
+                         parameter-for-parameter the first-generation one.
 
 ``DepthResNetLite``      a BasicBlock ResNet-18 layout (2-2-2-2 blocks, widths
                          32-64-128-256, GroupNorm, 2-channel input), random
@@ -102,7 +106,8 @@ class PointPatchEncoder(nn.Module):
                n_layers: int = 2, n_heads: int = 4, out_dim: int = 256) -> None:
     super().__init__()
     self.n_groups, self.group_size, self.dim = n_groups, group_size, dim
-    self.patch = _mlp((3, 64, dim))
+    self.feat_dim = max(0, int(in_dim) - 4)
+    self.patch = _mlp((3 + self.feat_dim, 64, dim))
     self.centre = nn.Linear(3, dim)
     layer = nn.TransformerEncoderLayer(dim, n_heads, dim_feedforward=2 * dim, dropout=0.0,
                                        activation="gelu", batch_first=True, norm_first=True)
@@ -124,6 +129,11 @@ class PointPatchEncoder(nn.Module):
     gathered = torch.gather(xyz.unsqueeze(1).expand(-1, self.n_groups, -1, -1), 2,
                             nidx.unsqueeze(-1).expand(-1, -1, -1, 3))        # (B, G, K, 3)
     local = gathered - centres.unsqueeze(2)
+    if self.feat_dim > 0:
+      feats = x[..., 4:4 + self.feat_dim]
+      gf = torch.gather(feats.unsqueeze(1).expand(-1, self.n_groups, -1, -1), 2,
+                        nidx.unsqueeze(-1).expand(-1, -1, -1, self.feat_dim))  # (B, G, K, F)
+      local = torch.cat([local, gf], dim=-1)
     tokens = self.patch(local).amax(dim=2) + self.centre(centres)           # (B, G, D)
     frame_valid = valid.any(dim=1)
     tokens = self.norm(self.encoder(tokens))

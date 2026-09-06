@@ -93,6 +93,65 @@ def route(d, teacher_placed):
     r["approach_blocked"] = (occ.get("by_phase") or {}).get("approach", {}).get("blocked_rate")
     r["engaged_blocked"] = (occ.get("engaged") or {}).get("blocked_rate")
   r["export"] = export_status(d)
+  r["oracle_only"] = bool(man.get("oracle_only", False))
+  # -- second generation: initiation (36 s, three seeds) and the long no-reset run
+  ini = {s: load(os.path.join(d, f"initiation_final_s{s}.json")) for s in SEEDS}
+  lng = {s: load(os.path.join(d, f"long_final_s{s}.json")) for s in SEEDS}
+  def pick(dd, *keys):
+    out = []
+    for s in SEEDS:
+      x = dd[s]
+      for k in keys:
+        x = x.get(k) if isinstance(x, dict) else None
+      out.append(x)
+    return out
+  if any(ini.values()):
+    r["ini_attempts_per_min"] = pick(ini, "attempts_per_min")
+    r["ini_success_per_attempt"] = pick(ini, "success_per_attempt")
+    r["ini_placed_per_min"] = pick(ini, "placed_per_min")
+    r["ini_loe_attempts"] = pick(ini, "late_over_early_attempts")
+    r["ini_wait_success_p50"] = pick(ini, "wait_after_success_s", "p50")
+    r["ini_wait_success_p90"] = pick(ini, "wait_after_success_s", "p90")
+    r["ini_first_attempt_p50"] = pick(ini, "time_to_first_attempt_s", "p50")
+    r["ini_stalled_fraction"] = pick(ini, "stalls", "stalled_step_fraction")
+    r["ini_stalls_per_min"] = pick(ini, "stalls", "per_arm_minute")
+    r["ini_target_pts_approach_re"] = pick(ini, "by_phase", "approach_re", "target_points_mean")
+    r["ini_target_pts_approach_first"] = pick(ini, "by_phase", "approach_first", "target_points_mean")
+    r["ini_target_pts_engaged"] = pick(ini, "by_phase", "engaged", "target_points_mean")
+    r["ini_zero_target_approach_re"] = pick(ini, "by_phase", "approach_re", "frac_frames_zero_target_points")
+    r["ini_drops"] = pick(ini, "drops")
+  if any(lng.values()):
+    r["long_seconds"] = pick(lng, "seconds")
+    r["long_placed_per_min"] = pick(lng, "placed_per_min")
+    r["long_attempts_per_min"] = pick(lng, "attempts_per_min")
+    r["long_loe_placed"] = pick(lng, "late_over_early_placed")
+    r["long_loe_attempts"] = pick(lng, "late_over_early_attempts")
+    r["long_stalled_fraction"] = pick(lng, "stalls", "stalled_step_fraction")
+    r["long_resets"] = pick(lng, "resets")
+    r["long_terminations"] = pick(lng, "terminations")
+    # first and last 36 s of the long run, from the placements per window
+    def edge(dd):
+      out = []
+      for s in SEEDS:
+        x = dd[s]
+        if not x:
+          out.append(None); continue
+        pw, w, dt = x["placed_per_window"], x["window"], x["dt"]
+        k = int(round(36.0 / (w * dt)))
+        if len(pw) < 2 * k:
+          out.append(None); continue
+        e, l = float(np.mean(pw[:k])), float(np.mean(pw[-k:]))
+        out.append(l / e if e > 1e-9 else None)
+      return out
+    r["long_last36_over_first36"] = edge(lng)
+  tim = os.path.join(d, "timing.jsonl")
+  if os.path.exists(tim):
+    r["timing_s"] = {}
+    for line in open(tim):
+      try:
+        j = json.loads(line); r["timing_s"][j["stage"]] = j["seconds"]
+      except Exception:
+        pass
   # -- gate
   placed = [x for x in r["final_placed"] if x is not None]
   loe = [x for x in r["final_loe"] if x is not None and np.isfinite(x)]
@@ -106,8 +165,9 @@ def route(d, teacher_placed):
   g["export_ok"] = r["export"].startswith("OK")
   g["action_api_ok"] = all(x == "ok" for x in r["final_api"])
   g["seed_spread_rel"] = ((max(placed) - min(placed)) / max(np.median(placed), 1e-9)) if placed else None
+  g["not_oracle"] = not r["oracle_only"]
   g["deployable"] = all(bool(g[k]) for k in ("three_seeds_place", "throughput_ge_70pct_teacher", "late_over_early_ge_0.85",
-                                              "no_jaw_latch", "no_nan", "heldout_nonzero", "export_ok", "action_api_ok"))
+                                              "no_jaw_latch", "no_nan", "heldout_nonzero", "export_ok", "action_api_ok", "not_oracle"))
   r["gate"] = g
   return r
 
@@ -134,6 +194,21 @@ def main():
     print(f"   occlusion approach {r.get('approach_blocked')} engaged {r.get('engaged_blocked')}   export {r['export']}")
     if r.get("p2"):
       print(f"   p2 {json.dumps(r['p2'])}")
+    if r.get("ini_attempts_per_min"):
+      print(f"   initiation (36 s): attempts/min {med(r['ini_attempts_per_min'])}  success/attempt {med(r['ini_success_per_attempt'], 3)}  "
+            f"l/e attempts {med(r['ini_loe_attempts'])}  wait after success p50 {med(r['ini_wait_success_p50'])} s p90 {med(r['ini_wait_success_p90'])} s  "
+            f"first attempt p50 {med(r['ini_first_attempt_p50'])} s")
+      print(f"   stalls: stalled fraction {med(r['ini_stalled_fraction'], 3)}  per arm-min {med(r['ini_stalls_per_min'])}  drops {r['ini_drops']}")
+      print(f"   target points (sampled, fresh): approach_first {med(r['ini_target_pts_approach_first'], 1)}  approach_re {med(r['ini_target_pts_approach_re'], 1)}  "
+            f"engaged {med(r['ini_target_pts_engaged'], 1)}  zero-target frames on re-approach {med(r['ini_zero_target_approach_re'], 3)}")
+    if r.get("long_placed_per_min"):
+      print(f"   long no-reset ({r['long_seconds'][0]} s): placed/min {med(r['long_placed_per_min'])}  attempts/min {med(r['long_attempts_per_min'])}  "
+            f"l/e placed {med(r['long_loe_placed'])}  l/e attempts {med(r['long_loe_attempts'])}  last36/first36 {med(r['long_last36_over_first36'])}  "
+            f"stalled {med(r['long_stalled_fraction'], 3)}  resets {r['long_resets']}  terminations {r['long_terminations']}")
+    if r.get("timing_s"):
+      print(f"   timing s {json.dumps(r['timing_s'])}")
+    if r.get("oracle_only"):
+      print("   ORACLE-ONLY route: simulation diagnostic, never a deployment candidate")
     print(f"   gate {json.dumps(r['gate'], default=str)}")
   if a.json:
     json.dump(rows, open(a.json, "w"), indent=1, default=str)

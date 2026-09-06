@@ -37,10 +37,17 @@ def main():
   a = p.parse_args()
   rd = pathlib.Path(a.route_dir)
   out = pathlib.Path(a.out)
+  man = json.loads((rd / "manifest.json").read_text())
+  from piper_push.pc import routes as pc_routes
+  try:
+    pc_routes.check_deployable(str(man.get("route")))
+  except ValueError as e:
+    raise SystemExit(f"refusing to bundle {rd}: {e}")
+  if man.get("oracle_only"):
+    raise SystemExit(f"refusing to bundle {rd}: manifest says oracle_only")
   if out.exists():
     raise SystemExit(f"{out} exists")
   out.mkdir(parents=True)
-  man = json.loads((rd / "manifest.json").read_text())
   export = rd / "export"
   files = {}
   for name in ("policy.onnx", "policy.pt"):

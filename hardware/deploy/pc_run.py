@@ -216,8 +216,15 @@ def main() -> int:
   spec = json.loads((bundle / "obs_spec.json").read_text())
   manifest = json.loads((bundle / "manifest.json").read_text()) if (bundle / "manifest.json").exists() else {}
   route = a.route or manifest.get("route")
-  if route not in ("P0", "P1A", "P1B", "P2"):
+  from piper_push.pc import routes as pc_routes
+  if route not in pc_routes.ROUTES:
     raise SystemExit(f"route {route!r}: pass --route or put it in manifest.json")
+  try:
+    pc_routes.check_deployable(route)
+  except ValueError as e:
+    raise SystemExit(str(e))
+  base_route = pc_routes.base_route(route)
+  target_channel = pc_routes.target_channel(route)
   out = pathlib.Path(a.record)
   if out.exists():
     raise SystemExit(f"{out} exists; shadow runs never overwrite a session")
@@ -227,10 +234,10 @@ def main() -> int:
   policy = PcPolicy(bundle / "policy.onnx", spec, threads=a.policy_threads, cuda=a.device.startswith("cuda"))
   mapper = robot.ActionMapper(spec)
   builder = proprio.ProprioBuilder(bundle / "obs_spec.json")
-  obs_builder = CloudObs(rig, mode="depth" if route == "P0" else "cloud", num_points=pc_cloud.POINT_DIM * 128, device=a.device)
-  if route != "P0":
+  obs_builder = CloudObs(rig, mode="depth" if base_route == "P0" else "cloud", num_points=pc_cloud.POINT_DIM * 128, device=a.device)
+  if base_route != "P0":
     obs_builder.num_points = int(spec["groups"]["camera"]["shape"][0])
-  grasp = GraspObs(builder.kin, device=a.device) if route == "P2" else None
+  grasp = GraspObs(builder.kin, device=a.device) if base_route == "P2" else None
 
   if a.replay:
     from .run import _Replay
@@ -294,7 +301,7 @@ def main() -> int:
     prop = builder(js, last_a)
     parts_1d = {"proprio": prop, "vision_meta": meta}
     parts_nd = {}
-    if route == "P2":
+    if base_route == "P2":
       topk, locked = (nd["extra"] if (nd is not None and nd["extra"] is not None)
                       else (np.zeros((32, 18), np.float32), np.zeros(20, np.float32)))
       parts_1d["grasp_locked"] = locked
@@ -303,7 +310,9 @@ def main() -> int:
         hold = "hold_no_candidate"
     else:
       shape = tuple(spec["groups"]["camera"]["shape"])
-      parts_nd["camera"] = nd["obs"] if nd is not None else np.zeros(shape, np.float32)
+      from .pc_perception import pad_target_channel
+      parts_nd["camera"] = (pad_target_channel(nd["obs"], target_channel) if nd is not None
+                            else np.zeros(shape, np.float32))
     u = policy(parts_1d, parts_nd)
     if not np.isfinite(u).all():
       hold = hold or "hold_nonfinite"

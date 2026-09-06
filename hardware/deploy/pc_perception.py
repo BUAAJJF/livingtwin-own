@@ -29,19 +29,22 @@ import numpy as np
 from . import proprio
 from .pc_obs import CloudObs, GraspObs
 from piper_push.pc import cloud as pc_cloud
+from piper_push.pc import routes as pc_routes
 
 
 class PcPerception(threading.Thread):
   def __init__(self, reader, rig, route: str, num_points: int, kin: proprio.Kinematics,
                device: str = "cuda:0", stereo=None) -> None:
     super().__init__(daemon=True, name="pc-perception")
+    pc_routes.check_deployable(route)
+    base = pc_routes.base_route(route)
     self.reader = reader
     self.route = route
     self.stereo = stereo
     self.stereo_misses = 0
-    self.obs = CloudObs(rig, mode="depth" if route == "P0" else "cloud", num_points=num_points, device=device)
+    self.obs = CloudObs(rig, mode="depth" if base == "P0" else "cloud", num_points=num_points, device=device)
     self.kin = kin
-    self.grasp = GraspObs(kin, device=device) if route == "P2" else None
+    self.grasp = GraspObs(kin, device=device) if base == "P2" else None
     self._lock = threading.Lock()
     self._stopping = threading.Event()
     self._joints = None
@@ -182,7 +185,12 @@ class PcRunPolicy:
   def __init__(self, bundle: pathlib.Path, route: str, threads: int = 2, cuda: bool = True) -> None:
     import onnxruntime as ort
     bundle = pathlib.Path(bundle)
+    pc_routes.check_deployable(route)
     self.pc_route = route
+    self.base_route = pc_routes.base_route(route)
+    # "zero": the graph was trained with a fifth, always-zero column that the
+    # robot's 4-column cloud is padded with here.  "oracle" never gets here.
+    self.target_channel = pc_routes.target_channel(route)
     self.spec = json.loads((bundle / "obs_spec.json").read_text())
     self.path = str(bundle / "policy.onnx")
     opts = ort.SessionOptions()
@@ -203,10 +211,10 @@ class PcRunPolicy:
     want = sum(int(self.spec["groups"][g]["total"]) for g in self.groups_1d)
     if want != self.flat_width:
       raise RuntimeError(f"{self.path}: flat input is {self.flat_width} wide, obs_spec says {want}")
-    self.nd_group = "grasp_topk" if route == "P2" else "camera"
+    self.nd_group = "grasp_topk" if self.base_route == "P2" else "camera"
     if self.nd_names != [self.nd_group]:
       raise RuntimeError(f"{self.path}: nd inputs {self.nd_names}, expected [{self.nd_group}] for route {route}")
-    self.num_points = (int(self.spec["groups"]["camera"]["shape"][0]) if route != "P0" and route != "P2"
+    self.num_points = (int(self.spec["groups"]["camera"]["shape"][0]) if self.base_route not in ("P0", "P2")
                        else pc_cloud.POINT_DIM * 128)
     self.provider = self.sess.get_providers()[0]
 
@@ -220,14 +228,14 @@ class PcRunPolicy:
                valid: bool = False, extra=None) -> np.ndarray:
     meta = vision_meta(age_s, fresh, valid)
     parts = {"proprio": np.asarray(proprio_vec, dtype=np.float32).reshape(-1), "vision_meta": meta}
-    if self.pc_route == "P2":
+    if self.base_route == "P2":
       topk, locked = (extra if extra is not None
                       else (np.zeros(tuple(self.spec["groups"]["grasp_topk"]["shape"]), np.float32),
                             np.zeros(int(self.spec["groups"]["grasp_locked"]["total"]), np.float32)))
       parts["grasp_locked"] = np.asarray(locked, dtype=np.float32).reshape(-1)
       nd = np.asarray(topk, dtype=np.float32)
     else:
-      nd = np.asarray(camera, dtype=np.float32)
+      nd = pad_target_channel(np.asarray(camera, dtype=np.float32), self.target_channel)
     if tuple(nd.shape) != tuple(self.image_shapes[0]):
       raise ValueError(f"the policy expects {self.image_shapes[0]} for {self.nd_group} and got {tuple(nd.shape)}")
     flat = np.concatenate([parts[g].reshape(-1) for g in self.groups_1d])
@@ -240,8 +248,17 @@ class PcRunPolicy:
 
 def blank_observation(spec: dict, route: str) -> np.ndarray:
   """The zero observation of the policy's nd group, from the bundle's spec."""
-  group = "grasp_topk" if route == "P2" else "camera"
+  group = "grasp_topk" if pc_routes.base_route(route) == "P2" else "camera"
   return np.zeros(tuple(int(x) for x in spec["groups"][group]["shape"]), np.float32)
+
+
+def pad_target_channel(cloud_obs: np.ndarray, target_channel: str) -> np.ndarray:
+  """A 4-column robot cloud padded with the always-zero fifth column of a ``zero`` route."""
+  if target_channel == "zero" and cloud_obs.ndim == 2 and cloud_obs.shape[-1] == pc_cloud.POINT_DIM:
+    return np.concatenate([cloud_obs, np.zeros((cloud_obs.shape[0], 1), np.float32)], axis=-1)
+  if target_channel == "oracle":
+    raise RuntimeError("an oracle-only route cannot be fed from the robot")
+  return cloud_obs
 
 
 def vision_meta(age_s: float, fresh: bool, valid: bool) -> np.ndarray:

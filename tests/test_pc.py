@@ -159,3 +159,128 @@ def test_pc_task_ids_are_registered(route):
   assert w[objects.SHAPE_CLASSES.index("capped")] == 0.0
   ho = load_env_cfg(f"Mjlab-Pick-Place-PiperX-PC-{route}-Vision-Heldout")
   assert ho.events["object_shape"].params["shape_weights"][objects.SHAPE_CLASSES.index("capped")] == 1.0
+
+
+# --- second generation: the target channel, the routes, the guards -----------
+
+
+def test_oracle_flag_labels_only_sampled_target_survivors():
+  torch.manual_seed(5)
+  b, h, w = 3, 20, 30
+  pts = torch.randn(b, h, w, 3)
+  inside = torch.zeros(b, h, w, dtype=torch.bool)
+  inside[:, 5:15, 5:25] = True
+  target = torch.zeros(b, h, w, dtype=torch.bool)
+  target[:, 8:12, 8:12] = True          # 16 target pixels, all inside
+  target[:, 0:3, 0:3] = True            # 9 target pixels OUTSIDE the workspace: must never be labelled
+  tmask = target & inside
+  idx, count = cloud.draw_indices(inside, 256)
+  out, count2 = cloud.sample_points(pts, inside, 256, augment=False, idx=idx)
+  assert torch.equal(count, count2) and (count == 200).all()
+  flag = torch.gather(tmask.reshape(b, -1).float(), 1, idx) * out[..., 3]
+  # every flagged point is a target pixel that survived the crop, and the draw is shared
+  sel_target = torch.gather(target.reshape(b, -1).float(), 1, idx)
+  sel_inside = torch.gather(inside.reshape(b, -1).float(), 1, idx)
+  assert torch.equal(flag, sel_target * sel_inside)
+  assert (sel_inside == 1).all()
+  # roughly 16/200 of the draws land on the target
+  frac = flag.mean().item()
+  assert 0.03 < frac < 0.14, frac
+  # the zero channel is exactly zero and does not touch the points
+  zero = torch.cat([out, torch.zeros_like(flag).unsqueeze(-1)], -1)
+  assert zero.shape == (b, 256, 5) and (zero[..., 4] == 0).all()
+  assert torch.equal(zero[..., :4], out)
+
+
+def test_ring_carries_the_fifth_column_with_the_points():
+  torch.manual_seed(4)
+  b, n, length = 1, 6, cloud.MAX_LAG + 1
+  hist = torch.zeros(length, b, n, 5)
+  mhist = torch.zeros(length, b, 3)
+  lag = torch.tensor([2])
+  write = 0
+  seen = []
+  for k, f in enumerate([True, False, True, True, False, True, False]):
+    new = torch.zeros(b, n, 5)
+    new[..., 0] = k + 1
+    new[..., 4] = float(k % 2)         # the label changes with the frame
+    fresh = torch.tensor([f])
+    meta = torch.stack([torch.zeros(b), fresh.float(), torch.ones(b)], -1)
+    write, out, _ = cloud.ring_step(hist, mhist, write, new, meta, fresh, lag, first=(k == 0))
+    seen.append((float(out[0, 0, 0]), float(out[0, 0, 4])))
+  # the label the policy sees always belongs to the frame it sees
+  for frame, label in seen:
+    if frame > 0:
+      assert label == float((int(frame) - 1) % 2), (frame, label)
+
+
+def test_pointpatch_encoder_reads_per_point_features_and_keeps_old_shapes():
+  torch.manual_seed(2)
+  old = encoders.PointPatchEncoder(in_dim=4, n_groups=8, group_size=8, out_dim=32)
+  assert old.patch[0].weight.shape == (64, 3) and old.feat_dim == 0
+  new = encoders.PointPatchEncoder(in_dim=5, n_groups=8, group_size=8, out_dim=32)
+  assert new.patch[0].weight.shape == (64, 4) and new.feat_dim == 1
+  new.eval()
+  x = torch.randn(2, 64, 5)
+  x[..., 3] = 1.0
+  x[..., 4] = 0.0
+  y0 = new(x)
+  x2 = x.clone()
+  x2[:, :10, 4] = 1.0
+  y1 = new(x2)
+  assert y0.shape == (2, 32) and not torch.allclose(y0, y1), "the fifth column must reach the output"
+  torch.jit.script(new)
+  # a 4-column checkpoint loads into a 4-column module built through build_encoder
+  spec = {"type": "pointpatch", "out_dim": 32, "n_groups": 8, "group_size": 8, "dim": 128, "n_layers": 2}
+  again = encoders.build_encoder(spec, (64, 4))
+  again.load_state_dict(old.state_dict())
+  wide = encoders.build_encoder(spec, (64, 5))
+  assert wide.feat_dim == 1
+
+
+def test_routes_module_names_the_variants_and_refuses_the_oracle():
+  from piper_push.pc import routes
+  assert routes.base_route("P1BZ") == "P1B" and routes.base_route("P1BT") == "P1B" and routes.base_route("P2") == "P2"
+  assert routes.target_channel("P1B") == "none" and routes.target_channel("P1BZ") == "zero" and routes.target_channel("P1BT") == "oracle"
+  routes.check_deployable("P1BZ")
+  with pytest.raises(ValueError, match="oracle-only"):
+    routes.check_deployable("P1BT")
+  with pytest.raises(ValueError):
+    routes.check_deployable("P9")
+
+
+@pytest.mark.parametrize("route,channel", [("P1BZ", "zero"), ("P1BT", "oracle")])
+def test_gen2_routes_are_p1b_with_a_target_channel(route, channel):
+  from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+  cfg = load_env_cfg(f"Mjlab-Pick-Place-PiperX-PC-{route}-Distill")
+  params = cfg.observations["camera"].terms["scene"].params
+  assert params["mode"] == "cloud" and params["target_channel"] == channel
+  base = load_env_cfg("Mjlab-Pick-Place-PiperX-PC-P1B-Distill").observations["camera"].terms["scene"].params
+  for k in ("num_points", "latency_probs", "scenery_dr", "cutoff_distance", "mask_jitter_px", "augment"):
+    assert params[k] == base[k], k
+  assert params["noise_cfg"] == base["noise_cfg"]
+  rl = load_rl_cfg(f"Mjlab-Pick-Place-PiperX-PC-{route}-Vision")
+  assert rl.actor.cnn_cfg == load_rl_cfg("Mjlab-Pick-Place-PiperX-PC-P1B-Vision").actor.cnn_cfg
+  assert rl.obs_groups["actor"] == ("proprio", "camera", "vision_meta")
+  load_env_cfg(f"Mjlab-Pick-Place-PiperX-PC-{route}-Vision-Heldout")
+
+
+def test_bundle_refuses_an_oracle_route(tmp_path, monkeypatch):
+  import json, sys, runpy
+  rd = tmp_path / "route"
+  rd.mkdir()
+  (rd / "manifest.json").write_text(json.dumps({"route": "P1BT", "oracle_only": True}))
+  monkeypatch.setattr(sys, "argv", ["bundle.py", str(rd), "--spec", "x.json", "--out", str(tmp_path / "out")])
+  with pytest.raises(SystemExit, match="oracle"):
+    runpy.run_path("scripts/pc/bundle.py", run_name="__main__")
+  assert not (tmp_path / "out").exists()
+
+
+def test_deployment_pads_the_zero_channel_and_refuses_the_oracle():
+  from hardware.deploy.pc_perception import pad_target_channel
+  x = np.zeros((512, 4), np.float32)
+  assert pad_target_channel(x, "none").shape == (512, 4)
+  y = pad_target_channel(x, "zero")
+  assert y.shape == (512, 5) and (y[:, 4] == 0).all()
+  with pytest.raises(RuntimeError, match="oracle"):
+    pad_target_channel(x, "oracle")

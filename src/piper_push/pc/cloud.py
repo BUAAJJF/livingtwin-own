@@ -36,6 +36,19 @@ nothing.  P1a and P1b read the identical tensor.
 The depth variant (P0) is the same pipeline stopped before sampling: metric
 depth in metres with everything outside the workspace zeroed, plus a validity
 channel.  No per-frame normalisation anywhere.
+
+**The target channel (second generation, ``target_channel``).**  ``none`` is
+the 4-column cloud above.  ``zero`` appends a fifth column that is always 0
+and ``oracle`` appends the renderer's label of the commanded object -- 1 on a
+sampled point whose pixel belongs to the target's visible silhouette, 0
+otherwise.  The label is read from the same rendered frame as the depth,
+gathered with the same sampled indices, and travels through the same hold and
+latency ring as the points, so it can never be newer than the cloud it sits
+on.  It labels only points the cloud already has: no occluded points, no
+completed object, no pose.  Whatever the channel, the capture-side counts of
+target pixels surviving the crop and of target points among the sampled set
+are kept on the term (``target_full_count``, ``target_sampled_count``) for the
+diagnostics that ask how much of the object the policy is ever shown.
 """
 
 from __future__ import annotations
@@ -62,6 +75,8 @@ AGE_NORM = 10.0
 MIN_POINTS = 16
 POINT_DIM = 4
 """x, y, z in the base frame, and a 1/0 flag that the frame was valid."""
+TARGET_CHANNELS = ("none", "zero", "oracle")
+"""See the module docstring; ``zero`` and ``oracle`` make the cloud 5 columns wide."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,22 +146,36 @@ def fresh_at(t: torch.Tensor, phase: torch.Tensor) -> torch.Tensor:
   return (k != kp) | (t == 0)
 
 
+def draw_indices(inside: torch.Tensor, num_points: int) -> tuple[torch.Tensor, torch.Tensor]:
+  """Pixel indices ``(B, N)`` drawn with replacement from the survivors, and the survivor count.
+
+  Survivors only.  A row with no survivor draws uniformly and is then zeroed
+  and flagged invalid by :func:`sample_points`; a tiny floor weight on every
+  pixel would let a far-plane point through once in a hundred thousand draws,
+  which is enough to put a point half a metre under the table in every batch.
+  """
+  b = inside.shape[0]
+  m = inside.reshape(b, -1)
+  count = m.sum(dim=1)
+  weights = torch.where(count.view(-1, 1) > 0, m.float(), torch.ones_like(m, dtype=torch.float32))
+  idx = torch.multinomial(weights, num_points, replacement=True)
+  return idx, count
+
+
 def sample_points(pts: torch.Tensor, inside: torch.Tensor, num_points: int,
-                  augment: bool) -> tuple[torch.Tensor, torch.Tensor]:
+                  augment: bool, idx: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
   """Draw ``num_points`` from the surviving pixels, with replacement.
 
-  Returns ``(B, N, 4)`` and the per-environment count of survivors.
+  Returns ``(B, N, 4)`` and the per-environment count of survivors.  ``idx``
+  lets a caller draw the indices first (:func:`draw_indices`) so that a
+  per-pixel label can be gathered with exactly the same draw.
   """
   b = pts.shape[0]
   flat = pts.reshape(b, -1, 3)
-  m = inside.reshape(b, -1)
-  count = m.sum(dim=1)
-  # Survivors only.  A row with no survivor draws uniformly and is then zeroed
-  # and flagged invalid below; a tiny floor weight on every pixel would let a
-  # far-plane point through once in a hundred thousand draws, which is enough
-  # to put a point half a metre under the table in every batch.
-  weights = torch.where(count.view(-1, 1) > 0, m.float(), torch.ones_like(m, dtype=torch.float32))
-  idx = torch.multinomial(weights, num_points, replacement=True)
+  if idx is None:
+    idx, count = draw_indices(inside, num_points)
+  else:
+    count = inside.reshape(b, -1).sum(dim=1)
   sel = torch.gather(flat, 1, idx.unsqueeze(-1).expand(-1, -1, 3))
   ok = (count >= MIN_POINTS).view(b, 1, 1)
   if augment:
@@ -216,6 +245,12 @@ class WorkspaceCloud:
     self.full_inside = None
     self.fresh = None
     self.lags = None
+    # Capture-side diagnostics (every step, whether or not the frame is used):
+    # the target's rendered silhouette after the workspace crop, how many of
+    # its pixels survived, and how many of the sampled points fell on it.
+    self.target_full_mask = None
+    self.target_full_count = None
+    self.target_sampled_count = None
     env._pc_cloud_owner = self
 
   # -- state --------------------------------------------------------------
@@ -249,11 +284,16 @@ class WorkspaceCloud:
   # -- one capture --------------------------------------------------------
 
   def _capture(self, env, sensor_name, command_name, num_points, cutoff_distance, min_depth,
-               noise_cfg, mask_jitter_px, scenery_dr, augment, mode, workspace):
+               noise_cfg, mask_jitter_px, scenery_dr, augment, mode, workspace, target_channel):
     img = self._scene(env, sensor_name, command_name, cutoff_distance, min_depth, noise_cfg,
                       mask_jitter_px, True, scenery_dr, None, None, None)
     depth = img[:, 0] * float(cutoff_distance)            # (B, H, W) metres, holes at the far plane
     valid = depth < float(cutoff_distance) - 1e-3
+    # The renderer's label of the commanded object on this very frame (jitter
+    # 0, no dropout, no target process on the cloud routes): the oracle.  It
+    # reaches the policy only under target_channel == "oracle"; the counts
+    # below are kept regardless, for the diagnostics.
+    target_px = img[:, 1] > 0.5
     b, h, w = depth.shape
     if self._rays is None or self._rays.shape[:2] != (h, w):
       self._rays = camera_rays(h, w, camera_mod.FOVY_DEG, depth.device)
@@ -265,11 +305,26 @@ class WorkspaceCloud:
     inside = valid & in_workspace(pts, workspace)
     self.full_points, self.full_inside = pts, inside
     self.last_depth = depth        # the corrupted metric depth this capture came from, for viewers
+    tmask = target_px & inside
+    self.target_full_mask = tmask
+    self.target_full_count = tmask.reshape(b, -1).sum(dim=1)
     if mode == "depth":
+      if target_channel != "none":
+        raise ValueError("the target channel is defined for the cloud routes only")
       out = torch.stack([torch.where(inside, depth, torch.zeros_like(depth)), inside.float()], dim=1)
       count = inside.reshape(b, -1).sum(dim=1)
+      self.target_sampled_count = self.target_full_count
     else:
-      out, count = sample_points(pts, inside, int(num_points), bool(augment))
+      idx, count = draw_indices(inside, int(num_points))
+      out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx)
+      # Same draw as the points, masked by the frame's validity flag (column 3),
+      # so an invalid frame carries no label either.
+      tflag = torch.gather(tmask.reshape(b, -1).float(), 1, idx) * out[..., 3]
+      self.target_sampled_count = tflag.sum(dim=1)
+      if target_channel == "oracle":
+        out = torch.cat([out, tflag.unsqueeze(-1)], dim=-1)
+      elif target_channel == "zero":
+        out = torch.cat([out, torch.zeros_like(tflag).unsqueeze(-1)], dim=-1)
     return out, count
 
   # -- the term -----------------------------------------------------------
@@ -278,15 +333,18 @@ class WorkspaceCloud:
                cutoff_distance: float = 1.5, min_depth: float = 0.05, noise_cfg=None,
                mask_jitter_px: int = 0, scenery_dr: bool = False,
                latency_probs=DEFAULT_LATENCY_PROBS, augment: bool = False,
-               mode: str = "cloud", workspace: WorkspaceCfg = WORKSPACE) -> torch.Tensor:
+               mode: str = "cloud", workspace: WorkspaceCfg = WORKSPACE,
+               target_channel: str = "none") -> torch.Tensor:
     stamp = (int(env.common_step_counter), self._epoch)
     if stamp == self._stamp and self._out is not None:
       return self._out
+    if target_channel not in TARGET_CHANNELS:
+      raise ValueError(f"target_channel must be one of {TARGET_CHANNELS}, not {target_channel!r}")
     self.params = {"latency_probs": tuple(float(x) for x in latency_probs), "mode": mode,
-                   "num_points": int(num_points)}
+                   "num_points": int(num_points), "target_channel": target_channel}
     out_new, count = self._capture(env, sensor_name, command_name, num_points, cutoff_distance,
                                    min_depth, noise_cfg, mask_jitter_px, scenery_dr, augment,
-                                   mode, workspace)
+                                   mode, workspace, target_channel)
     b = out_new.shape[0]
     dev = out_new.device
     if self._phase is None or self._history.shape[1] != b or self._history.shape[2:] != out_new.shape[1:]:
