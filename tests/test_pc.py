@@ -284,3 +284,32 @@ def test_deployment_pads_the_zero_channel_and_refuses_the_oracle():
   assert y.shape == (512, 5) and (y[:, 4] == 0).all()
   with pytest.raises(RuntimeError, match="oracle"):
     pad_target_channel(x, "oracle")
+
+
+# --- the object-astray termination (2026-09-06) ------------------------------
+
+
+def test_astray_dwell_counts_only_consecutive_violations():
+  from piper_push.tasks.pick_place.mdp import astray_step
+  c = torch.zeros(3, dtype=torch.long)
+  seq = [[1, 1, 0], [1, 0, 0], [1, 1, 0], [1, 1, 0]]     # env 0 stays out 4 steps, env 1 blips, env 2 never
+  fired = []
+  for v in seq:
+    c, done = astray_step(c, torch.tensor(v, dtype=torch.bool), dwell_steps=3)
+    fired.append(done.tolist())
+  assert fired[2] == [True, False, False] and fired[3] == [True, False, False]
+  assert fired[1] == [False, False, False]
+  assert c.tolist() == [4, 2, 0]
+
+
+def test_object_astray_is_a_default_termination_on_the_spawn_sector():
+  from mjlab.tasks.registry import load_env_cfg
+  from piper_push.tasks.pick_place import env_cfg as T, mdp as M
+  for task in ("Mjlab-Pick-Place-PiperX-Robust", "Mjlab-Pick-Place-PiperX-PC-P1BZ-Vision"):
+    cfg = load_env_cfg(task, play=True)
+    term = cfg.terminations["object_astray"]
+    assert term.func is M.ObjectAstray
+    assert term.params["radius_range"] == T.SPAWN_RADIUS and term.params["angle_range"] == T.SPAWN_ANGLE
+    assert term.params["margin_m"] == T.OBJECT_ASTRAY_MARGIN_M and term.params["dwell_s"] == T.OBJECT_ASTRAY_DWELL_S
+    assert not term.time_out
+  assert "OBJECT_ASTRAY_TERMINATE" in __import__("piper_push.evalcfg", fromlist=["ENV_KNOBS"]).ENV_KNOBS

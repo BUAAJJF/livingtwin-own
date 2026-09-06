@@ -66,7 +66,7 @@ def main() -> int:
   policy = runner.get_inference_policy(device=a.device)
   robot = env.scene["robot"]
   tm = env.termination_manager
-  causes = [n for n in ("over_speed", "object_lost", "nan", "time_out") if n in tm.active_terms]
+  causes = [n for n in ("over_speed", "object_lost", "object_astray", "nan", "time_out") if n in tm.active_terms]
 
   env.reset()
   obs = wrapped.get_observations()

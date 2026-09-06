@@ -1717,6 +1717,70 @@ def object_lost(
   return (out & ~in_bin) | (pos[:, 2] > z_max)
 
 
+def astray_step(counter: torch.Tensor, violating: torch.Tensor, dwell_steps: int) -> tuple[torch.Tensor, torch.Tensor]:
+  """Advance the astray dwell counter by one step; return it and the termination flag.
+
+  ``violating`` is "loose and outside the sector by more than the margin"
+  this step; the counter runs while it holds and clears the moment it does
+  not, so a brief excursion during a grasp never terminates and an object that
+  has been left outside for ``dwell_steps`` steps does.  Pure, so it is tested
+  without a simulator.
+  """
+  counter = torch.where(violating, counter + 1, torch.zeros_like(counter))
+  return counter, counter >= dwell_steps
+
+
+class ObjectAstray:
+  """Terminate when the object has been left outside the working sector.
+
+  Found 2026-09-06 (results/pc/gen2): on the fixed-cadence P1B student 86 % of
+  the stalled steps -- and 99.7 % of the teacher's -- had the object outside the
+  spawn sector, typically 7-8 cm past its edge, with the arm waiting for up to
+  the rest of the episode on an object neither policy retrieves.  Until then
+  such an object earned the per-step ``object_astray`` penalty and nothing
+  ended the episode.  Under this term the episode ends (and pays the
+  ``terminated`` penalty) once the object has been loose outside the sector by
+  more than ``margin_m`` for ``dwell_s``: a nudge during a grasp is not
+  astray, an object left there is.  The bin footprint is exempt, as for the
+  penalty.  Switched by ``OBJECT_ASTRAY_TERMINATE`` in env_cfg; every number
+  measured before 2026-09-06 was measured without it.
+  """
+
+  def __init__(self, cfg, env) -> None:
+    del cfg
+    self._count: torch.Tensor | None = None
+
+  def reset(self, env_ids=None) -> None:
+    if self._count is None:
+      return
+    if env_ids is None:
+      self._count.zero_()
+    else:
+      self._count[env_ids] = 0
+
+  def __call__(
+    self,
+    env: "ManagerBasedRlEnv",
+    command_name: str,
+    radius_range: tuple[float, float],
+    angle_range: tuple[float, float],
+    margin_m: float = 0.03,
+    dwell_s: float = 1.0,
+  ) -> torch.Tensor:
+    cmd: PickCommand = env.command_manager.get_term(command_name)
+    xy = cmd._object_pos_local()[:, :2]
+    if self._count is None or self._count.shape[0] != xy.shape[0]:
+      self._count = torch.zeros(xy.shape[0], dtype=torch.long, device=xy.device)
+    in_bin = (
+      (xy - torch.tensor(cmd.cfg.bin_center, device=xy.device)).abs()
+      < torch.tensor(cmd.cfg.bin_inner, device=xy.device)
+    ).all(dim=-1)
+    violating = (sector_violation(xy, radius_range, angle_range) > float(margin_m)) & ~cmd.grasped & ~in_bin
+    dwell_steps = max(1, int(round(float(dwell_s) / env.step_dt)))
+    self._count, done = astray_step(self._count, violating, dwell_steps)
+    return done
+
+
 def joint_velocity_trip(
   env: "ManagerBasedRlEnv", limits: dict[str, float], asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:

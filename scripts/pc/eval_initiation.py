@@ -356,7 +356,7 @@ def main() -> int:
   robot = env.scene["robot"]
   cmd = env.command_manager.get_term("pick")
   tm = env.termination_manager
-  causes = [n for n in ("object_lost", "over_speed", "nan", "time_out") if n in tm.active_terms]
+  causes = [n for n in ("object_lost", "object_astray", "over_speed", "nan", "time_out") if n in tm.active_terms]
   reach = float(a.reach_m if a.reach_m is not None else cmd.cfg.grasp_reach_m)
   lift = float(cmd.cfg.grasp_lift_m)
   bin_c = torch.tensor(cmd.cfg.bin_center, device=a.device)

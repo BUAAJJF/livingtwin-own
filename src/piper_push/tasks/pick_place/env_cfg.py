@@ -70,6 +70,14 @@ OBJECT_LOST_ANGLE = layout.rotate_angle_range((-1.22, 1.22))
 # boundary, and the penalty read -0.023 because the policy was obeying it.
 OBJECT_ALLOWED_RADIUS = (0.15, 0.55)
 OBJECT_ALLOWED_ANGLE = layout.rotate_angle_range((-0.95, 0.90))
+# An object left loose outside the SPAWN sector by more than the margin for
+# the dwell ends the episode (mdp.ObjectAstray).  Decided 2026-09-06 after the
+# gen-2 audit: nearly every stall of every policy was an object knocked past
+# the sector's edge and never fetched.  OBJECT_ASTRAY_TERMINATE=0 reproduces
+# the environment every number before that date was measured in.
+OBJECT_ASTRAY_MARGIN_M = 0.03
+OBJECT_ASTRAY_DWELL_S = 1.0
+OBJECT_ASTRAY_TERMINATE = os.environ.get("OBJECT_ASTRAY_TERMINATE", "1") not in ("0", "false", "False")
 # S0: straight down runs out at 150 mm for r <= 0.35 and 130 mm at r = 0.42.
 # Release happens at 115 mm, so 0.30 is clear of every useful pose and well
 # under where the arm ends up if it flings itself.
@@ -634,6 +642,17 @@ def make_pick_place_env_cfg(
     ),
     "nan": TerminationTermCfg(func=mdp.nan_detection),
   }
+  if OBJECT_ASTRAY_TERMINATE:
+    terminations["object_astray"] = TerminationTermCfg(
+      func=pick_mdp.ObjectAstray,
+      params={
+        "command_name": TASK,
+        "radius_range": SPAWN_RADIUS,
+        "angle_range": SPAWN_ANGLE,
+        "margin_m": OBJECT_ASTRAY_MARGIN_M,
+        "dwell_s": OBJECT_ASTRAY_DWELL_S,
+      },
+    )
 
   cfg = ManagerBasedRlEnvCfg(
     scene=SceneCfg(

@@ -168,7 +168,7 @@ def main() -> int:
   robot = env.scene["robot"]
   obj = env.scene["object"]
   tm = env.termination_manager
-  causes = [n for n in ("over_speed", "object_lost", "nan", "time_out") if n in tm.active_terms]
+  causes = [n for n in ("over_speed", "object_lost", "object_astray", "nan", "time_out") if n in tm.active_terms]
   origin = env.scene.env_origins[0]
 
   env.reset()
