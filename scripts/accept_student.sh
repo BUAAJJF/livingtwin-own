@@ -37,7 +37,7 @@ SENSOR=${SENSOR:-measured}
 # (TARGET_VISIBLE_*, TARGET_GAP_SCALE, OBS_LATENCY_PROBS, SMOOTH_SCALE, ...)
 # from the environment at import time and nothing in the checkpoint records
 # them, so a run script that distils under one setting has to leave them in
-# a domain.env next to the checkpoint -- scripts/run_v8.sh does -- and this
+# a domain.env next to the checkpoint, and this
 # script has to export them, or the student is measured in the wrong domain
 # (v8s_sam2 was, for two days).  Anything already exported wins.
 DOMAIN_ENV=${DOMAIN_ENV:-$(dirname "$ST")/domain.env}

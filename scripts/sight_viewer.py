@@ -1,10 +1,10 @@
 """A draggable, frame-by-frame 3D view of what the camera can and cannot see.
 
-``show_occlusion.py`` renders a fixed spectator viewpoint, which is enough to
-notice a problem and not enough to diagnose one: when a number and a picture
-disagree the next question is always "from where I am standing, what is
-actually in front of what", and a still cannot answer it.  This exports the
-geometry itself and lets the viewpoint move.
+A fixed spectator render is enough to notice a problem and not enough to
+diagnose one: when a number and a picture disagree the next question is
+always "from where I am standing, what is actually in front of what", and a
+still cannot answer it.  This exports the geometry itself and lets the
+viewpoint move.
 
 It also carries the evidence for why the sphere tracer was wrong, because that
 is not something to take on trust.  Every frame stores three visibility

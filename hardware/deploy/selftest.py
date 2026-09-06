@@ -69,9 +69,8 @@ def d405_fovy() -> float:
 def build_env(device: str = "cuda:0", num_envs: int = 1):
   """The vision task with a D405-shaped camera bolted alongside the policy's.
 
-  Shared with ``simrecord.py`` and ``scripts/plot_depth_model.py``: all three
-  need a scene rendered twice through two different lenses, and two of them
-  would otherwise reconstruct it from this file's docstring.
+  A scene rendered twice through two different lenses; kept here so nobody
+  reconstructs it from this file's docstring.
   """
   cfg = load_env_cfg(TASK, play=True)
   cfg.scene.num_envs = num_envs
