@@ -1,0 +1,114 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "num_envs": 256,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 21.875,
+  "held_fraction": 0.08688802083333333,
+  "joint_speed_rad_s": {
+    "mean": 1.686156153678894,
+    "p95": 2.337845802307129,
+    "p99": 2.686893939971924,
+    "max": 3.9222047328948975,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.1762082278728485,
+  "all": {
+    "n": 76800,
+    "visible_mean": 0.551111111111111,
+    "visible_median": 0.6,
+    "blocked_rate": 0.22640625,
+    "occluded_by": {
+      "fingers": 0.2264375,
+      "gripper_base": 0.010644097222222221,
+      "arm": 0.0001171875,
+      "other": 0.21169010416666667
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 70127,
+      "visible_mean": 0.5716523830574053,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.1912387525489469,
+      "occluded_by": {
+        "fingers": 0.19554142246685774,
+        "gripper_base": 0.011048526245240777,
+        "arm": 0.00012358530475660824,
+        "other": 0.2216340829257395
+      }
+    },
+    "holding": {
+      "n": 6673,
+      "visible_mean": 0.33524152055547235,
+      "visible_median": 0.3333333333333333,
+      "blocked_rate": 0.5959838153753934,
+      "occluded_by": {
+        "fingers": 0.551126429891603,
+        "gripper_base": 0.006393925770518008,
+        "arm": 4.9952545082171936e-05,
+        "other": 0.10718817123732455
+      }
+    }
+  },
+  "engaged": {
+    "n": 48641,
+    "visible_mean": 0.5375766671463718,
+    "visible_median": 0.6,
+    "blocked_rate": 0.23060792335683888,
+    "occluded_by": {
+      "fingers": 0.25391062409626997,
+      "gripper_base": 0.012409284348594807,
+      "arm": 0.00010827628269703885,
+      "other": 0.1959951481260665
+    }
+  },
+  "reach_m": {
+    "mean": 0.10256998240947723,
+    "engaged_fraction": 0.720234375
+  },
+  "seed": 202,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": null
+    },
+    "argv": [
+      "scripts/eval_occlusion.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Robust",
+      "--num-envs",
+      "256",
+      "--steps",
+      "300",
+      "--seed",
+      "202",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/teacher_eval/v10c_nosight_7400/occlusion_s202.json"
+    ]
+  }
+}

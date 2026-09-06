@@ -1,0 +1,168 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1b_vision/2026-09-05_19-10-02_pc_screen_P1B_20260905T1842_finetune/model_299.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1B-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 600,
+  "bounded": true,
+  "action_dim": 7,
+  "frac_sat99": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "frac_sat999": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mean_abs_u": [
+    0.7149107230703037,
+    0.1572842313970129,
+    0.5542820212244988,
+    0.24502202110985916,
+    0.1995579254999757,
+    0.14606114202489456,
+    0.5416022139290969
+  ],
+  "max_abs_u": [
+    1.6620298624038696,
+    0.7886619567871094,
+    1.3491989374160767,
+    1.0589417219161987,
+    0.8312115669250488,
+    0.6088335514068604,
+    1.8039604425430298
+  ],
+  "mean_abs_da": [
+    0.04213200986559482,
+    0.049848727023661235,
+    0.042445502596874664,
+    0.06965291163633781,
+    0.10635194189237036,
+    0.07674081949439392,
+    0.04755584273070644
+  ],
+  "mean_abs_da_all": 0.06210396503427703,
+  "jaw_cmd_mm_mean": 34.75610722166796,
+  "jaw_meas_mm_mean": 33.76649954555129,
+  "jaw_cmd_mm_last100": 35.91431483626366,
+  "jaw_meas_mm_last100": 35.720105580985546,
+  "jaw_end_mm_median": 36.820926666259766,
+  "jaw_end_mm_p10": 30.529705047607422,
+  "gripper_action_hist20": [
+    0.0012434895616024733,
+    0.009947916492819786,
+    0.010052083060145378,
+    0.009589843451976776,
+    0.011080728843808174,
+    0.010690104216337204,
+    0.010572916828095913,
+    0.01061197929084301,
+    0.011236979626119137,
+    0.013554687611758709,
+    0.026783853769302368,
+    0.03031250089406967,
+    0.047936197370290756,
+    0.10654296725988388,
+    0.25248047709465027,
+    0.24693359434604645,
+    0.14439453184604645,
+    0.04235025867819786,
+    0.0036848958116024733,
+    0.0
+  ],
+  "terminations": {
+    "over_speed": 17,
+    "object_lost": 77,
+    "nan": 0,
+    "time_out": 0
+  },
+  "terminations_per_arm_minute": {
+    "over_speed": 0.33203125,
+    "object_lost": 1.50390625,
+    "nan": 0.0,
+    "time_out": 0.0
+  },
+  "safe_env_fraction": 0.6953125,
+  "safe_env_fraction_def": "environments with no over_speed and no object_lost termination over the whole rollout",
+  "nonfinite_action_steps": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/pc/eval_actions.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1b_vision/2026-09-05_19-10-02_pc_screen_P1B_20260905T1842_finetune/model_299.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1B-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "600",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:6",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_screen_P1B_20260905T1842/actions_final_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 56,
+      "iter": 299,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": []
+    }
+  }
+}

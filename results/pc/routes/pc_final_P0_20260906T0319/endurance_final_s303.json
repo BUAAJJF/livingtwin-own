@@ -1,0 +1,88 @@
+{
+  "placed_per_min": [
+    6.09375,
+    9.375,
+    8.90625,
+    5.390625,
+    6.09375,
+    4.21875,
+    4.453125,
+    2.8125,
+    2.6953125,
+    2.578125,
+    1.7578125,
+    1.0546875
+  ],
+  "early_per_min": 6.6796875,
+  "late_per_min": 2.55859375,
+  "late_over_early": 0.3830409356725146,
+  "started_envs": 52,
+  "stopped_envs": 50,
+  "survivor_fraction": 0.038461538461538436,
+  "survivor_placements_last": 1.0,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 28.86092569679022,
+  "jaw_mm_running": 29.147841967642307,
+  "checkpoint": "logs/rsl_rl/piperx_pc_p0_vision/2026-09-06_04-25-26_pc_final_P0_20260906T0319_finetune/model_799.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P0-Vision",
+  "seed": 303,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p0_vision/2026-09-06_04-25-26_pc_final_P0_20260906T0319_finetune/model_799.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P0-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "1200",
+      "--seed",
+      "303",
+      "--device",
+      "cuda:7",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_final_P0_20260906T0319/endurance_final_s303.json"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+iter   7500  narrow early 23.7 late 16.8 l/e 0.707 jaw 32.1  |  full early 23.6 late 22.4 l/e 0.949
+iter   8000  narrow early 22.6 late 17.0 l/e 0.753 jaw 28.3  |  full early 24.0 late 19.1 l/e 0.795
+iter   8500  narrow early 24.1 late 17.6 l/e 0.731 jaw 27.5  |  full early 22.2 late 19.7 l/e 0.886
+iter   9000  narrow early 20.6 late 14.5 l/e 0.701 jaw 29.3  |  full early 21.3 late 18.9 l/e 0.886

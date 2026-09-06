@@ -1,0 +1,54 @@
+{
+  "route": "P0",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P0-Distill",
+  "num_envs": 8,
+  "obs_shapes": {
+    "proprio": [
+      8,
+      36
+    ],
+    "object": [
+      8,
+      21
+    ],
+    "privileged": [
+      8,
+      5
+    ],
+    "camera": [
+      8,
+      2,
+      168,
+      224
+    ],
+    "vision_meta": [
+      8,
+      3
+    ],
+    "full_proprio": [
+      8,
+      36
+    ]
+  },
+  "fresh_fraction": 0.6,
+  "valid_fraction": 0.978125,
+  "lags": [
+    3,
+    2,
+    2,
+    2,
+    0,
+    2,
+    2,
+    0
+  ],
+  "step_ms_p50": 25.54070414043963,
+  "occupancy_mean": 0.028400197613518686,
+  "student_params": 3451662,
+  "encoders": {
+    "camera": "DepthResNetLite"
+  },
+  "learn_s_per_iter": 1.862651954521425,
+  "infer_ms_single_env": 1.4545485423877835,
+  "gpu_mem_alloc_gb": 1.253221888
+}

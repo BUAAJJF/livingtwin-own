@@ -1,0 +1,120 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1a_vision/2026-09-05_19-09-34_pc_screen_P1A_20260905T1842_finetune/model_299.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1A-Vision",
+  "num_envs": 256,
+  "steps": 300,
+  "method": "rendered segmentation at projected sample points",
+  "rays_per_frame": 15,
+  "inset": 0.85,
+  "visible_floor": 0.35,
+  "placed_per_min": 0.0,
+  "held_fraction": 0.0,
+  "joint_speed_rad_s": {
+    "mean": 1.2386232614517212,
+    "p95": 2.1119117736816406,
+    "p99": 2.42254638671875,
+    "max": 3.380775213241577,
+    "over_rating": 0.0
+  },
+  "action_rate": 0.05781981348991394,
+  "all": {
+    "n": 76800,
+    "visible_mean": 0.6284392361111111,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.11787760416666666,
+    "occluded_by": {
+      "fingers": 0.13880642361111112,
+      "gripper_base": 0.009568576388888889,
+      "arm": 0.00031684027777777776,
+      "other": 0.2228689236111111
+    }
+  },
+  "by_phase": {
+    "approach": {
+      "n": 76800,
+      "visible_mean": 0.6284392361111111,
+      "visible_median": 0.6666666666666666,
+      "blocked_rate": 0.11787760416666666,
+      "occluded_by": {
+        "fingers": 0.13880642361111112,
+        "gripper_base": 0.009568576388888889,
+        "arm": 0.00031684027777777776,
+        "other": 0.2228689236111111
+      }
+    },
+    "holding": null
+  },
+  "engaged": {
+    "n": 67755,
+    "visible_mean": 0.6259916857304504,
+    "visible_median": 0.6666666666666666,
+    "blocked_rate": 0.12334145081543797,
+    "occluded_by": {
+      "fingers": 0.1547113374166728,
+      "gripper_base": 0.008177502275354832,
+      "arm": 6.887560573635402e-06,
+      "other": 0.21111258701694832
+    }
+  },
+  "reach_m": {
+    "mean": 0.1014864593744278,
+    "engaged_fraction": 0.8822265625
+  },
+  "seed": 101,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_occlusion.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1a_vision/2026-09-05_19-09-34_pc_screen_P1A_20260905T1842_finetune/model_299.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1A-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "300",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_screen_P1A_20260905T1842/occlusion_final_s101.json"
+    ]
+  }
+}

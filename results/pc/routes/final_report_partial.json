@@ -1,0 +1,260 @@
+[
+ {
+  "dir": "results/pc/routes/pc_final_P1A_20260906T0319",
+  "route": "P1A",
+  "gpu": 4,
+  "teacher_sha256": "d685b54821593f72",
+  "distill_iters": 1500,
+  "finetune_iters": 800,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointNetEncoder"
+  },
+  "infer_ms_single_env": 0.43009915854781866,
+  "learn_s_per_iter_8env": 0.8544680170016363,
+  "fresh_fraction": 0.6,
+  "student_placed": 2.509765863418579,
+  "student_success": 0.5418275594711304,
+  "student_loe": 0.4196078431372549,
+  "final_placed": [
+   3.076171875,
+   3.168945550918579,
+   3.02734375
+  ],
+  "final_success": [
+   0.6722783446311951,
+   0.682170569896698,
+   0.6704936623573303
+  ],
+  "final_drops": [
+   0.134599506855011,
+   0.12900641560554504,
+   0.14044444262981415
+  ],
+  "final_trips": [
+   4.6875,
+   7.91015625,
+   6.4453125
+  ],
+  "final_loe": [
+   0.1625,
+   0.14860681114551083,
+   0.10333333333333333
+  ],
+  "final_early": [
+   6.25,
+   6.30859375,
+   5.859375
+  ],
+  "final_late": [
+   1.015625,
+   0.9375,
+   0.60546875
+  ],
+  "final_jaw_stopped": [
+   30.252939090132713,
+   28.823576867580414,
+   31.975101679563522
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 2.3828125,
+  "heldout_success": 0.6061828136444092,
+  "mean_abs_da": 0.05668582222314501,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.7578125,
+  "jaw_end_mm": 30.15195655822754,
+  "object_lost_per_min": 1.09375,
+  "over_speed_per_min": 0.25390625,
+  "p2": null,
+  "approach_blocked": 0.14639130611305842,
+  "engaged_blocked": 0.16539254010128826,
+  "export": "OK onnx 2.384e-07 jit 1.341e-07",
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": true,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.04603182353670635,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_final_P1B_20260906T0319",
+  "route": "P1B",
+  "gpu": 5,
+  "teacher_sha256": "d685b54821593f72",
+  "distill_iters": 1500,
+  "finetune_iters": 800,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointPatchEncoder"
+  },
+  "infer_ms_single_env": 2.805269439704716,
+  "learn_s_per_iter_8env": 1.078751088003628,
+  "fresh_fraction": 0.6,
+  "student_placed": 4.565430164337158,
+  "student_success": 0.6731418967247009,
+  "student_loe": 0.4915254237288136,
+  "final_placed": [
+   6.5673828125,
+   6.240234375,
+   6.416015625
+  ],
+  "final_success": [
+   0.7866582870483398,
+   0.7839789986610413,
+   0.7794871926307678
+  ],
+  "final_drops": [
+   0.12227938324213028,
+   0.10784313827753067,
+   0.11266447603702545
+  ],
+  "final_trips": [
+   7.324219226837158,
+   13.18359375,
+   9.960938453674316
+  ],
+  "final_loe": [
+   0.4696969696969697,
+   0.4416826003824092,
+   0.5063520871143375
+  ],
+  "final_early": [
+   11.6015625,
+   10.21484375,
+   10.76171875
+  ],
+  "final_late": [
+   5.44921875,
+   4.51171875,
+   5.44921875
+  ],
+  "final_jaw_stopped": [
+   26.32211521267891,
+   27.33112871646881,
+   26.92506369203329
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 6.328125,
+  "heldout_success": 0.7430058717727661,
+  "mean_abs_da": 0.06536260294674007,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.734375,
+  "jaw_end_mm": 26.932113647460938,
+  "object_lost_per_min": 0.9765625,
+  "over_speed_per_min": 0.52734375,
+  "p2": null,
+  "approach_blocked": 0.16186110160793704,
+  "engaged_blocked": 0.21974221942785288,
+  "export": "OK onnx 2.980e-07 jit 2.086e-07",
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": true,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.05098934550989345,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_final_P2_20260906T0331",
+  "route": "P2",
+  "gpu": 6,
+  "teacher_sha256": "d685b54821593f72",
+  "distill_iters": 1500,
+  "finetune_iters": 800,
+  "vision_envs": 512,
+  "encoders": {
+   "grasp_topk": "SetMLPEncoder"
+  },
+  "infer_ms_single_env": 0.40682712104171515,
+  "learn_s_per_iter_8env": 1.0388609445653856,
+  "fresh_fraction": 0.59375,
+  "student_placed": 4.248046875,
+  "student_success": 0.6772767305374146,
+  "student_loe": 0.36548223350253806,
+  "final_placed": [
+   4.4384765625,
+   4.873047351837158,
+   5.0537109375
+  ],
+  "final_success": [
+   0.7141615748405457,
+   0.7363781929016113,
+   0.7383540272712708
+  ],
+  "final_drops": [
+   0.11020407825708389,
+   0.10526315867900848,
+   0.1037687137722969
+  ],
+  "final_trips": [
+   7.617187976837158,
+   8.49609375,
+   13.76953125
+  ],
+  "final_loe": [
+   0.4377431906614786,
+   0.3076923076923077,
+   0.39918533604887985
+  ],
+  "final_early": [
+   10.0390625,
+   8.6328125,
+   9.58984375
+  ],
+  "final_late": [
+   4.39453125,
+   2.65625,
+   3.828125
+  ],
+  "final_jaw_stopped": [
+   28.267618268728256,
+   28.104456141591072,
+   29.16237711906433
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 4.799805164337158,
+  "heldout_success": 0.711616575717926,
+  "approach_blocked": 0.1853821504056726,
+  "engaged_blocked": 0.20873365808575775,
+  "export": "OK onnx 2.384e-07 jit 1.341e-07",
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": true,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.12625249265596694,
+   "deployable": false
+  }
+ }
+]

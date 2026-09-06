@@ -1,0 +1,6 @@
+{"tag": "pc_screen_P2_20260905T1842", "route": "P2", "gpu": 7, "teacher": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt", "teacher_sha256": "1ddfefad821551019ddc498dedd860085e383b5f5f321b276cb47e2be598620d",
+ "code_commit_local": "cccfff5", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068", "seed": 42,
+ "vision_envs": 512, "distill_iters": 600, "finetune_iters": 300,
+ "episode_s": 36.0, "eval_envs": 256, "eval_seeds": "101 202 303",
+ "distill_task": "Mjlab-Pick-Place-PiperX-PC-P2-Distill", "vision_task": "Mjlab-Pick-Place-PiperX-PC-P2-Vision", "heldout_task": "Mjlab-Pick-Place-PiperX-PC-P2-Vision-Heldout",
+ "started": "2026-09-05T18:42:15+00:00", "host": "shen-teacher-26"}

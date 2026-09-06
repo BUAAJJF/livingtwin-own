@@ -1,0 +1,153 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 600,
+  "bounded": true,
+  "action_dim": 7,
+  "frac_sat99": [
+    0.0008138020833333334,
+    0.00052734375,
+    0.00024739583333333335,
+    0.00048177083333333335,
+    0.00022135416666666668,
+    0.00038411458333333337,
+    0.0014127604166666668
+  ],
+  "frac_sat999": [
+    0.00015625,
+    5.8593750000000005e-05,
+    3.255208333333333e-05,
+    6.510416666666667e-05,
+    3.255208333333333e-05,
+    9.114583333333334e-05,
+    1.953125e-05
+  ],
+  "mean_abs_u": [
+    0.764822746316592,
+    0.35574158561726416,
+    0.6076593417922657,
+    0.38355308920145037,
+    0.3254165887832642,
+    0.2466283713281155,
+    0.7346933201203744
+  ],
+  "max_abs_u": [
+    7.28590726852417,
+    6.120578289031982,
+    4.452704906463623,
+    6.888266563415527,
+    4.4091477394104,
+    5.948436260223389,
+    4.254371166229248
+  ],
+  "mean_abs_da": [
+    0.12740404479740458,
+    0.13351847208999035,
+    0.12895965065576995,
+    0.14121211391682417,
+    0.1434671252076584,
+    0.136348967283392,
+    0.09424827869154376
+  ],
+  "mean_abs_da_all": 0.12930837894894046,
+  "jaw_cmd_mm_mean": 27.29981488082558,
+  "jaw_meas_mm_mean": 29.09462099642648,
+  "jaw_cmd_mm_last100": 27.433840334415436,
+  "jaw_meas_mm_last100": 29.62575001642108,
+  "jaw_end_mm_median": 29.830373764038086,
+  "jaw_end_mm_p10": 14.364846229553223,
+  "gripper_action_hist20": [
+    0.07081380486488342,
+    0.0836067721247673,
+    0.05015625059604645,
+    0.030963541939854622,
+    0.026614584028720856,
+    0.02109375037252903,
+    0.015455729328095913,
+    0.01774088479578495,
+    0.019524740055203438,
+    0.020774738863110542,
+    0.025774739682674408,
+    0.03613932430744171,
+    0.04934244975447655,
+    0.06910156458616257,
+    0.09656249731779099,
+    0.1277604103088379,
+    0.12845702469348907,
+    0.08110026270151138,
+    0.026158854365348816,
+    0.0028580729849636555
+  ],
+  "terminations": {
+    "over_speed": 47,
+    "object_lost": 22,
+    "nan": 0,
+    "time_out": 0
+  },
+  "terminations_per_arm_minute": {
+    "over_speed": 0.91796875,
+    "object_lost": 0.4296875,
+    "nan": 0.0,
+    "time_out": 0.0
+  },
+  "safe_env_fraction": 0.75390625,
+  "safe_env_fraction_def": "environments with no over_speed and no object_lost termination over the whole rollout",
+  "nonfinite_action_steps": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": null
+    },
+    "argv": [
+      "scripts/pc/eval_actions.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Robust",
+      "--num-envs",
+      "256",
+      "--steps",
+      "600",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/teacher_eval/v10c_nosight_7400/actions_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 13,
+      "iter": 7400,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": [
+        "distribution"
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{"tag": "v11_nosight_36s", "task": "Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight", "gpu": 4, "base": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-40_v10c_coldstart_nosight_teacher/model_7400.pt", "base_sha256": "1ddfefad821551019ddc498dedd860085e383b5f5f321b276cb47e2be598620d",
+ "code_commit_local": "cccfff5", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+ "num_envs": 8192, "additional_iterations": 2000, "episode_s": 36.0,
+ "env": {"RESET_FULL_RANGE": "1", "WRIST_W": "0.30", "PIPER_COLD_START_STAGE": "3", "SMOOTH_SCALE": "unset (1.0)"},
+ "eval_every": 250, "gate_late_over_early": 0.85, "started": "2026-09-05T18:42:11+00:00", "host": "shen-teacher-26"}

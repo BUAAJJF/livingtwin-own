@@ -1,0 +1,78 @@
+{
+  "route": "P2",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P2-Distill",
+  "num_envs": 8,
+  "obs_shapes": {
+    "proprio": [
+      8,
+      36
+    ],
+    "object": [
+      8,
+      21
+    ],
+    "privileged": [
+      8,
+      5
+    ],
+    "camera": [
+      8,
+      512,
+      4
+    ],
+    "vision_meta": [
+      8,
+      3
+    ],
+    "grasp_topk": [
+      8,
+      32,
+      18
+    ],
+    "grasp_locked": [
+      8,
+      20
+    ],
+    "full_proprio": [
+      8,
+      36
+    ]
+  },
+  "fresh_fraction": 0.596875,
+  "valid_fraction": 0.975,
+  "lags": [
+    1,
+    1,
+    2,
+    1,
+    3,
+    2,
+    3,
+    3
+  ],
+  "step_ms_p50": 21.837216103449464,
+  "occupancy_mean": 0.96875,
+  "extent_min": [
+    -0.3775831162929535,
+    0.06929312646389008,
+    0.0014215055853128433
+  ],
+  "extent_max": [
+    0.3266831636428833,
+    0.557094395160675,
+    0.4291316270828247
+  ],
+  "p2": {
+    "switches": 1,
+    "no_candidate_steps": 62,
+    "locked_now": 8,
+    "topk_feasible_mean": 3.125
+  },
+  "student_params": 550350,
+  "encoders": {
+    "grasp_topk": "SetMLPEncoder"
+  },
+  "learn_s_per_iter": 0.907352756941691,
+  "infer_ms_single_env": 0.4106124769896269,
+  "gpu_mem_alloc_gb": 0.11901184
+}

@@ -1,0 +1,354 @@
+[
+ {
+  "dir": "results/pc/routes/pc_screen_P0_20260905T1842",
+  "route": "P0",
+  "gpu": 7,
+  "teacher_sha256": "1ddfefad82155101",
+  "distill_iters": 600,
+  "finetune_iters": 300,
+  "vision_envs": 256,
+  "encoders": {
+   "camera": "DepthResNetLite"
+  },
+  "infer_ms_single_env": 1.4545485423877835,
+  "learn_s_per_iter_8env": 1.862651954521425,
+  "fresh_fraction": 0.6,
+  "student_placed": 0.146484375,
+  "student_success": 0.037383176386356354,
+  "student_loe": 0.26666666666666666,
+  "final_placed": [
+   0.0048828125,
+   0.0048828125,
+   0.0
+  ],
+  "final_success": [
+   0.0,
+   0.0037313431967049837,
+   0.0
+  ],
+  "final_drops": [
+   0.4000000059604645,
+   0.0,
+   1.0
+  ],
+  "final_trips": [
+   1.171875,
+   2.050781488418579,
+   3.22265625
+  ],
+  "final_loe": [
+   NaN,
+   NaN,
+   NaN
+  ],
+  "final_early": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "final_late": [
+   0.01953125,
+   0.0,
+   0.0
+  ],
+  "final_jaw_stopped": [
+   NaN,
+   NaN,
+   NaN
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 0.0048828125,
+  "heldout_success": 0.0,
+  "mean_abs_da": 0.06297657188386144,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.89453125,
+  "jaw_end_mm": 37.46009826660156,
+  "object_lost_per_min": 0.546875,
+  "over_speed_per_min": 0.01953125,
+  "approach_blocked": 0.41167048650901134,
+  "engaged_blocked": 0.47095238095238096,
+  "export": "FAILED: AttributeError: 'SetRecurrentModel' object has no attribute 'obs_groups_2d'. Did you mean:",
+  "gate": {
+   "three_seeds_place": false,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": false,
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": false,
+   "action_api_ok": true,
+   "seed_spread_rel": 1.0,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_screen_P1A_20260905T1842",
+  "route": "P1A",
+  "gpu": 5,
+  "teacher_sha256": "1ddfefad82155101",
+  "distill_iters": 600,
+  "finetune_iters": 300,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointNetEncoder"
+  },
+  "infer_ms_single_env": 0.41059379931539297,
+  "learn_s_per_iter_8env": 0.8293569380184636,
+  "fresh_fraction": 0.5875,
+  "student_placed": 0.009765625,
+  "student_success": 0.00358422938734293,
+  "student_loe": 0.0,
+  "final_placed": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "final_success": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "final_drops": [
+   0.20000000298023224,
+   0.0,
+   0.5
+  ],
+  "final_trips": [
+   1.171875,
+   3.515625,
+   1.4648438692092896
+  ],
+  "final_loe": [
+   NaN,
+   NaN,
+   NaN
+  ],
+  "final_early": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "final_late": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "final_jaw_stopped": [
+   NaN,
+   NaN,
+   NaN
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 0.0,
+  "heldout_success": 0.0,
+  "mean_abs_da": 0.05147783083615981,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.87890625,
+  "jaw_end_mm": 37.39866638183594,
+  "object_lost_per_min": 0.60546875,
+  "over_speed_per_min": 0.0390625,
+  "approach_blocked": 0.11787760416666666,
+  "engaged_blocked": 0.12334145081543797,
+  "export": "FAILED:                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE",
+  "gate": {
+   "three_seeds_place": false,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": false,
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": false,
+   "export_ok": false,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.0,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_screen_P1B_20260905T1842",
+  "route": "P1B",
+  "gpu": 6,
+  "teacher_sha256": "1ddfefad82155101",
+  "distill_iters": 600,
+  "finetune_iters": 300,
+  "vision_envs": 512,
+  "encoders": {
+   "camera": "PointPatchEncoder"
+  },
+  "infer_ms_single_env": 2.8512065997347236,
+  "learn_s_per_iter_8env": 1.0640279959188774,
+  "fresh_fraction": 0.59375,
+  "student_placed": 1.3525390625,
+  "student_success": 0.3368794322013855,
+  "student_loe": 0.34710743801652894,
+  "final_placed": [
+   0.8154296875,
+   1.0009765625,
+   0.8837891221046448
+  ],
+  "final_success": [
+   0.30523917078971863,
+   0.3549060523509979,
+   0.3210412263870239
+  ],
+  "final_drops": [
+   0.19899244606494904,
+   0.18465228378772736,
+   0.2016129046678543
+  ],
+  "final_trips": [
+   7.91015625,
+   5.859375476837158,
+   5.56640625
+  ],
+  "final_loe": [
+   0.23157894736842105,
+   0.13333333333333333,
+   0.26666666666666666
+  ],
+  "final_early": [
+   1.85546875,
+   1.7578125,
+   1.7578125
+  ],
+  "final_late": [
+   0.4296875,
+   0.234375,
+   0.46875
+  ],
+  "final_jaw_stopped": [
+   35.07070615887642,
+   37.29994222521782,
+   37.421975284814835
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 0.9033203125,
+  "heldout_success": 0.29119637608528137,
+  "mean_abs_da": 0.06210396503427703,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.6953125,
+  "jaw_end_mm": 36.820926666259766,
+  "object_lost_per_min": 1.50390625,
+  "over_speed_per_min": 0.33203125,
+  "approach_blocked": 0.15901544299794446,
+  "engaged_blocked": 0.18534810649909045,
+  "export": "FAILED: AttributeError: 'SetRecurrentModel' object has no attribute 'obs_groups_2d'. Did you mean:",
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": false,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.20994473722208856,
+   "deployable": false
+  }
+ },
+ {
+  "dir": "results/pc/routes/pc_screen_P2_20260905T1842",
+  "route": "P2",
+  "gpu": 7,
+  "teacher_sha256": "1ddfefad82155101",
+  "distill_iters": 600,
+  "finetune_iters": 300,
+  "vision_envs": 512,
+  "encoders": {
+   "grasp_topk": "SetMLPEncoder"
+  },
+  "infer_ms_single_env": 0.40715722367167473,
+  "learn_s_per_iter_8env": 0.9817034620791674,
+  "fresh_fraction": 0.590625,
+  "student_placed": 0.7226563096046448,
+  "student_success": 0.23897911608219147,
+  "student_loe": 0.36666666666666664,
+  "final_placed": [
+   0.25390625,
+   0.2392578274011612,
+   0.2587890923023224
+  ],
+  "final_success": [
+   0.11384615302085876,
+   0.09287925809621811,
+   0.1070336401462555
+  ],
+  "final_drops": [
+   0.28260868787765503,
+   0.268456369638443,
+   0.25999999046325684
+  ],
+  "final_trips": [
+   9.082032203674316,
+   7.91015625,
+   8.7890625
+  ],
+  "final_loe": [
+   0.11764705882352941,
+   0.21739130434782608,
+   0.08571428571428572
+  ],
+  "final_early": [
+   0.33203125,
+   0.44921875,
+   0.68359375
+  ],
+  "final_late": [
+   0.0390625,
+   0.09765625,
+   0.05859375
+  ],
+  "final_jaw_stopped": [
+   31.994495540857315,
+   39.72211107611656,
+   40.30567780137062
+  ],
+  "final_api": [
+   "ok",
+   "ok",
+   "ok"
+  ],
+  "heldout_placed": 0.3027344048023224,
+  "heldout_success": 0.11214952915906906,
+  "mean_abs_da": 0.05138955201581387,
+  "sat999_max": 0.0,
+  "nonfinite": 0,
+  "nan_terms": 0,
+  "safe_env": 0.74609375,
+  "jaw_end_mm": 38.36547088623047,
+  "object_lost_per_min": 1.15234375,
+  "over_speed_per_min": 0.2734375,
+  "approach_blocked": 0.19666256898490833,
+  "engaged_blocked": 0.23719626483848635,
+  "export": "FAILED:                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE",
+  "gate": {
+   "three_seeds_place": true,
+   "throughput_ge_70pct_teacher": "False",
+   "late_over_early_ge_0.85": "False",
+   "no_jaw_latch": true,
+   "no_nan": true,
+   "heldout_nonzero": true,
+   "export_ok": false,
+   "action_api_ok": true,
+   "seed_spread_rel": 0.07692313561072717,
+   "deployable": false
+  }
+ }
+]

@@ -1,0 +1,71 @@
+{
+  "placed_per_min": [
+    14.296875,
+    24.2578125,
+    20.625,
+    18.8671875,
+    17.9296875,
+    13.828125,
+    14.765625,
+    12.65625,
+    11.71875,
+    9.375,
+    8.671875,
+    8.3203125
+  ],
+  "early_per_min": 18.30078125,
+  "late_per_min": 10.91796875,
+  "late_over_early": 0.5965848452508005,
+  "started_envs": 122,
+  "stopped_envs": 88,
+  "survivor_fraction": 0.2786885245901639,
+  "survivor_placements_last": 1.3235294117647058,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 23.29615131020546,
+  "jaw_mm_running": 24.01668392121792,
+  "checkpoint": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-39_v10c_coldstart_sight_teacher/model_7400.pt",
+  "task": "Mjlab-Pick-Place-PiperX-Robust",
+  "seed": 202,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "PIPER_X_URDF": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": null
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-39_v10c_coldstart_sight_teacher/model_7400.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-Robust",
+      "--num-envs",
+      "256",
+      "--steps",
+      "1200",
+      "--seed",
+      "202",
+      "--device",
+      "cuda:4",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/teacher_eval/v10c_sight_7400/endurance_s202.json"
+    ]
+  }
+}

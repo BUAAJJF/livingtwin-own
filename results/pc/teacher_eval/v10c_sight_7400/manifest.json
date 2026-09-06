@@ -1,0 +1,3 @@
+{"tag": "v10c_sight_7400", "checkpoint": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_10-27-39_v10c_coldstart_sight_teacher/model_7400.pt", "checkpoint_sha256": "1c0568d3e3a7bfeee238bc43e502ab4ef3deae35cb63da449a447594fcd799d2", "task": "Mjlab-Pick-Place-PiperX-Robust", "seeds": "101 202 303",
+ "num_envs": 256, "gpu": 4, "code_commit_local": "a355df8", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+ "started": "2026-09-05T18:23:44+00:00", "host": "shen-teacher-26"}
