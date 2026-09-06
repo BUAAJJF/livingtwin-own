@@ -227,7 +227,9 @@ Frame-by-frame pages (untracked, 36-38 MB each, in the route directories): E0
 `viewer_final_s101.html` -- a success cycle at frames 116-197, a 16 s stall at frames 1202-2000;
 E0 `viewer_final_s202.html` -- six placements, first cycle at frames 12-97, no stall in 60 s; E2
 `viewer_final_s101.html` -- eleven placements, first cycle at frames 2-85; E2 `viewer_final_s202.html`
--- six placements, first cycle at frames 20-99.  In the E2 pages the flagged points are drawn in
+-- six placements, first cycle at frames 20-99; E2 `viewer_final_s303.html` -- one placement, then a
+9.6 s stall at frames 2521-2999 (the single-environment pages of seeds 101 and 202 happened not to
+stall in 60 s, so a third seed was rendered).  In the E2 pages the flagged points are drawn in
 magenta: on the frames where the hand is at the object they are 5-11 points on the object's top
 and near face, and on roughly a third of those frames there are none.  Keys `n`/`p` step between
 attempts, `s` jumps to the next stall.
