@@ -19,7 +19,11 @@ STAMP=${STAMP:-$(date -u +%Y%m%dT%H%M)}
 SEED=${SEED:-42}
 COMMIT=$(git rev-parse --short HEAD)
 DIRTY=$(git status --porcelain | { grep -v '^??' || true; } | wc -l)
-[ "$DIRTY" = 0 ] || { echo "commit first: $DIRTY tracked files modified" >&2; exit 2; }
+if [ "$DIRTY" != 0 ]; then
+  git status --porcelain | { grep -v '^??' || true; }
+  [ "${ALLOW_DIRTY:-0}" = 1 ] || { echo "commit first: $DIRTY tracked files modified (ALLOW_DIRTY=1 to launch anyway; the list above goes into the log)" >&2; exit 2; }
+  echo "launching with the modified tracked files above (ALLOW_DIRTY=1)"
+fi
 
 echo "== sync code to $HOST ($COMMIT)"
 rsync -az --delete src/piper_push/ "$HOST:$RROOT/src/piper_push/"
