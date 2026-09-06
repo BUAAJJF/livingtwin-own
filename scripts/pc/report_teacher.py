@@ -102,8 +102,12 @@ def screen(r):
 
 
 def main():
+  dirs = [a for a in sys.argv[1:] if os.path.isdir(a)]
+  if not dirs or len(dirs) != len(sys.argv[1:]):
+    print(__doc__)
+    raise SystemExit("usage: report_teacher.py <teacher_eval dir> [...]")
   rows = []
-  for out in sys.argv[1:]:
+  for out in dirs:
     r = arm(out)
     r["screen"] = screen(r)
     rows.append(r)

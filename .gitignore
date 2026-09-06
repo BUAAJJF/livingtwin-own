@@ -105,3 +105,7 @@ results/accept_compare/*.json
 # them carry every number.
 results/segbench/**/shape/
 results/segbench/**/relief/
+
+# ultralytics base weights, downloaded on first use
+/yolo26n.pt
+/yolo26n-seg.pt

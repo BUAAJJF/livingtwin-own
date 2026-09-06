@@ -694,7 +694,7 @@ def main() -> None:
   ap.add_argument("--depth-units", dest="depth_units", type=float, default=1e-4)
   ap.add_argument("--filters", action="store_true")
   ap.add_argument("--serial", default=None)
-  # Odin 1 knobs.  Not pulled in via its add_args because that would collide
+  # Backend knobs kept off add_args because they would collide
   # with --width/--height/--fps, which mean the D405's stream here.
   ap.add_argument("--odin-rate", type=int, default=2, choices=(0, 1, 2))
   ap.add_argument("--conf-min", type=int, default=30)
@@ -708,7 +708,7 @@ def main() -> None:
 
   board, spec = M.load_target(args.target)
 
-  names = (["d405", "d455", "zedx", "odin1"] if args.backends == "auto"
+  names = (["d405", "d455"] if args.backends == "auto"
            else args.backends.split(","))
   found = []
   for bname in names:

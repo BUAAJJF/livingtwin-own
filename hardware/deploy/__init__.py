@@ -1,8 +1,8 @@
-"""Run the trained vision policy on the real PiPER-X and the real D405.
+"""Run the trained vision policy on the real PiPER-X and the real D455 (D405 before 2026-08-25).
 
 The pipeline, in the order a frame travels through it:
 
-    d405 -> rectify -> mask -> obs ---.
+    d455 -> rectify -> mask -> obs ---.
                                        >-- policy -> command -> arm
     arm  -> proprio ------------------'
 

@@ -109,12 +109,4 @@ def open_backend(name: str):
     from . import d455
 
     return d455
-  if name == "zedx":
-    from . import zedx
-
-    return zedx
-  if name == "odin1":
-    from . import odin1
-
-    return odin1
-  raise SystemExit(f"unknown backend {name!r}; have: d405, d455, zedx, odin1")
+  raise SystemExit(f"unknown backend {name!r}; have: d405, d455")

@@ -67,7 +67,7 @@ def main() -> None:
   ap = argparse.ArgumentParser(description=__doc__,
                                formatter_class=argparse.RawDescriptionHelpFormatter)
   ap.add_argument("--backend", required=True,
-                  choices=["d405", "d455", "zedx", "odin1"])
+                  choices=["d405", "d455"])
   ap.add_argument("--label", default=None, help="name for this capture, e.g. 40cm")
   ap.add_argument("--frames", type=int, default=60)
   ap.add_argument("--target", type=Path, default=DEFAULT_TARGET)

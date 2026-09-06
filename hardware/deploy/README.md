@@ -1,13 +1,19 @@
-# Deploying the vision policy on a RealSense D405
+# Deploying the vision policy on a RealSense D455 + PiPER-X
 
-The policy in `src/piper_push` sees a 224×168 depth image from a 52° camera at a
-fixed place in the robot's base frame, plus 36 numbers of proprioception, and
-writes six joint targets and a gripper command at 50 Hz. This directory turns a
-D405 and a PiPER-X into exactly that.
+The mask policy in `src/piper_push` sees a 224×168 depth image from a 52°
+camera at a fixed place in the robot's base frame, plus 36 numbers of
+proprioception, and writes six joint targets and a gripper command at 50 Hz.
+This directory turns a D455 (a D405 until 2026-08-25) and a PiPER-X into
+exactly that.  The point-cloud policies of branch `yf/pc` reuse the same loop
+through `run.py --obs pc` (`pc_perception.py`, `pc_obs.py`); their shadow
+runner is `pc_run.py` and their runbook is `docs/pc_shadow_runbook.md`.
 
-Nothing here has run against the arm. There is no PiPER and no CAN interface on
-the machine it was written on. What *has* run is everything that can be checked
-against the simulator, which is most of it — see **What is verified** below.
+This stack has driven the arm: on 2026-09-01 the `d455_v4_final` policy
+picked objects off the table and placed them in the bin from the calibrated
+D455 alone (`recordings/v4_stereo_try3`; the command is in the root README).
+The text below was written before that and describes the checks that made it
+possible; where a number is quoted it is the D405-era measurement unless it
+says otherwise.
 
 ---
 
@@ -71,9 +77,8 @@ $M -m hardware.deploy.selftest --policy /tmp/vision_policy \
 # 3. dry run -- no camera, no arm -- then a replayed session, which is the
 #    only thing that measures the real cost of the loop without hardware.
 $M -m hardware.deploy.run --policy /tmp/vision_policy --dry-run --seconds 10
-$M -m hardware.deploy.simrecord --frames 240 --out recordings/sim
-$M -m hardware.deploy.run --policy /tmp/vision_policy --replay recordings/sim \
-    --allow-nominal --seconds 20
+$M -m hardware.deploy.run --policy /tmp/vision_policy --replay recordings/v4_stereo_try3 \
+    --seconds 20                                # a recorded D455 session, dry arm
 
 # 3b. the arm's CAN link.  Needs root and the system's can-utils, so it is
 #     not something this pipeline can do for itself:
@@ -103,11 +108,9 @@ $M scripts/rig_to_sim.py                      # what the simulator now gets wron
 $M -m hardware.deploy.run --policy /tmp/vision_policy --no-arm --seconds 30 \
     --record recordings/look
 
-# 6. and if the depth segmenter struggles on the real objects, train the
-#    appearance model on what it did manage, and use that instead.
-$M -m hardware.deploy.autolabel recordings/look --out hardware/deploy/yolo/data
-$M -m hardware.deploy.train_yolo --epochs 60
-$M -m hardware.deploy.run --policy /tmp/vision_policy --no-arm --mask yolo
+# 6. the appearance backend (--mask yolo / fused) loads the weights under
+#    hardware/deploy/yolo_d455/.  The labelling and training tools that made
+#    them are in git history before 2026-09-06; the best run used --mask depth.
 
 # 7. the arm moves for the first time -- one joint, five degrees, and a
 #    number.  This is what stands between a units error and the table.
@@ -468,24 +471,14 @@ bench measured the D405's fill rate on a blank white surface at 88% on average
 and 42% in the worst shot, and a depth segmenter has nothing to segment where
 there is no depth. Colour is unaffected by that failure.
 
-Nobody labels anything. `autolabel.py` runs the depth segmenter over recorded
-sessions, keeps only the frames where it was confident — high fill, instance
-confirmed, the instance's own pixels mostly valid — and writes its output as
-ground truth. The model is trained on the easy frames and asked to generalise to
-the hard ones, which is the right way round: the hard frames are hard because
-the depth is missing, not because the object looks different.
-
-```bash
-python -m hardware.deploy.run --policy … --no-arm --seconds 120 --record recordings/table
-python -m hardware.deploy.autolabel recordings/table
-python -m hardware.deploy.train_yolo --epochs 60
-python -m hardware.deploy.run --policy … --mask yolo
-```
-
-`simrecord.py` writes a session in the same format out of the simulator, so the
-whole labelling and training path runs with no hardware. It is a check on the
-plumbing and **not** a training set: the scene renders untextured and unshaded,
-so a model fitted to those images has learned what MuJoCo looks like.
+Nobody labelled anything: the depth segmenter ran over recorded sessions and
+its confident frames -- high fill, instance confirmed, the instance's own
+pixels mostly valid -- became the ground truth (90 accepted D455 frames; mask
+mAP50 0.931).  The labelling and training tools (`autolabel.py`,
+`train_yolo.py`, `collect_yolo_gui.py`, `simrecord.py`) were retired on
+2026-09-06 and are in git history; the trained weights stay under
+`yolo_d455/` and `YoloSegmenter` still loads them.  Pure YOLO was never the
+deployed mode; the runs that worked used `--mask depth`.
 
 ---
 
@@ -505,9 +498,14 @@ calibgui.py     the same calibration, guided, in a browser -- + calibgui.html
 run.py          the 50 Hz loop, and what it does when something is wrong
 jointcheck.py   one joint, five degrees: the CAN units, before anything else
 selftest.py     all of the above, against the simulator, nothing plugged in
-simrecord.py    a synthetic session, for exercising the labelling path
-autolabel.py    depth segmenter -> YOLO dataset, no hand labels
-train_yolo.py   fine-tune YOLO26-seg on it
+yolo_backend.py the YOLO26-seg appearance backend (weights under yolo_d455/)
+sam_tracker.py  SAM2.1 as a causal tracker for the target (+ sam2_predictor, rgbmap)
+lifecycle.py, target_mask.py   which instance is the target, and what the policy is shown
+stereo.py       Fast-FoundationStereo depth from the raw imagers (TensorRT)
+scene.py        does the table match a run you want to repeat
+review.py, logview.py, graspview.py   look at a recording, frame by frame
+gripcal.py, mit.py, sysid.py   the gripper drive, the MIT command boundary, plant identification
+pc_obs.py, pc_perception.py, pc_run.py   the point-cloud policies (branch yf/pc)
 ```
 
 ## Export the policy on the task it will be deployed on

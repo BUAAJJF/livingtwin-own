@@ -146,9 +146,6 @@ def main() -> None:
   print("\n--- live session ---")
   fails += check_live_session()
 
-  print("\n--- odin1 extrinsic calibration ---")
-  fails += check_odin1_calibration()
-
   if fails:
     raise SystemExit(f"\n{len(fails)} check(s) failed: {', '.join(fails)}")
   print("\nall checks passed")
@@ -162,12 +159,9 @@ def main() -> None:
 def check_live_session() -> list[str]:
   """Drive live.py's session logic with two synthetic cameras.
 
-  The second camera does not exist yet -- the ZED X is away with a fault and
-  the Odin 1 has no backend -- so the paired-comparison path, which is the
-  entire point of the live viewer, would otherwise ship untested and first run
-  on the day the hardware arrives.  Here it runs now, against two synthetic
-  sensors with deliberately different noise and dropout, and the report has to
-  rank them the right way round.
+  Two synthetic sensors with deliberately different noise and dropout, so the
+  paired-comparison path -- the entire point of the live viewer -- runs with
+  no hardware attached, and the report has to rank them the right way round.
   """
   import argparse as _argparse
   import threading
@@ -273,78 +267,6 @@ def check_live_session() -> list[str]:
     print(f"  live: figure -> {outdir / 'comparison.png'}")
   return fails
 
-
-# --------------------------------------------------------------------------
-# the Odin 1 extrinsic calibration
-
-
-def check_odin1_calibration() -> list[str]:
-  """Recover a known extrinsic correction and a known depth bias.
-
-  The transform this refines is a *reflection* -- the Odin 1's dTOF frame has
-  the opposite handedness to its colour camera, per the vendor's own driver --
-  so the fit has to work on a matrix with det -1.  Every search written here
-  before assumed a rotation, which is exactly how the answer stayed out of
-  reach for so long; this checks that the code that replaced them can start
-  from the vendor value, apply a proper correction on top of it, and come back
-  with the truth.
-
-  The board is rendered against a background 1.6 m away rather than as a plane
-  filling the frame.  An earlier version of this test filled the frame, and
-  then every candidate scored perfectly because whatever it pointed at was
-  still that plane -- which is also why the real procedure says to hold the
-  sheet up in the air rather than lay it on the desk.
-  """
-  import calibrate_odin1 as C
-  from capture import rays_from_K
-
-  board, spec = M.load_target(HERE / "targets" / "target_a4.json")
-  fails: list[str] = []
-
-  FLIP = np.diag([1.0, -1.0, 1.0])                    # det -1, as on the device
-  R_true = cv2.Rodrigues(np.array([0.03, -0.02, 0.015]))[0] @ FLIP
-  t_true = np.array([-0.0495, 0.005, 0.011])
-  T_true = np.eye(4)
-  T_true[:3, :3], T_true[:3, 3] = R_true, t_true
-  BIAS = 0.004
-
-  rays = rays_from_K(K, (H, W))
-  shots = []
-  for i, (dist, tilt) in enumerate([(0.35, 6.0), (0.45, 28.0), (0.55, 15.0),
-                                    (0.65, 38.0), (0.50, 45.0), (0.40, 20.0)]):
-    cap, _ = render(spec, distance=dist, tilt_deg=tilt, seed=i,
-                    bias=0.0, sigma=0.0008, drop={})
-    pose_c = M.detect_pose(cap.gray, K, DIST, board)
-    pose_d = M.transform_pose(pose_c, T_true)
-    gt, pb = M.board_coords(rays, pose_d)
-    sheet = ((pb[..., 0] > -0.02) & (pb[..., 0] < 0.19) &
-             (pb[..., 1] > -0.01) & (pb[..., 1] < 0.29) & np.isfinite(gt))
-    shots.append({"pose": pose_c,
-                  "depth": np.nan_to_num(np.where(sheet, gt + BIAS, 1.6), nan=0.0)})
-
-  # Start from the structural factor alone: the vendor value with none of the
-  # per-unit correction, which is what the real script starts from.
-  T0 = np.eye(4)
-  T0[:3, :3] = FLIP
-  T0[:3, 3] = t_true + np.array([0.004, -0.003, 0.005])
-
-  T, bias, rms, n = C.solve(shots, rays, T0, spec)
-  ang = np.degrees(np.arccos(np.clip(
-    (np.trace(T[:3, :3].T @ R_true) - 1) / 2, -1, 1)))
-  dt = float(np.linalg.norm(T[:3, 3] - t_true))
-  print(f"  odin1-cal: recovered to {ang:.2f} deg, translation off by "
-        f"{dt * 1000:.1f} mm, bias {bias * 1000:+.2f} mm (true {BIAS * 1000:+.2f}), "
-        f"residual {rms * 1000:.2f} mm on {n} points")
-  if np.linalg.det(T[:3, :3]) > 0:
-    fails.append("the fit lost the reflection (det became positive)")
-  for name, got, want, tol in [("rotation (deg)", ang, 0.0, 1.5),
-                               ("translation (m)", dt, 0.0, 0.010),
-                               ("recovered bias (m)", bias, BIAS, 0.0015)]:
-    ok = abs(got - want) <= tol
-    print(f"  {'ok ' if ok else 'FAIL'} {name:22s} {got:9.5f} vs {want:9.5f}")
-    if not ok:
-      fails.append(name)
-  return fails
 
 
 if __name__ == "__main__":
