@@ -25,7 +25,7 @@ So the bench has two jobs, and the second is the one that matters:
 `results/` into `model/d405_noise.json`, `src/piper_push/depth_noise.py`
 implements it, and the two constants above are gone. What was measured and what
 it changed:
-[`docs/depth_sensor_and_deployment.md`](../../docs/depth_sensor_and_deployment.md).
+[`docs/history/depth_sensor_and_deployment.md`](../../docs/history/depth_sensor_and_deployment.md).
 The pipeline that runs the policy on that camera is in
 [`hardware/deploy/`](../deploy/README.md).
 

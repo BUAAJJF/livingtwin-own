@@ -29,7 +29,7 @@ assumes, and the first three do not move the arm at all.
     python -m hardware.deploy.sysid chirp --joint 2
     python -m hardware.deploy.sysid slew --joint 2 --mode mit
     python -m hardware.deploy.sysid slew --joint 2 --mode movej      # the A/B
-    python -m hardware.deploy.sysid replay logs/deploy/<session>
+    python -m hardware.deploy.sysid replay recordings/<session>
 
 Everything writes ``logs/sysid/<stamp>_<what>/`` with the full time series, so
 a fit can be redone without touching the robot again.

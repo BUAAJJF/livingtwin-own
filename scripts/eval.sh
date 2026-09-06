@@ -11,7 +11,7 @@
 #   SEED        rollout seed               (default: 20260823)
 #   OUT         directory for the JSON     (default: results/eval/baseline)
 #
-# 512 x 2400 is the protocol every number in docs/results.md was measured
+# 512 x 2400 is the protocol every number in docs/history/nominal_results_2026-08.md was measured
 # under: 409.6 arm-minutes, about 22k object instances.  Smaller samples read
 # 1-2% optimistic across the board, so they are not comparable and are not
 # mixed in.

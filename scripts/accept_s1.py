@@ -235,7 +235,7 @@ def main() -> int:
                         "from the base and drops the floor 0.75 m below it, "
                         "which is the one thing about the real scene the "
                         "simulator's infinite plane cannot represent.")
-    # 'clean' is the protocol every number in docs/results.md was measured
+    # 'clean' is the protocol every number in docs/history/nominal_results_2026-08.md was measured
     # with and stays the default.  Until 2026-09-04 'measured' replaced the
     # task's noise model with the NOMINAL one at strength 1.0, which on a
     # -Robust task is a downgrade, and 'clean' left a -Robust task's sensor

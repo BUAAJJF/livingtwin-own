@@ -270,7 +270,7 @@ Two students, distilled from the same teacher for the same 1500 iterations and
 differing in one thing: one saw the fitted D405 model during distillation, the
 other saw clean rendered depth. Both evaluated under both sensors, three
 rollout seeds each, 512 environments x 2400 control steps -- the protocol every
-number in `docs/results.md` uses.
+number in `nominal_results_2026-08.md` uses.
 
 | | objects/min | success | post-grasp drop | trips/arm-hour |
 |---|---|---|---|---|

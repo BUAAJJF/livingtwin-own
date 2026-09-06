@@ -933,7 +933,7 @@ def main() -> int:
                       "own rest-to-rest path, speed and tracking check.")
   p.add_argument("--home-speed", type=float, default=robot.AUTO_SPEED_RAD_S,
                  help="peak joint speed for that move, rad/s")
-  p.add_argument("--log-root", default="logs/deploy",
+  p.add_argument("--log-root", default="recordings",
                  help="where a session goes when --record is not given.  Each "
                       "run gets its own timestamped directory, so evidence "
                       "from two runs can never land in one folder and be read "

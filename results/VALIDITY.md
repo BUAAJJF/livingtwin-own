@@ -18,18 +18,18 @@ a scan of every evaluation JSON under results/ on 2026-09-04: 701 files, 19 affe
 | `results/decay/v4_final_nominal.json` | **invalid** | noop_load, no_gru_reset, clean_sensor | `results/audit_20260904/v4_vision_measured.json` |
 | `results/decay/v4_final_reset.json` | **invalid** | no_gru_reset, clean_sensor | `results/audit_20260904/v4_vision_measured.json` |
 | `results/decay/v4_final_vision.json` | **invalid** | no_gru_reset, clean_sensor | `results/audit_20260904/v4_vision_measured.json` |
-| `results/v4_endurance_fixed.json` | **superseded** | clean_sensor | `results/audit_20260904/v4_vision_measured.json` |
+| `results/audit_20260904/v4_endurance_fixed.json` | **superseded** | clean_sensor | `results/audit_20260904/v4_vision_measured.json` |
 | `results/v7_students/heldproxy_5000.json` | **invalid** | no_gru_reset | re-measure pending |
 | `results/v7_students/iid_control_8000.json` | **invalid** | no_gru_reset | re-measure pending |
 | `results/v7_students/statemachine_5000.json` | **invalid** | no_gru_reset | re-measure pending |
 | `results/v7_students/student_5000.json` | **invalid** | no_gru_reset | re-measure pending |
 | `results/v7_students/v7b_strong_student_700.json` | **invalid** | no_gru_reset | re-measure pending |
-| `results/v8_occ_v8s_depth.json` | **invalid** | no_gru_reset | `results/v8_occ_fixed_v8s_depth.json` |
-| `results/v8_occ_v8s_sam2.json` | **invalid** | no_gru_reset | `results/v8_occ_fixed_v8s_sam2.json` |
-| `results/v8_students_v8s_depth-0.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_depth.json` |
-| `results/v8_students_v8s_depth-300.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_depth.json` |
-| `results/v8_students_v8s_sam2-0.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_sam2.json` |
-| `results/v8_students_v8s_sam2-300.json` | **invalid** | no_gru_reset | `results/v8_fixed_v8s_sam2.json` |
+| `results/v8_students/v8_occ_v8s_depth.json` | **invalid** | no_gru_reset | `results/v8_students/v8_occ_fixed_v8s_depth.json` |
+| `results/v8_students/v8_occ_v8s_sam2.json` | **invalid** | no_gru_reset | `results/v8_students/v8_occ_fixed_v8s_sam2.json` |
+| `results/v8_students/v8_students_v8s_depth-0.json` | **invalid** | no_gru_reset | `results/v8_students/v8_fixed_v8s_depth.json` |
+| `results/v8_students/v8_students_v8s_depth-300.json` | **invalid** | no_gru_reset | `results/v8_students/v8_fixed_v8s_depth.json` |
+| `results/v8_students/v8_students_v8s_sam2-0.json` | **invalid** | no_gru_reset | `results/v8_students/v8_fixed_v8s_sam2.json` |
+| `results/v8_students/v8_students_v8s_sam2-300.json` | **invalid** | no_gru_reset | `results/v8_students/v8_fixed_v8s_sam2.json` |
 
 Re-measuring anything listed here: every checkpoint on this page predates the
 bounded action convention of 2026-09-05, so it has to be run on the matching

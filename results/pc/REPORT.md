@@ -95,3 +95,5 @@ has placed objects on the arm; it is a fallback for the arm, not a checkpoint of
 `results/pc/routes/pc_screen_*` (screening from the unqualified teacher), `results/pc/routes/pc_final_*`
 (this table; `final_report.json`), `results/pc/specs/` (observation specs), the aborted P2 run in
 `pc_final_P2_20260906T0319_aborted_widthfix`.
+
+Log convention: every stage transcript (`*.log`), stage marker and `export/` under these directories is untracked; the JSONs, `manifest.json` and this report are what is committed (`results/README.md`).
