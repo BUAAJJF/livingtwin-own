@@ -117,10 +117,11 @@ def main() -> int:
     gripper_hist += torch.histc(act[:, -1].float(), bins=20, min=-1.0, max=1.0)
     obs, _, dones, _ = wrapped.step(u)
     reset_recurrent(policy, dones)
-    if gowner is not None and gowner.topk is not None and gowner.fresh is not None:
+    cowner = getattr(env, "_pc_cloud_owner", None)
+    if gowner is not None and gowner.topk is not None and cowner is not None and cowner.fresh is not None:
       # On fresh frames while nothing is held: is there a candidate within 3 cm
       # (in the plane) of the target object?  That is the proposal recall.
-      fresh = gowner.fresh & ~cmd.grasped
+      fresh = cowner.fresh & ~cmd.grasped
       if bool(fresh.any()):
         from piper_push.pc import grasp as _grasp
         objp = cmd._object_pos_local() if hasattr(cmd, "_object_pos_local") else None
