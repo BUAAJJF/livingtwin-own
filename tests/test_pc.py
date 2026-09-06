@@ -28,6 +28,35 @@ def test_cadence_is_three_of_five_with_any_phase():
         assert f[i] + f[i - 1] + f[i - 2] <= 2
 
 
+def test_ring_holds_the_newest_frame_and_delays_by_the_lag():
+  torch.manual_seed(3)
+  b, n, length = 2, 8, cloud.MAX_LAG + 1
+  hist = torch.zeros(length, b, n, 4)
+  mhist = torch.zeros(length, b, 3)
+  lag = torch.tensor([0, 2])
+  write = 0
+  frames = []
+  outs = []
+  pattern = [True, False, True, False, True, True, False, True, False, True]
+  for k, f in enumerate(pattern):
+    new = torch.full((b, n, 4), float(k + 1))
+    fresh = torch.tensor([f, f])
+    meta = torch.stack([torch.zeros(b), fresh.float(), torch.ones(b)], -1)
+    write, out, m = cloud.ring_step(hist, mhist, write, new, meta, fresh, lag, first=(k == 0))
+    frames.append(k + 1 if f else frames[-1])
+    outs.append(out.clone())
+  # lag 0: the policy sees the newest frame, held through blank steps
+  seen0 = [float(o[0, 0, 0]) for o in outs]
+  assert seen0 == [float(x) for x in frames]
+  # lag 2: the same sequence two steps late, zeros before anything arrived
+  seen1 = [float(o[1, 0, 0]) for o in outs]
+  assert seen1 == [0.0, 0.0] + [float(x) for x in frames[:-2]]
+  # a held step repeats the previous step's cloud exactly
+  for k in range(1, len(pattern)):
+    if not pattern[k]:
+      assert torch.equal(outs[k][0], outs[k - 1][0])
+
+
 def test_unproject_puts_the_optical_axis_where_the_camera_looks():
   h, w = 168, 224
   rays = cloud.camera_rays(h, w, 52.0, "cpu")

@@ -162,6 +162,32 @@ def draw_lags(probs, n: int, device) -> torch.Tensor:
   return torch.multinomial(p.expand(n, -1), 1).squeeze(-1)
 
 
+def ring_step(history: torch.Tensor, meta_hist: torch.Tensor, write: int, out_new: torch.Tensor,
+              meta_new: torch.Tensor, fresh: torch.Tensor, lag: torch.Tensor, first: bool
+              ) -> tuple[int, torch.Tensor, torch.Tensor]:
+  """Advance the capture ring by one control step and read the delayed slot.
+
+  ``write`` is the slot the LAST step wrote.  A step without a fresh frame
+  keeps that slot's cloud (the newest frame), a fresh step stores ``out_new``;
+  the policy reads ``lag`` slots back.  Returns the new write index and the
+  delayed ``(cloud, meta)`` for every environment.
+
+  Kept as a pure function so a test can pin the one property that matters
+  and that the first version got wrong: on a held step the cloud the policy
+  receives is identical to the previous step's, not the frame from two steps
+  back (which is what reading ``write - 1`` before incrementing produced).
+  """
+  length = history.shape[0]
+  prev = torch.zeros_like(out_new) if first else history[write]
+  write = (write + 1) % length
+  keep = fresh.view(-1, *([1] * (out_new.dim() - 1)))
+  history[write] = torch.where(keep, out_new, prev)
+  meta_hist[write] = meta_new
+  read = (write - lag) % length
+  ar = torch.arange(out_new.shape[0], device=out_new.device)
+  return write, history[read, ar], meta_hist[read, ar]
+
+
 class WorkspaceCloud:
   """The observation term.  Owns the cadence, the latency ring and the sensor.
 
@@ -267,22 +293,14 @@ class WorkspaceCloud:
     t = env.episode_length_buf.to(dev).long()
     fresh = fresh_at(t, self._phase)
     self.fresh = fresh
-    length = self._history.shape[0]
-    prev = self._history[(self._write - 1) % length] if self._stamp is not None else torch.zeros_like(out_new)
-    self._write = (self._write + 1) % length
-    keep = fresh.view(-1, *([1] * (out_new.dim() - 1)))
-    cur = torch.where(keep, out_new, prev)
-    self._history[self._write] = cur
     self._t_last = torch.where(fresh, t, self._t_last)
     age = (t - self._t_last) + self._lag
     valid_frame = (count >= MIN_POINTS)
     meta_new = torch.stack([(age.float() / AGE_NORM).clamp(0.0, 1.0), fresh.float(),
                             valid_frame.float()], dim=-1)
-    self._meta_hist[self._write] = meta_new
-    read = (self._write - self._lag) % length
-    ar = torch.arange(b, device=dev)
-    self._out = self._history[read, ar]
-    self.meta = self._meta_hist[read, ar]
+    self._write, self._out, self.meta = ring_step(
+      self._history, self._meta_hist, self._write, out_new, meta_new, fresh, self._lag,
+      first=self._stamp is None)
     self._stamp = stamp
     return self._out
 
