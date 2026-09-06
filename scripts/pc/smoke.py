@@ -22,7 +22,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 def main() -> int:
   p = argparse.ArgumentParser()
-  p.add_argument("--route", required=True, choices=("P0", "P1A", "P1B", "P2"))
+  from piper_push.pc import routes as pc_routes
+  p.add_argument("--route", required=True, choices=pc_routes.ROUTES)
   p.add_argument("--teacher", required=True)
   p.add_argument("--num-envs", type=int, default=8)
   p.add_argument("--steps", type=int, default=40)
@@ -50,7 +51,7 @@ def main() -> int:
   print("obs:", report["obs_shapes"])
   owner = env._pc_cloud_owner
   fresh_n, valid_n, t_obs = 0, 0, []
-  occ, ext = [], []
+  occ, ext, tflag = [], [], []
   for t in range(a.steps):
     act = torch.zeros(a.num_envs, env.action_manager.total_action_dim, device=a.device)
     t0 = time.perf_counter()
@@ -60,10 +61,12 @@ def main() -> int:
     meta = obs["vision_meta"]
     fresh_n += int(meta[:, 1].sum())
     valid_n += int(meta[:, 2].sum())
-    if a.route != "P0":
+    if pc_routes.base_route(a.route) != "P0":
       c = obs["camera"]
       flag = c[..., 3] > 0.5
       occ.append(float(flag.float().mean()))
+      if c.shape[-1] >= 5:
+        tflag.append(float((c[..., 4] > 0.5).float().sum(1).mean()))
       xyz = c[..., :3][flag]
       if xyz.numel():
         ext.append([float(xyz[:, i].min()) for i in range(3)] + [float(xyz[:, i].max()) for i in range(3)])
@@ -76,12 +79,18 @@ def main() -> int:
   report["lags"] = owner.lags.tolist()
   report["step_ms_p50"] = 1000 * sorted(t_obs)[len(t_obs) // 2]
   report["occupancy_mean"] = sum(occ) / max(len(occ), 1)
+  # The target channel: its width, and how many sampled points carry the flag
+  # (must be > 0 on an oracle route and exactly 0 on a zero route).
+  report["target_channel"] = pc_routes.target_channel(a.route)
+  report["camera_width"] = int(obs["camera"].shape[-1]) if obs["camera"].dim() == 3 else None
+  report["target_flag_points_mean"] = (sum(tflag) / len(tflag)) if tflag else None
+  report["target_sampled_count_mean"] = float(owner.target_sampled_count.float().mean()) if owner.target_sampled_count is not None else None
   if ext:
     import numpy as np
     e = np.array(ext)
     report["extent_min"] = e[:, :3].min(0).tolist()
     report["extent_max"] = e[:, 3:].max(0).tolist()
-  if a.route == "P2":
+  if pc_routes.base_route(a.route) == "P2":
     g = env._pc_grasp_owner
     report["p2"] = {"switches": int(g.switches.sum()), "no_candidate_steps": int(g.no_candidate_steps.sum()),
                     "locked_now": int(g._lock_on.sum()), "topk_feasible_mean": float((obs["grasp_topk"][..., 17] > 0.5).float().sum(1).mean())}
@@ -89,6 +98,13 @@ def main() -> int:
   ok = abs(report["fresh_fraction"] - 0.6) < 0.08
   if not ok:
     print(f"FAIL: fresh fraction {report['fresh_fraction']:.3f} is not 3/5")
+  tc = report["target_channel"]
+  if tc != "none" and report["camera_width"] != 5:
+    ok = False; print(f"FAIL: target channel {tc} but the cloud is {report['camera_width']} wide")
+  if tc == "zero" and (report["target_flag_points_mean"] or 0) != 0:
+    ok = False; print("FAIL: the zero channel is not zero")
+  if tc == "oracle" and not (report["target_flag_points_mean"] or 0) > 0:
+    ok = False; print("FAIL: the oracle channel never flagged a point in the smoke")
   env.close()
 
   # -- the student and two distillation iterations ---------------------------
