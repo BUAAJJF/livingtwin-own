@@ -64,6 +64,11 @@ export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 export PIPER_U_TELEMETRY="$OUT/u_telemetry.jsonl"
 unset PIPER_ALLOW_LEGACY_ACTION_API RESET_FULL_RANGE
+# Environment knobs for the TRAINING stages only (distill, finetune), e.g.
+# TRAIN_ENV="RESET_FULL_RANGE=1".  The evaluation stages run the standard
+# ruler without them, so the number stays comparable across recipes; the
+# manifest records what training saw.
+TRAIN_ENV=${TRAIN_ENV:-}
 say()  { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 fail() { printf '[%s] FAILED: %s\n' "$(date -Is)" "$*" >&2; date -Is >"$OUT/FAILED"; exit 1; }
 marker() { printf '%s\n' "$OUT/stage_$1.done"; }
@@ -112,6 +117,7 @@ cat >"$OUT/manifest.json" <<JSON
             "distill_gradient_length": $GRAD_LEN, "distill_optimizer_updates": $DISTILL_UPDATES,
             "finetune_optimizer_updates": $FINETUNE_UPDATES, "finetune_epochs_x_minibatches": "5x4"},
  "distill_task": "$DISTILL_TASK", "vision_task": "$VISION_TASK", "heldout_task": "$HELDOUT_TASK",
+ "train_env": "$TRAIN_ENV",
  "gpu_name": "$(nvidia-smi --query-gpu=name --format=csv,noheader -i "$GPU" 2>/dev/null | head -n 1)",
  "started": "$(date -Is)", "host": "$(hostname)"}
 JSON
@@ -137,7 +143,7 @@ fi
 if ! stage_done distill; then
   stage_begin
   say "distill: $VISION_ENVS envs x $DISTILL_ITERS iterations, episode ${EPISODE_S}s"
-  PIPER_U_TELEMETRY_TAG=distill $PY scripts/distill.py --task "$DISTILL_TASK" --teacher "$TEACHER" \
+  env $TRAIN_ENV PIPER_U_TELEMETRY_TAG=distill $PY scripts/distill.py --task "$DISTILL_TASK" --teacher "$TEACHER" \
     --num-envs "$VISION_ENVS" --iterations "$DISTILL_ITERS" --episode-length-s "$EPISODE_S" \
     --run-name "${TAG}_distill" --device "cuda:$GPU" --seed "$SEED" --logger tensorboard \
     >"$OUT/distill.log" 2>&1 || fail "distill (see $OUT/distill.log)"
@@ -165,7 +171,7 @@ fi
 if ! stage_done finetune; then
   stage_begin
   say "finetune: $VISION_ENVS envs x $FINETUNE_ITERS iterations from $DS, critic from the teacher"
-  PIPER_U_TELEMETRY_TAG=finetune $PY scripts/finetune.py --task "$VISION_TASK" --student "$DS" --critic "$TEACHER" \
+  env $TRAIN_ENV PIPER_U_TELEMETRY_TAG=finetune $PY scripts/finetune.py --task "$VISION_TASK" --student "$DS" --critic "$TEACHER" \
     --num-envs "$VISION_ENVS" --iterations "$FINETUNE_ITERS" --episode-length-s "$EPISODE_S" \
     --run-name "${TAG}_finetune" --device "cuda:$GPU" --seed "$SEED" --logger tensorboard \
     >"$OUT/finetune.log" 2>&1 || fail "finetune (see $OUT/finetune.log)"

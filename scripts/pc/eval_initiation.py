@@ -224,6 +224,7 @@ def summarise(tr: dict, dt: float, window: int, idle_s: float, drop_grace_s: flo
       "dist_mm_p50": _pct(tr["dist"][m] * 1000, 50) if m.any() else None,
     }
   stall_m = stalled
+  tr["_stalled"] = stalled
   # An object that is neither on the table nor grasped for a long time is not
   # waiting to be picked: it is resting on the bin rim or wedged somewhere.
   # Reported apart so that it is never read as a stall, and so that a policy
@@ -323,6 +324,16 @@ def main() -> int:
   p.add_argument("--episode-length-s", type=float, default=None,
                  help="override the play config's time-out (40 s); above the run length = no time-out")
   p.add_argument("--out", default=None)
+  p.add_argument("--reset-hidden-every-s", type=float, default=0.0,
+                 help="diagnostic: clear the policy's recurrent state in every environment this often "
+                      "(0 = never, the normal run).  If a long-run decay disappears under it, the decay "
+                      "lives in the hidden state, not in the environment")
+  p.add_argument("--reset-hidden-on-placement", action="store_true",
+                 help="diagnostic: clear the recurrent state of an environment the step its placement registers")
+  p.add_argument("--env-reset-every-s", type=float, default=0.0,
+                 help="diagnostic: reset every ENVIRONMENT (object, arm, memory) this often.  If a long-run decay "
+                      "disappears under it but not under the hidden-state resets, the decay is state the environment "
+                      "accumulates -- which objects are left on the table, where the arm has ended up")
   p.add_argument("--trace-npz", default=None, help="also save the per-step record of the first --trace-envs envs")
   p.add_argument("--trace-envs", type=int, default=8)
   from piper_push import evalcfg
@@ -365,8 +376,9 @@ def main() -> int:
 
   n, dev, T = a.num_envs, a.device, a.steps
   keys = ("grasped", "engaged", "on_table", "in_bin", "placed", "reset", "term", "fresh",
-          "target_full", "target_sampled", "jaw_cmd", "jaw_meas", "dist", "target_idx")
-  rec = {k: torch.zeros(T, n, device=dev, dtype=(torch.int16 if k in ("term", "target_idx") else torch.float32)) for k in keys}
+          "target_full", "target_sampled", "jaw_cmd", "jaw_meas", "dist", "target_idx", "obj_class", "posture_dev", "posture_out")
+  rec = {k: torch.zeros(T, n, device=dev, dtype=(torch.int16 if k in ("term", "target_idx", "obj_class") else torch.float32)) for k in keys}
+  from piper_push import shapes as _shapes, objects as _objects
 
   env.reset()
   obs = wrapped.get_observations()
@@ -396,12 +408,36 @@ def main() -> int:
       rec["jaw_meas"][t] = robot.data.joint_pos[:, 6]
       rec["dist"][t] = dist
       rec["target_idx"][t] = cmd.target.to(torch.int16)
+      rec["obj_class"][t] = _shapes.object_shape_class(env).to(torch.int16)
+      # How far the arm has wandered from the posture box training starts in:
+      # the largest |q - q_home| over the six arm joints, and whether it is
+      # outside the reset event's +-0.7 rad delta on any joint.
+      qdev = (robot.data.joint_pos[:, :6] - robot.data.default_joint_pos[:, :6]).abs()
+      rec["posture_dev"][t] = qdev.amax(dim=1)
+      rec["posture_out"][t] = (qdev > 0.7).any(dim=1).float()
       if owner is not None and owner.target_full_count is not None:
         rec["fresh"][t] = owner.fresh.float() if owner.fresh is not None else 0.0
         rec["target_full"][t] = owner.target_full_count.float()
         rec["target_sampled"][t] = owner.target_sampled_count.float()
       obs, _, dones, _ = wrapped.step(u)
       reset_recurrent(policy, dones)
+      if a.reset_hidden_on_placement and getattr(policy, "is_recurrent", False):
+        jp = cmd.just_placed > 0
+        if bool(jp.any()):
+          policy.reset(jp)
+      if a.reset_hidden_every_s > 0 and getattr(policy, "is_recurrent", False):
+        every = max(1, int(round(a.reset_hidden_every_s / env.step_dt)))
+        if (t + 1) % every == 0:
+          policy.reset()
+      if a.env_reset_every_s > 0:
+        every = max(1, int(round(a.env_reset_every_s / env.step_dt)))
+        if (t + 1) % every == 0 and t + 1 < T:
+          env.reset()
+          obs = wrapped.get_observations()
+          obs = obs[0] if isinstance(obs, tuple) else obs
+          if getattr(policy, "is_recurrent", False):
+            policy.reset()
+          rec["reset"][t] = 1.0
       rec["placed"][t] = cmd.just_placed.float()          # registered by this step
       rec["reset"][t] = dones.float()
       code = torch.zeros(n, device=dev, dtype=torch.int16)
@@ -413,7 +449,33 @@ def main() -> int:
   tr = {k: v.cpu().numpy() for k, v in rec.items()}
   tr["term_names"] = causes
   out = summarise(tr, float(env.step_dt), a.window, a.idle_s)
+  # Which objects are on the table as the run goes on: the share of each shape
+  # class among loose, on-table steps per 36 s block.  A class whose share
+  # rises is one the policy leaves behind.
+  oc = tr["obj_class"].astype(np.int64); loose = (tr["grasped"] < 0.5) & (tr["on_table"] > 0.5) & (tr["in_bin"] < 0.5)
+  blk = max(1, int(round(36.0 / env.step_dt)))
+  names = list(_objects.SHAPE_CLASSES)
+  share = []
+  for i in range(0, T, blk):
+    m = loose[i:i + blk]; c = oc[i:i + blk][m]
+    share.append({nm: (float((c == j).mean()) if c.size else None) for j, nm in enumerate(names)})
+  out["object_class_share_per_36s"] = share
+  # The arm's posture over the run: per 36 s block, the mean of the largest
+  # joint deviation from home and the fraction of steps outside the +-0.7 rad
+  # box the students' episodes start in; and the same split by stalled / not.
+  pdv, pout = tr["posture_dev"], tr["posture_out"] > 0.5
+  out["posture_per_36s"] = [{"max_joint_dev_rad_mean": float(pdv[i:i + blk].mean()), "outside_reset_box_fraction": float(pout[i:i + blk].mean())} for i in range(0, T, blk)]
+  st = tr.get("_stalled")
+  if st is not None:
+    out["posture_outside_reset_box_fraction_stalled"] = float(pout[st].mean()) if st.any() else None
+    out["posture_outside_reset_box_fraction_not_stalled"] = float(pout[~st].mean()) if (~st).any() else None
+  # and placements per class over the whole run, against the class's share of loose time
+  pl = tr["placed"] > 0.5
+  out["placements_by_class"] = {nm: int(pl[oc == j].sum()) for j, nm in enumerate(names)}
+  out["loose_steps_by_class"] = {nm: int(loose[oc == j].sum()) for j, nm in enumerate(names)}
   out.update({"checkpoint": a.checkpoint, "task": a.task, "seed": a.seed, "num_envs": n, "reach_m": reach,
+              "reset_hidden_every_s": a.reset_hidden_every_s, "reset_hidden_on_placement": bool(a.reset_hidden_on_placement),
+              "env_reset_every_s": a.env_reset_every_s,
               "episode_length_s": float(cfg.episode_length_s), "nonfinite_action_steps": nonfinite,
               "num_objects": int(cmd.num_objects),
               "provenance": evalcfg.provenance(argv=sys.argv, sensor=sensor_prov, weights=loaded)})
@@ -433,6 +495,10 @@ def main() -> int:
           f"zero {d['frac_frames_zero_target_points']}  jaw cmd/meas {d['jaw_cmd_mm']}/{d['jaw_meas_mm']}")
   print(f"drops {out['drops']}  terminations {out['terminations']}  resets {out['resets']}  target switches {out['target_switches']}")
   print(f"stuck object (place phase >= {a.idle_s} s): {out['stuck_object']}  end-state env fractions {out['end_state_env_fraction']}")
+  print("object class share of loose time per 36 s block:", [{k: (round(v, 2) if v is not None else None) for k, v in b.items()} for b in out["object_class_share_per_36s"]])
+  print("posture per 36 s block (max joint dev rad, outside reset box):", [(round(b["max_joint_dev_rad_mean"], 2), round(b["outside_reset_box_fraction"], 2)) for b in out["posture_per_36s"]],
+        " outside-box fraction stalled / not:", out.get("posture_outside_reset_box_fraction_stalled"), out.get("posture_outside_reset_box_fraction_not_stalled"))
+  print("placements by class:", out["placements_by_class"], " loose steps by class:", out["loose_steps_by_class"])
   print(f"live-time rates: placed/min {out['placed_per_live_min']}  attempts/min {out['attempts_per_live_min']}  "
         f"l/e placed {out['late_over_early_placed_live']}  l/e attempts {out['late_over_early_attempts_live']}")
   if a.out:
