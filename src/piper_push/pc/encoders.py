@@ -45,13 +45,13 @@ def _mlp(dims: tuple[int, ...]) -> nn.Sequential:
   return nn.Sequential(*layers)
 
 
-NEG = -1.0e30
-"""Stands in for -inf under the masked max; a literal, because TorchScript has no torch.finfo."""
-
-
 def masked_max(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-  """Max over the point axis of ``x`` (B, N, C) where ``mask`` (B, N) is set; 0 if none."""
-  y = torch.where(mask.unsqueeze(-1), x, torch.full_like(x, NEG)).amax(dim=1)
+  """Max over the point axis of ``x`` (B, N, C) where ``mask`` (B, N) is set; 0 if none.
+
+  ``-1e30`` stands in for -inf, written as a literal: TorchScript has neither
+  ``torch.finfo`` nor module-level constants.
+  """
+  y = torch.where(mask.unsqueeze(-1), x, torch.full_like(x, -1.0e30)).amax(dim=1)
   any_ = mask.any(dim=1, keepdim=True)
   return torch.where(any_, y, torch.zeros_like(y))
 
@@ -81,7 +81,7 @@ def farthest_points(xyz: torch.Tensor, valid: torch.Tensor, n_groups: int) -> to
   """Indices (B, G) of farthest-point-sampled centres among the valid points."""
   b, n, _ = xyz.shape
   dev = xyz.device
-  dist = torch.full((b, n), -NEG, device=dev)
+  dist = torch.full((b, n), 1.0e30, device=dev)
   dist = torch.where(valid, dist, torch.full_like(dist, -1.0))
   first = valid.float().argmax(dim=1)
   idx = torch.empty(b, n_groups, dtype=torch.long, device=dev)
@@ -119,7 +119,7 @@ class PointPatchEncoder(nn.Module):
       cidx = farthest_points(xyz, valid, self.n_groups)                    # (B, G)
       centres = torch.gather(xyz, 1, cidx.unsqueeze(-1).expand(-1, -1, 3))  # (B, G, 3)
       d = torch.cdist(centres, xyz)                                         # (B, G, N)
-      d = torch.where(valid.unsqueeze(1), d, torch.full_like(d, -NEG))
+      d = torch.where(valid.unsqueeze(1), d, torch.full_like(d, 1.0e30))
       nidx = torch.topk(d, self.group_size, dim=-1, largest=False)[1]      # (B, G, K)
     gathered = torch.gather(xyz.unsqueeze(1).expand(-1, self.n_groups, -1, -1), 2,
                             nidx.unsqueeze(-1).expand(-1, -1, -1, 3))        # (B, G, K, 3)
