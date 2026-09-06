@@ -87,6 +87,7 @@ def route(d, teacher_placed):
     r["safe_env"] = act.get("safe_env_fraction"); r["jaw_end_mm"] = act.get("jaw_end_mm_median")
     t = act.get("terminations_per_arm_minute") or {}
     r["object_lost_per_min"] = t.get("object_lost"); r["over_speed_per_min"] = t.get("over_speed")
+    r["p2"] = act.get("p2")
   occ = load(os.path.join(d, "occlusion_final_s101.json"))
   if occ:
     r["approach_blocked"] = (occ.get("by_phase") or {}).get("approach", {}).get("blocked_rate")
@@ -131,6 +132,8 @@ def main():
     print(f"   endurance per seed: early {r['final_early']} late {r['final_late']} l/e {r['final_loe']} jaw_stopped {r['final_jaw_stopped']}")
     print(f"   held-out placed {r['heldout_placed']} success {r['heldout_success']}  safe_env {r.get('safe_env')}  lost/min {r.get('object_lost_per_min')}  overspeed/min {r.get('over_speed_per_min')}  sat999 {r.get('sat999_max')}  nonfinite {r.get('nonfinite')}")
     print(f"   occlusion approach {r.get('approach_blocked')} engaged {r.get('engaged_blocked')}   export {r['export']}")
+    if r.get("p2"):
+      print(f"   p2 {json.dumps(r['p2'])}")
     print(f"   gate {json.dumps(r['gate'], default=str)}")
   if a.json:
     json.dump(rows, open(a.json, "w"), indent=1, default=str)
