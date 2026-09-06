@@ -313,3 +313,15 @@ def test_object_astray_is_a_default_termination_on_the_spawn_sector():
     assert term.params["margin_m"] == T.OBJECT_ASTRAY_MARGIN_M and term.params["dwell_s"] == T.OBJECT_ASTRAY_DWELL_S
     assert not term.time_out
   assert "OBJECT_ASTRAY_TERMINATE" in __import__("piper_push.evalcfg", fromlist=["ENV_KNOBS"]).ENV_KNOBS
+
+
+def test_p1bz6_is_p1bz_with_a_six_millimetre_cut():
+  from mjlab.tasks.registry import load_env_cfg
+  from piper_push.pc import routes
+  assert routes.crop_z_min("P1BZ6") == 0.006 and routes.crop_z_min("P1BZ") == 0.010 and routes.crop_z_min("P1B") == 0.010
+  assert routes.target_channel("P1BZ6") == "zero" and routes.base_route("P1BZ6") == "P1B"
+  routes.check_deployable("P1BZ6")
+  a = load_env_cfg("Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill").observations["camera"].terms["scene"].params
+  b = load_env_cfg("Mjlab-Pick-Place-PiperX-PC-P1BZ-Distill").observations["camera"].terms["scene"].params
+  assert a["workspace"].z_min == 0.006 and b["workspace"].z_min == 0.010
+  assert a["workspace"].r_max == b["workspace"].r_max and a["target_channel"] == b["target_channel"] == "zero"

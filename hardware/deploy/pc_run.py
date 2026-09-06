@@ -234,7 +234,8 @@ def main() -> int:
   policy = PcPolicy(bundle / "policy.onnx", spec, threads=a.policy_threads, cuda=a.device.startswith("cuda"))
   mapper = robot.ActionMapper(spec)
   builder = proprio.ProprioBuilder(bundle / "obs_spec.json")
-  obs_builder = CloudObs(rig, mode="depth" if base_route == "P0" else "cloud", num_points=pc_cloud.POINT_DIM * 128, device=a.device)
+  obs_builder = CloudObs(rig, mode="depth" if base_route == "P0" else "cloud", num_points=pc_cloud.POINT_DIM * 128, device=a.device,
+                         height_min_m=pc_routes.crop_z_min(route))
   if base_route != "P0":
     obs_builder.num_points = int(spec["groups"]["camera"]["shape"][0])
   grasp = GraspObs(builder.kin, device=a.device) if base_route == "P2" else None

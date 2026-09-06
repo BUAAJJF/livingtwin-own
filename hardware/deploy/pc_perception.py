@@ -42,7 +42,8 @@ class PcPerception(threading.Thread):
     self.route = route
     self.stereo = stereo
     self.stereo_misses = 0
-    self.obs = CloudObs(rig, mode="depth" if base == "P0" else "cloud", num_points=num_points, device=device)
+    self.obs = CloudObs(rig, mode="depth" if base == "P0" else "cloud", num_points=num_points, device=device,
+                        height_min_m=pc_routes.crop_z_min(route))
     self.kin = kin
     self.grasp = GraspObs(kin, device=device) if base == "P2" else None
     self._lock = threading.Lock()

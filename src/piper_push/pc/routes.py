@@ -20,10 +20,16 @@ registering tasks.
 
 from __future__ import annotations
 
-ROUTES = ("P0", "P1A", "P1B", "P2", "P1BZ", "P1BT")
-_BASE = {"P1BZ": "P1B", "P1BT": "P1B"}
-_TARGET_CHANNEL = {"P1BZ": "zero", "P1BT": "oracle"}
+ROUTES = ("P0", "P1A", "P1B", "P2", "P1BZ", "P1BT", "P1BZ6")
+_BASE = {"P1BZ": "P1B", "P1BT": "P1B", "P1BZ6": "P1B"}
+_TARGET_CHANNEL = {"P1BZ": "zero", "P1BT": "oracle", "P1BZ6": "zero"}
 ORACLE_ROUTES = ("P1BT",)
+DEFAULT_CROP_Z_MIN = 0.010
+_CROP_Z_MIN = {"P1BZ6": 0.006}
+"""P1BZ6 = P1BZ with the height-above-table cut at 6 mm instead of 10 mm.  Measured 2026-09-07
+(results/pc/gen3/crop): at 10 mm the shortest objects in the distribution contribute no point on
+83 % of frames and accumulate on the table over a long run; at 6 mm that is 56 % for 3.5 % more
+table-noise pixels.  The deployment applies the same cut above the calibrated plane."""
 
 
 def base_route(route: str) -> str:
@@ -34,6 +40,11 @@ def base_route(route: str) -> str:
 def target_channel(route: str) -> str:
   """``none`` (4 columns), ``zero`` or ``oracle`` (5 columns)."""
   return _TARGET_CHANNEL.get(route, "none")
+
+
+def crop_z_min(route: str) -> float:
+  """Height above the table plane below which a point is not shown to the policy (metres)."""
+  return _CROP_Z_MIN.get(route, DEFAULT_CROP_Z_MIN)
 
 
 def is_oracle(route: str) -> bool:

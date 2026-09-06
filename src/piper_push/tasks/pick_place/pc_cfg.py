@@ -103,6 +103,7 @@ def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
     "augment": not play,
     "mode": "depth" if base == "P0" else "cloud",
     "target_channel": pc_routes.target_channel(route),
+    "workspace": dataclasses.replace(cloud.WORKSPACE, z_min=pc_routes.crop_z_min(route)),
   }
   # The ``camera`` group keeps its name and its ``scene`` term so that
   # evalcfg.apply_sensor and robust_cfg address the sensor the same way.

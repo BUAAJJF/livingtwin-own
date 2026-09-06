@@ -330,6 +330,9 @@ def main() -> int:
                       "lives in the hidden state, not in the environment")
   p.add_argument("--reset-hidden-on-placement", action="store_true",
                  help="diagnostic: clear the recurrent state of an environment the step its placement registers")
+  p.add_argument("--crop-z-min", type=float, default=None,
+                 help="diagnostic: override the cloud's height-above-table cut (metres; the task's is 0.010).  "
+                      "The policy was not trained with it; use it to measure what a different cut would show")
   p.add_argument("--env-reset-every-s", type=float, default=0.0,
                  help="diagnostic: reset every ENVIRONMENT (object, arm, memory) this often.  If a long-run decay "
                       "disappears under it but not under the hidden-state resets, the decay is state the environment "
@@ -357,6 +360,12 @@ def main() -> int:
   if a.episode_length_s is not None:
     cfg.episode_length_s = float(a.episode_length_s)
   sensor_prov = evalcfg.apply_sensor(cfg, a.task, a.sensor)
+  if a.crop_z_min is not None:
+    import dataclasses as _dc
+    from piper_push.pc import cloud as _cloud
+    term = cfg.observations["camera"].terms["scene"]
+    term.params["workspace"] = _dc.replace(term.params.get("workspace", _cloud.WORKSPACE), z_min=float(a.crop_z_min))
+    print(f"[diagnostic] cloud crop z_min = {a.crop_z_min} m (the task's is {_cloud.WORKSPACE.z_min})")
   bounded = bool(cfg.actions["arm"].bounded)
   env = ManagerBasedRlEnv(cfg=cfg, device=a.device, render_mode=None)
   agent = load_rl_cfg(a.task)
@@ -376,7 +385,8 @@ def main() -> int:
 
   n, dev, T = a.num_envs, a.device, a.steps
   keys = ("grasped", "engaged", "on_table", "in_bin", "placed", "reset", "term", "fresh",
-          "target_full", "target_sampled", "jaw_cmd", "jaw_meas", "dist", "target_idx", "obj_class", "posture_dev", "posture_out")
+          "target_full", "target_sampled", "jaw_cmd", "jaw_meas", "dist", "target_idx", "obj_class", "posture_dev", "posture_out",
+          "obj_x", "obj_y", "obj_z", "ee_x", "ee_y", "ee_z", "obj_speed", "survivors", "obj_half_z")
   rec = {k: torch.zeros(T, n, device=dev, dtype=(torch.int16 if k in ("term", "target_idx", "obj_class") else torch.float32)) for k in keys}
   from piper_push import shapes as _shapes, objects as _objects
 
@@ -409,6 +419,12 @@ def main() -> int:
       rec["dist"][t] = dist
       rec["target_idx"][t] = cmd.target.to(torch.int16)
       rec["obj_class"][t] = _shapes.object_shape_class(env).to(torch.int16)
+      rec["obj_x"][t], rec["obj_y"][t], rec["obj_z"][t] = obj[:, 0], obj[:, 1], obj[:, 2]
+      rec["ee_x"][t], rec["ee_y"][t], rec["ee_z"][t] = site[:, 0], site[:, 1], site[:, 2]
+      rec["obj_speed"][t] = torch.linalg.norm(cmd._target_lin_vel_w(), dim=-1)
+      rec["obj_half_z"][t] = half[:, 2]
+      if owner is not None and owner.full_inside is not None:
+        rec["survivors"][t] = owner.full_inside.reshape(n, -1).sum(dim=1).float()
       # How far the arm has wandered from the posture box training starts in:
       # the largest |q - q_home| over the six arm joints, and whether it is
       # outside the reset event's +-0.7 rad delta on any joint.
@@ -475,7 +491,7 @@ def main() -> int:
   out["loose_steps_by_class"] = {nm: int(loose[oc == j].sum()) for j, nm in enumerate(names)}
   out.update({"checkpoint": a.checkpoint, "task": a.task, "seed": a.seed, "num_envs": n, "reach_m": reach,
               "reset_hidden_every_s": a.reset_hidden_every_s, "reset_hidden_on_placement": bool(a.reset_hidden_on_placement),
-              "env_reset_every_s": a.env_reset_every_s,
+              "env_reset_every_s": a.env_reset_every_s, "crop_z_min": a.crop_z_min,
               "episode_length_s": float(cfg.episode_length_s), "nonfinite_action_steps": nonfinite,
               "num_objects": int(cmd.num_objects),
               "provenance": evalcfg.provenance(argv=sys.argv, sensor=sensor_prov, weights=loaded)})
