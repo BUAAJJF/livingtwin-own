@@ -1,0 +1,95 @@
+{
+  "placed_per_min": [
+    13.359375,
+    19.5703125,
+    19.21875,
+    18.8671875,
+    19.8046875,
+    19.5703125,
+    17.4609375,
+    18.75,
+    17.2265625,
+    19.5703125,
+    20.0390625,
+    17.9296875
+  ],
+  "early_per_min": 18.3984375,
+  "late_per_min": 18.49609375,
+  "late_over_early": 1.005307855626327,
+  "started_envs": 114,
+  "stopped_envs": 48,
+  "survivor_fraction": 0.5789473684210527,
+  "survivor_placements_last": 1.1363636363636365,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 29.441317543387413,
+  "jaw_mm_running": 29.845861718058586,
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1bz6r_distill/2026-09-07_07-11-58_pc_gen4_T4_P1BZ6R_x2_push_dr_recon_20260907T0620_distill/model_2999.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6R-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PUSH_PENALTY_W": null,
+      "APPROACH_SPEED_W": null,
+      "GRIPPER_KP_SCALE": null,
+      "PC_CLOUD_DR": null,
+      "RECON_W": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1bz6r_distill/2026-09-07_07-11-58_pc_gen4_T4_P1BZ6R_x2_push_dr_recon_20260907T0620_distill/model_2999.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1BZ6R-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:7",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen4_T4_P1BZ6R_x2_push_dr_recon_20260907T0620/endurance_student_s101.json"
+    ]
+  }
+}

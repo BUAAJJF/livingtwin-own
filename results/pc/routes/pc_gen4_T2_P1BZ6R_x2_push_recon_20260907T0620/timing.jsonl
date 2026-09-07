@@ -1,0 +1,5 @@
+{"stage": "smoke", "started": 1788765095, "finished": 1788765110, "seconds": 15, "gpu": 6}
+{"stage": "distill", "started": 1788765110, "finished": 1788775377, "seconds": 10267, "gpu": 6}
+{"stage": "distill_eval", "started": 1788775377, "finished": 1788775634, "seconds": 257, "gpu": 6}
+{"stage": "finetune", "started": 1788775634, "finished": 1788782506, "seconds": 6872, "gpu": 6}
+{"stage": "eval", "started": 1788782506, "finished": 1788783471, "seconds": 965, "gpu": 6}

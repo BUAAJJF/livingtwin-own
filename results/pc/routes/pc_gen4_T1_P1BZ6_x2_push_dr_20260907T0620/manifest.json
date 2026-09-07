@@ -1,0 +1,12 @@
+{"tag": "pc_gen4_T1_P1BZ6_x2_push_dr_20260907T0620", "route": "P1BZ6", "oracle_only": false, "gpu": 5, "teacher": "logs/rsl_rl/piperx_pick_place_robust_cold/2026-09-05_18-42-17_v11_nosight_36s_teacher/model_9399.pt", "teacher_sha256": "d685b54821593f724714c4969bda6d7ca8a11e7fe6aa85f4c5a5c4555e19367a",
+ "code_commit_local": "f029d40", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068", "seed": 42,
+ "vision_envs": 512, "distill_iters": 3000, "finetune_iters": 1600,
+ "episode_s": 36.0, "eval_envs": 256, "eval_seeds": "101 202 303",
+ "long_steps": 9000, "long_seeds": "101 202 303", "viewer_steps": 3000, "viewer_seeds": "101 202",
+ "budget": {"steps_per_env_per_iter": 32, "distill_env_steps": 49152000, "finetune_env_steps": 26214400,
+            "distill_gradient_length": 16, "distill_optimizer_updates": 6000,
+            "finetune_optimizer_updates": 32000, "finetune_epochs_x_minibatches": "5x4"},
+ "distill_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill", "vision_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision", "heldout_task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision-Heldout",
+ "train_env": "RESET_FULL_RANGE=1 PUSH_PENALTY_W=2 PC_CLOUD_DR=1",
+ "gpu_name": "NVIDIA RTX 6000D",
+ "started": "2026-09-07T07:11:32+00:00", "host": "shen-teacher-26"}
