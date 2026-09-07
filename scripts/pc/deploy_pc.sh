@@ -23,6 +23,12 @@ CUT=${CUT:-0.004}
 DEVICE=${DEVICE:-cuda}
 RATE=${RATE:-0.5}
 SPEED=${SPEED:-0.6}
+# The log writer: zlib on 848x480 RGB + depth at 30 Hz falls behind the camera
+# and a full queue ends the run ("recording queue full", 2026-09-07 on the
+# second motion).  Uncompressed frames at ~3 MB each keep the writer ahead of
+# the camera (90 MB/s to disk; 32 GB free), and a queue of 600 frames (~1.8 GB
+# of RAM) rides out any stall.  A run is still never left unlogged.
+RECORD_FLAGS=${RECORD_FLAGS:---no-record-compress --record-queue 600}
 cd "$(dirname "$0")/../.."
 export MUJOCO_GL=disable
 export LD_LIBRARY_PATH="${MAMBA_ROOT:-$HOME/micromamba}/envs/mjlab/lib:${LD_LIBRARY_PATH:-}"
@@ -46,7 +52,7 @@ case "$STEP" in
   noarm)
     OUT=recordings/pc_noarm_${NAME}_$STAMP
     $M -m hardware.deploy.run --obs pc --policy "$POLICY" --camera d455 --no-arm --policy-device "$DEVICE" \
-      --cloud-height-min "$CUT" --seconds "${SECONDS_RUN:-20}" --record "$OUT"
+      --cloud-height-min "$CUT" --seconds "${SECONDS_RUN:-20}" --record "$OUT" $RECORD_FLAGS
     echo "recorded $OUT -- check the perception line: ~30 Hz, 0 frames with too few workspace points, holds only at the start" ;;
   move)
     OUT=recordings/pc_motion_${NAME}_$STAMP
@@ -54,7 +60,7 @@ case "$STEP" in
     echo "run.py will ask for the word 'move'.  Rate $RATE, speed fraction $SPEED, ${SECONDS_RUN:-20} s, --home-first."
     $M -m hardware.deploy.run --obs pc --policy "$POLICY" --camera d455 --policy-device "$DEVICE" \
       --cloud-height-min "$CUT" --home-first --command-rate-scale "$RATE" --max-joint-speed-fraction "$SPEED" \
-      --seconds "${SECONDS_RUN:-20}" --record "$OUT"
+      --seconds "${SECONDS_RUN:-20}" --record "$OUT" $RECORD_FLAGS
     echo "recorded $OUT; render with: scripts/pc/deploy_pc.sh review $OUT" ;;
   review)
     $M -m hardware.deploy.review "${2:?recording dir}" ;;
