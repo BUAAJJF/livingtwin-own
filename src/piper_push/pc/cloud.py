@@ -180,6 +180,10 @@ class CloudDrCfg:
   dropout_max: float = 0.5
   frame_offset_m: float = 0.010
   jitter_m: float = 0.003
+  fixed: bool = False
+  """Evaluation stress rather than training DR: the plane offset and the dropout
+  are applied at exactly their values (not drawn), and the frame offset is a
+  constant bias of ``frame_offset_m`` along +x and +y instead of a per-frame draw."""
 
 
 def sample_points(pts: torch.Tensor, inside: torch.Tensor, num_points: int,
@@ -298,8 +302,12 @@ class WorkspaceCloud:
     if dr is None or ids.numel() == 0:
       return
     dev = ids.device
-    self._dr_plane[ids] = (2.0 * torch.rand(ids.numel(), device=dev) - 1.0) * float(dr.plane_offset_m)
-    self._dr_drop[ids] = torch.rand(ids.numel(), device=dev) * float(dr.dropout_max)
+    if dr.fixed:
+      self._dr_plane[ids] = float(dr.plane_offset_m)
+      self._dr_drop[ids] = float(dr.dropout_max)
+    else:
+      self._dr_plane[ids] = (2.0 * torch.rand(ids.numel(), device=dev) - 1.0) * float(dr.plane_offset_m)
+      self._dr_drop[ids] = torch.rand(ids.numel(), device=dev) * float(dr.dropout_max)
 
   def reset(self, env_ids=None) -> None:
     self._scene.reset(env_ids)
@@ -359,9 +367,15 @@ class WorkspaceCloud:
       self.target_sampled_count = self.target_full_count
     else:
       idx, count = draw_indices(inside, int(num_points))
-      out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx,
-                             jitter_m=(dr.jitter_m if dr is not None else None),
-                             frame_offset_m=(dr.frame_offset_m if dr is not None else None))
+      if dr is not None and dr.fixed:
+        out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx,
+                               jitter_m=dr.jitter_m, frame_offset_m=0.0)
+        bias = float(dr.frame_offset_m) / math.sqrt(2.0)
+        out = torch.cat([out[..., :2] + bias * out[..., 3:4], out[..., 2:]], dim=-1) if bias else out
+      else:
+        out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx,
+                               jitter_m=(dr.jitter_m if dr is not None else None),
+                               frame_offset_m=(dr.frame_offset_m if dr is not None else None))
       # Same draw as the points, masked by the frame's validity flag (column 3),
       # so an invalid frame carries no label either.
       tflag = torch.gather(tmask.reshape(b, -1).float(), 1, idx) * out[..., 3]

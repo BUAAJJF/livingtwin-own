@@ -333,6 +333,12 @@ def main() -> int:
   p.add_argument("--crop-z-min", type=float, default=None,
                  help="diagnostic: override the cloud's height-above-table cut (metres; the task's is 0.010).  "
                       "The policy was not trained with it; use it to measure what a different cut would show")
+  p.add_argument("--perturb", default=None,
+                 help="sim-to-real stress applied at evaluation, comma-separated key=value: plane=<m> (the cut's plane "
+                      "offset), drop=<0..1> (fraction of surviving pixels removed), offset=<m> (a constant calibration "
+                      "bias of the cloud along x and y), jitter=<m> (per-point Gaussian), noise=<factor> (depth-noise "
+                      "strength multiplier), campos=<m> and camrot=<deg> (a random camera pose offset per environment). "
+                      "The policy is not trained for any of it; the drop from the unperturbed number is the sensitivity")
   p.add_argument("--env-reset-every-s", type=float, default=0.0,
                  help="diagnostic: reset every ENVIRONMENT (object, arm, memory) this often.  If a long-run decay "
                       "disappears under it but not under the hidden-state resets, the decay is state the environment "
@@ -366,6 +372,23 @@ def main() -> int:
     term = cfg.observations["camera"].terms["scene"]
     term.params["workspace"] = _dc.replace(term.params.get("workspace", _cloud.WORKSPACE), z_min=float(a.crop_z_min))
     print(f"[diagnostic] cloud crop z_min = {a.crop_z_min} m (the task's is {_cloud.WORKSPACE.z_min})")
+  perturb = {}
+  if a.perturb:
+    import dataclasses as _dc, math as _math
+    from piper_push.pc import cloud as _cloud
+    perturb = {k: float(v) for k, v in (kv.split("=") for kv in a.perturb.split(",") if kv)}
+    term = cfg.observations["camera"].terms["scene"]
+    if any(k in perturb for k in ("plane", "drop", "offset", "jitter")):
+      term.params["dr"] = _cloud.CloudDrCfg(plane_offset_m=perturb.get("plane", 0.0), dropout_max=perturb.get("drop", 0.0),
+                                            frame_offset_m=perturb.get("offset", 0.0), jitter_m=perturb.get("jitter", 0.0), fixed=True)
+      term.params["augment"] = True
+    if "noise" in perturb:
+      term.params["noise_cfg"] = _dc.replace(term.params["noise_cfg"], strength=float(term.params["noise_cfg"].strength) * perturb["noise"])
+    if "campos" in perturb or "camrot" in perturb:
+      ev = cfg.events["camera_pose"]
+      ev.params["pos_jitter"] = perturb.get("campos", 0.0)
+      ev.params["rot_jitter"] = _math.radians(perturb.get("camrot", 0.0))
+    print(f"[stress] {perturb}")
   bounded = bool(cfg.actions["arm"].bounded)
   env = ManagerBasedRlEnv(cfg=cfg, device=a.device, render_mode=None)
   agent = load_rl_cfg(a.task)
@@ -491,7 +514,7 @@ def main() -> int:
   out["loose_steps_by_class"] = {nm: int(loose[oc == j].sum()) for j, nm in enumerate(names)}
   out.update({"checkpoint": a.checkpoint, "task": a.task, "seed": a.seed, "num_envs": n, "reach_m": reach,
               "reset_hidden_every_s": a.reset_hidden_every_s, "reset_hidden_on_placement": bool(a.reset_hidden_on_placement),
-              "env_reset_every_s": a.env_reset_every_s, "crop_z_min": a.crop_z_min,
+              "env_reset_every_s": a.env_reset_every_s, "crop_z_min": a.crop_z_min, "perturb": perturb,
               "episode_length_s": float(cfg.episode_length_s), "nonfinite_action_steps": nonfinite,
               "num_objects": int(cmd.num_objects),
               "provenance": evalcfg.provenance(argv=sys.argv, sensor=sensor_prov, weights=loaded)})
