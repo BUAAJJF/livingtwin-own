@@ -325,3 +325,29 @@ def test_p1bz6_is_p1bz_with_a_six_millimetre_cut():
   b = load_env_cfg("Mjlab-Pick-Place-PiperX-PC-P1BZ-Distill").observations["camera"].terms["scene"].params
   assert a["workspace"].z_min == 0.006 and b["workspace"].z_min == 0.010
   assert a["workspace"].r_max == b["workspace"].r_max and a["target_channel"] == b["target_channel"] == "zero"
+
+
+def test_round3_shaping_knobs_are_off_by_default_and_recorded():
+  from mjlab.tasks.registry import load_env_cfg
+  from piper_push import evalcfg
+  cfg = load_env_cfg("Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision")
+  assert "object_pushed" not in cfg.rewards and "approach_speed" not in cfg.rewards
+  for k in ("PUSH_PENALTY_W", "APPROACH_SPEED_W", "GRIPPER_KP_SCALE"):
+    assert k in evalcfg.ENV_KNOBS
+
+
+def test_round3_shaping_knobs_wire_the_v10d_terms(monkeypatch):
+  import importlib, subprocess, sys, json
+  code = """
+import os, json
+os.environ['PUSH_PENALTY_W'] = '2'; os.environ['APPROACH_SPEED_W'] = '1'; os.environ['GRIPPER_KP_SCALE'] = '1.5'
+import mjlab.tasks
+from mjlab.tasks.registry import load_env_cfg
+c = load_env_cfg('Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision')
+print(json.dumps({'pushed': c.rewards['object_disturbed'].weight, 'approach': c.rewards['approach_speed'].weight,
+                  'kp': list(c.events['robust_gripper_gains'].params['kp_range'])}))
+"""
+  out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**__import__("os").environ, "MUJOCO_GL": "disable"})
+  line = [l for l in out.stdout.splitlines() if l.startswith("{")][-1]
+  d = json.loads(line)
+  assert d["pushed"] == -2.0 and d["approach"] == -1.0 and abs(d["kp"][0] - 0.9) < 1e-6 and abs(d["kp"][1] - 2.1) < 1e-6

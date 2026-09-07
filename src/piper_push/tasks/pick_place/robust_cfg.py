@@ -76,6 +76,10 @@ the time, all of the time.  Set this when the perception stack changes, from
 the replay, not from taste."""
 
 _SMOOTH = float(os.environ.get("SMOOTH_SCALE", 1.0))
+_GRIPPER_KP = float(os.environ.get("GRIPPER_KP_SCALE", 1.0))
+"""Multiplies the gripper's kp DR range (0.60-1.40 by default): the 2026-09-07
+test of "the jaw does not squeeze hard enough".  The gripper loop has no hardware
+identification, so a value other than 1 is a diagnostic, never the fitted plant."""
 """Multiplies every term that charges for how the arm moves rather than where.
 
 ``action_rate``, ``action_acc``, ``joint_vel``, ``joint_acc``,
@@ -436,7 +440,7 @@ def apply_heavy_dr(
     func=dr.pd_gains,
     mode="reset",
     params={
-      "kp_range": robot["gripper_kp_scale"],
+      "kp_range": tuple(x * _GRIPPER_KP for x in robot["gripper_kp_scale"]),
       "kd_range": robot["gripper_kd_scale"],
       "operation": "scale",
       "asset_cfg": SceneEntityCfg("robot", actuator_ids=[4]),

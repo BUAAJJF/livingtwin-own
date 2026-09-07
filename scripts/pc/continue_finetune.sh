@@ -33,6 +33,7 @@ export PATH="$(dirname "$MM"):$PATH"
 export LD_LIBRARY_PATH="$ENV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
 unset PIPER_ALLOW_LEGACY_ACTION_API RESET_FULL_RANGE
+TRAIN_ENV=${TRAIN_ENV:-}   # knobs for the fine-tune only; the evaluation runs the standard ruler
 PY="$MM run -n $ENV_NAME python -u"
 say() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 RSHA=$(sha256sum "$RESUME" | cut -d' ' -f1)
@@ -40,11 +41,11 @@ cat >"$OUT/manifest.json" <<JSON
 {"resume": "$RESUME", "resume_sha256": "$RSHA", "task": "$TASK", "iterations_target": $ITERS, "gpu": $GPU,
  "seed": $SEED, "vision_envs": $VISION_ENVS, "episode_s": $EPISODE_S, "eval_envs": $EVAL_ENVS, "eval_seeds": "$EVAL_SEEDS",
  "code_commit_local": "$COMMIT", "remote_git_head": "$(git rev-parse HEAD)", "started": "$(date -Is)", "host": "$(hostname)",
- "env_knobs": {"OBJECT_ASTRAY_TERMINATE": "${OBJECT_ASTRAY_TERMINATE:-unset(default on)}"}}
+ "train_env": "$TRAIN_ENV", "env_knobs": {"OBJECT_ASTRAY_TERMINATE": "${OBJECT_ASTRAY_TERMINATE:-unset(default on)}"}}
 JSON
 say "continue $RESUME ($RSHA) on $TASK to iteration $ITERS, GPU $GPU"
 T0=$(date +%s)
-$PY scripts/finetune.py --task "$TASK" --resume "$RESUME" --num-envs "$VISION_ENVS" --iterations "$ITERS" \
+env $TRAIN_ENV $PY scripts/finetune.py --task "$TASK" --resume "$RESUME" --num-envs "$VISION_ENVS" --iterations "$ITERS" \
   --episode-length-s "$EPISODE_S" --run-name "$(basename "$OUT")" --device "cuda:$GPU" --seed "$SEED" --logger tensorboard \
   >"$OUT/finetune.log" 2>&1 || { say "finetune FAILED"; date -Is >"$OUT/FAILED"; exit 1; }
 printf '{"stage": "finetune", "seconds": %d}\n' "$(( $(date +%s) - T0 ))" >>"$OUT/timing.jsonl"

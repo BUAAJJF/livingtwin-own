@@ -75,6 +75,13 @@ OBJECT_ALLOWED_ANGLE = layout.rotate_angle_range((-0.95, 0.90))
 # gen-2 audit: nearly every stall of every policy was an object knocked past
 # the sector's edge and never fetched.  OBJECT_ASTRAY_TERMINATE=0 reproduces
 # the environment every number before that date was measured in.
+# Round-3 shaping knobs (2026-09-07), off by default: the v10d approach terms
+# (``mdp.object_disturbed``, the loose object's speed -- the grasp flicking it;
+# ``mdp.approach_speed``, the hand arriving fast) switched on for a STUDENT's
+# PPO stage.  Weights per m/s of excess per step; the teacher's curriculum used
+# up to 2.0 / 1.5.
+PUSH_PENALTY_W = float(os.environ.get("PUSH_PENALTY_W", "0"))
+APPROACH_SPEED_W = float(os.environ.get("APPROACH_SPEED_W", "0"))
 OBJECT_ASTRAY_MARGIN_M = 0.03
 OBJECT_ASTRAY_DWELL_S = 1.0
 OBJECT_ASTRAY_TERMINATE = os.environ.get("OBJECT_ASTRAY_TERMINATE", "1") not in ("0", "false", "False")
@@ -623,6 +630,13 @@ def make_pick_place_env_cfg(
     ),
     "terminated": RewardTermCfg(func=mdp.is_terminated, weight=-300.0),
   }
+  if PUSH_PENALTY_W > 0:
+    rewards["object_disturbed"] = RewardTermCfg(
+      func=pick_mdp.object_disturbed, weight=-PUSH_PENALTY_W, params={"command_name": TASK, "v_floor_m_s": 0.02})
+  if APPROACH_SPEED_W > 0:
+    rewards["approach_speed"] = RewardTermCfg(
+      func=pick_mdp.approach_speed, weight=-APPROACH_SPEED_W,
+      params={"command_name": TASK, "asset_cfg": ee(), "near_m": 0.15, "stop_m": 0.03, "v_near_m_s": 0.10, "v_far_m_s": 0.60})
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
