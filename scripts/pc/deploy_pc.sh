@@ -22,7 +22,12 @@ POLICY=${POLICY:-hardware/deploy/policies/pc_P1BZ6_C1_20260907T1245}
 CUT=${CUT:-0.004}
 DEVICE=${DEVICE:-cuda}
 RATE=${RATE:-0.5}
-SPEED=${SPEED:-0.6}
+# The software speed guard as a fraction of the hardware shell's trip.  0.6 was
+# the runbook's first-motion setting; the first two motions (2026-09-07)
+# reached 2.0-2.5 rad/s on the wrist joints -- 52-63 % of their 3.93 rad/s
+# shell -- because the real wrist overshoots a rate-limited command by ~1.6x,
+# and 0.6 ended the second run on it.  0.9 keeps the guard below the shell.
+SPEED=${SPEED:-0.9}
 # The log writer: zlib on 848x480 RGB + depth at 30 Hz falls behind the camera
 # and a full queue ends the run ("recording queue full", 2026-09-07 on the
 # second motion).  Uncompressed frames at ~3 MB each keep the writer ahead of
