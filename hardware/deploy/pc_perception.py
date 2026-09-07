@@ -34,7 +34,7 @@ from piper_push.pc import routes as pc_routes
 
 class PcPerception(threading.Thread):
   def __init__(self, reader, rig, route: str, num_points: int, kin: proprio.Kinematics,
-               device: str = "cuda:0", stereo=None) -> None:
+               device: str = "cuda:0", stereo=None, height_min_m: float | None = None) -> None:
     super().__init__(daemon=True, name="pc-perception")
     pc_routes.check_deployable(route)
     base = pc_routes.base_route(route)
@@ -42,8 +42,13 @@ class PcPerception(threading.Thread):
     self.route = route
     self.stereo = stereo
     self.stereo_misses = 0
+    # The cut above the calibrated plane: the route's by default.  The
+    # simulator's stress sweep (results/pc/gen4/robustness) found a cut 4 mm
+    # too HIGH costs 18 % and 4 mm too low costs nothing, so a deployment may
+    # lower it a little as a margin against a plane fitted slightly low.
+    self.height_min_m = float(height_min_m) if height_min_m is not None else pc_routes.crop_z_min(route)
     self.obs = CloudObs(rig, mode="depth" if base == "P0" else "cloud", num_points=num_points, device=device,
-                        height_min_m=pc_routes.crop_z_min(route))
+                        height_min_m=self.height_min_m)
     self.kin = kin
     self.grasp = GraspObs(kin, device=device) if base == "P2" else None
     self._lock = threading.Lock()
@@ -151,7 +156,7 @@ class PcPerception(threading.Thread):
     span = ((self._last_finished - self._first_finished) if (self._first_finished is not None and self._last_finished) else 0.0)
     rate = (self.frames - 1) / span if span > 0 and self.frames > 1 else None
     out = {
-      "route": self.route, "frames": self.frames, "dropped_by_mailbox": self.dropped,
+      "route": self.route, "height_min_m": self.height_min_m, "frames": self.frames, "dropped_by_mailbox": self.dropped,
       "invalid_frames": self.invalid_frames, "rate_hz": rate,
       "compute_ms": stats(self.compute_ms), "capture_to_publish_ms": stats(self.capture_to_publish_ms),
       "workspace_points": stats(self.counts), "stereo_misses": self.stereo_misses,

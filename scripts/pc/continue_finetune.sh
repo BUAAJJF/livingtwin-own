@@ -38,7 +38,7 @@ PY="$MM run -n $ENV_NAME python -u"
 say() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 RSHA=$(sha256sum "$RESUME" | cut -d' ' -f1)
 cat >"$OUT/manifest.json" <<JSON
-{"resume": "$RESUME", "resume_sha256": "$RSHA", "task": "$TASK", "iterations_target": $ITERS, "gpu": $GPU,
+{"resume": "$RESUME", "resume_sha256": "$RSHA", "task": "$TASK", "route": "$(echo "$TASK" | sed -nE 's/.*-PC-([A-Z0-9]+)-.*/\1/p')", "oracle_only": false, "iterations_target": $ITERS, "gpu": $GPU,
  "seed": $SEED, "vision_envs": $VISION_ENVS, "episode_s": $EPISODE_S, "eval_envs": $EVAL_ENVS, "eval_seeds": "$EVAL_SEEDS",
  "code_commit_local": "$COMMIT", "remote_git_head": "$(git rev-parse HEAD)", "started": "$(date -Is)", "host": "$(hostname)",
  "train_env": "$TRAIN_ENV", "env_knobs": {"OBJECT_ASTRAY_TERMINATE": "${OBJECT_ASTRAY_TERMINATE:-unset(default on)}"}}

@@ -686,6 +686,10 @@ def main() -> int:
   p = argparse.ArgumentParser()
   p.add_argument("--policy", required=True,
                  help="exported policy.onnx, or the directory holding it")
+  p.add_argument("--cloud-height-min", type=float, default=None,
+                 help="--obs pc only: the cut above the calibrated table plane in metres, "
+                      "overriding the route's (P1BZ6: 0.006).  Lower is safe, higher is not: "
+                      "the simulator loses 18%% of its throughput at +4 mm and nothing at -4 mm")
   p.add_argument("--obs", choices=("mask", "pc"), default="mask",
                  help="what the policy is shown.  'mask': the depth image with "
                       "the segmented target (every policy before yf/pc).  'pc': "
@@ -1213,7 +1217,7 @@ def main() -> int:
       from .pc_perception import PcPerception
       vision = PcPerception(reader, rig, pol.pc_route, pol.num_points,
                             proprio.Kinematics(), device=a.device,
-                            stereo=stereo_backend)
+                            stereo=stereo_backend, height_min_m=a.cloud_height_min)
     else:
       vision = Perception(reader, reproj, segmenter, tracker,
                           proprio.Kinematics(), rig=rig,

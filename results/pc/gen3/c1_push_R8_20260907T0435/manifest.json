@@ -1,4 +1,22 @@
-{"resume": "logs/rsl_rl/piperx_pc_p1bz6_vision/2026-09-06_23-20-56_pc_gen3_R8_P1BZ6_x2_fullreset_20260906T1515_finetune/model_1599.pt", "resume_sha256": "879c9cdb9f4aec50506cdef52d52e237196394891b4447aeb9fcf53b72ecbc58", "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision", "iterations_target": 2400, "gpu": 4,
- "seed": 42, "vision_envs": 512, "episode_s": 36.0, "eval_envs": 256, "eval_seeds": "101 202 303",
- "code_commit_local": "3cc0286", "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068", "started": "2026-09-07T04:35:50+00:00", "host": "shen-teacher-26",
- "train_env": "PUSH_PENALTY_W=2", "env_knobs": {"OBJECT_ASTRAY_TERMINATE": "unset(default on)"}}
+{
+ "resume": "logs/rsl_rl/piperx_pc_p1bz6_vision/2026-09-06_23-20-56_pc_gen3_R8_P1BZ6_x2_fullreset_20260906T1515_finetune/model_1599.pt",
+ "resume_sha256": "879c9cdb9f4aec50506cdef52d52e237196394891b4447aeb9fcf53b72ecbc58",
+ "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision",
+ "iterations_target": 2400,
+ "gpu": 4,
+ "seed": 42,
+ "vision_envs": 512,
+ "episode_s": 36.0,
+ "eval_envs": 256,
+ "eval_seeds": "101 202 303",
+ "code_commit_local": "3cc0286",
+ "remote_git_head": "f1dab6ef0a4c6c11c8b971d0d2499a86fc88c068",
+ "started": "2026-09-07T04:35:50+00:00",
+ "host": "shen-teacher-26",
+ "train_env": "PUSH_PENALTY_W=2",
+ "env_knobs": {
+  "OBJECT_ASTRAY_TERMINATE": "unset(default on)"
+ },
+ "route": "P1BZ6",
+ "oracle_only": false
+}
