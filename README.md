@@ -18,10 +18,16 @@ rsl_rl, so thousands of environments run in parallel.
 - **Current line (`yf/pc`, 2026-09-06).** Mask-free students that see a
   workspace point cloud (or raw metric depth) instead of a segmented target,
   distilled from the qualified Action-API-v2 state teacher `v11_nosight_36s`.
-  Four routes were trained and evaluated on one ruler; the best (P1B,
-  point-patch transformer) reaches a third of the teacher's throughput and
-  decays within an episode, so the first generation is **NO-GO for real
-  motion and GO for shadow runs**. Report: [`results/pc/REPORT.md`](results/pc/REPORT.md);
+  The first generation (2026-09-06) reached a third of the teacher's
+  throughput; the second and third rounds found why -- the shortest objects
+  are invisible above the 10 mm table cut and accumulate, and an object
+  knocked out of the sector used to sit there for the rest of the episode --
+  and fixed both (route `P1BZ6`, 6 mm cut; the `object_astray` termination).
+  **R8** (`P1BZ6`, budget × 2) passes the gate: 23.4 placed/min (85 % of the
+  teacher), late/early 1.07, bundle `hardware/deploy/policies/pc_P1BZ6_R8_20260907T0230`,
+  shadow-verified on the real recording; **GO for shadow, real motion is a
+  human decision** per the runbook. Reports: [`results/pc/gen2/REPORT.md`](results/pc/gen2/REPORT.md)
+  (sections 5-7), [`results/pc/REPORT.md`](results/pc/REPORT.md) (gen 1);
   runbook: [`docs/pc_shadow_runbook.md`](docs/pc_shadow_runbook.md).
 - **Two facts that constrain every number here.** The simulator is not
   reproducible run to run (identical commands span ~3%), so quote a median

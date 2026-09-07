@@ -1,0 +1,8 @@
+{"stage": "smoke", "started": 1788727486, "finished": 1788727501, "seconds": 15, "gpu": 6}
+{"stage": "distill", "started": 1788727501, "finished": 1788736602, "seconds": 9101, "gpu": 6}
+{"stage": "distill_eval", "started": 1788736602, "finished": 1788736851, "seconds": 249, "gpu": 6}
+{"stage": "finetune", "started": 1788736851, "finished": 1788743777, "seconds": 6926, "gpu": 6}
+{"stage": "eval", "started": 1788743777, "finished": 1788744742, "seconds": 965, "gpu": 6}
+{"stage": "initiation", "started": 1788744742, "finished": 1788746840, "seconds": 2098, "gpu": 6}
+{"stage": "viewer", "started": 1788746840, "finished": 1788747006, "seconds": 166, "gpu": 6}
+{"stage": "export", "started": 1788747006, "finished": 1788747018, "seconds": 12, "gpu": 6}

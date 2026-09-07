@@ -400,3 +400,47 @@ plane).
 **6.3 Running now** (results follow in section 7): R4 P1BZ with `RESET_FULL_RANGE=1` in training;
 R5 the same with 120 s training episodes; R7 P1BZ6 + full-range resets; R8 P1BZ6 + full-range
 resets + budget × 2 -- the candidate for the gate.
+
+## 7. Round 3, complete: the recipe that passes the gate
+
+| recipe (all: v11 teacher, seed 42, 512 envs, 36 s unless said, astray termination) | distilled student | placed/min (accept) | success | endurance l/e | 36 s: grasps/attempt, stalled, astray/min, jaw | 180 s placed/min; blocks | held-out | gate |
+|---|---|---|---|---|---|---|---|---|
+| R0 P1BZ (10 mm cut), 1500 + 800 | 8.9 | 12.1 [11.4, 12.2] | 0.831 | 0.81 | 0.228, 0.138, 2.58, 18.7 mm | 6.8; 12 → 8 → 6 → 5 → 4 | 10.2 | no |
+| R2 P1BZ, 3000 + 1600 | 13.3 | 18.1 [17.8, 18.2] | 0.911 | 0.94 | 0.330, 0.103, 1.81, 18.2 mm | 10.6; 18 → 13 → 10 → 8 → 7 | 16.1 | no (throughput) |
+| R3 P1BZ, 12 s episodes | 11.1 | 13.8 [12.7, 13.8] | 0.874 | 0.84 | 0.253, 0.136, 1.98, 16.2 mm | 6.6 | | no |
+| R4 P1BZ, `RESET_FULL_RANGE=1` in training | 10.4 | 9.8 [9.8, 10.4] | 0.811 | 0.72 | 0.178, 0.131, 2.47 | 4.8 | | no |
+| R5 P1BZ, 120 s episodes + full-range | 8.5 | 1.8 (PPO collapse) | 0.489 | 0.31 | 0.026 | 0.5 | | no |
+| C0 E0 + 800 PPO here | - | 13.9 [13.8, 14.3] | 0.879 | 0.82 | 0.289, 0.128, 2.40, 17.0 mm | 6.4 | | no |
+| R1 MASK (depth + mask), 1500 + 800 | 4.2 | 0.3 (PPO collapse) | 0.088 | 0.35 | 0.005, 0.30, 0.32, 37.8 mm | 0.07 | | no |
+| R10 **P1BZ6** (6 mm cut), 1500 + 800 | 13.4 | 17.4 [17.1, 17.4] | 0.886 | 1.06 | | | 14.7 | no (throughput) |
+| R7 P1BZ6 + full-range | 13.8 | 16.5 [15.6, 16.5] | 0.877 | 0.98 | 0.277, 0.042, 2.24, 16.2 mm | 12.4; 17 → 15 → 11.5 → 11 → 9 | | no (throughput) |
+| **R8 P1BZ6, 3000 + 1600, + full-range** | 16.7 | **23.4 [22.7, 23.7]** | **0.940** | **1.07 [1.03, 1.09]** | **0.384, 0.035, 1.93, 16.2 mm** | **20.5 [20.3, 21.1]; 23.5 → 21.5 → 20.3 → 18.8 → 18.2** | **20.8 / 0.909** | **GO** |
+| R9 P1BZ6, 3000 + 1600 (no full-range) | running | | | | | | | |
+| teacher v11 | | 27.6 | 0.93 | | 0.398, 0.014, 1.73, 13.6 mm | 27.7 flat | | |
+
+Tags `pc_gen3_*_20260906T1515` in `results/pc/routes/`; `scripts/pc/report_routes.py ... --teacher-placed 27.6`
+prints R8's gate line: three seeds place, throughput 85 % of the teacher (gate 70 %), late/early 1.07,
+no jaw latch, no NaN, held-out 20.8, export OK (onnx 4.8e-7, jit), Action API v2, seed spread 4 %,
+not oracle → **deployable**.
+
+*What moved the number, each measured on its own:* the 6 mm cut (+44 % at the standard budget, R0 →
+R10; the long-run floor 4 → 9-18 placed/min); the budget × 2 (+50 % at 10 mm, R0 → R2); together
+23.4.  Full-range resets are neutral-to-negative (R4 −19 %, R7 vs R10 −5 %); 12 s episodes help the
+student and not the policy; 120 s episodes and the mask observation collapse under PPO with the
+−300 termination (reward up, placements down: not engaging becomes optimal from a weak start).
+R8's grasps per attempt (0.384) and jaw (16.2 mm) are the teacher's (0.398, 13.6 mm); what remains
+is the residual long-run decay from the objects still invisible at 6 mm (23.5 → 18.2 over 180 s
+against the teacher's flat 27.7) and 15 % of throughput.
+
+**Bundle and shadow.**  `hardware/deploy/policies/pc_P1BZ6_R8_20260907T0230/` (checkpoint sha256
+`879c9cdb…`, policy.onnx `54b5c97c…`, spec `results/pc/specs/obs_spec_P1BZ6.json`: proprio 36,
+camera 512 × 5, vision_meta 3, Action API v2 `51c919a9dd2e92db`).  Shadow against
+`recordings/v4_stereo_try3` (real D455 + recorded joints, 30 s): control 2.3 / 3.5 ms p50 / p95,
+perception 1.0 / 2.0 ms, 29.9 Hz effective, frame age 20 / 34 ms, one `hold_no_vision` at the start,
+`action_api_status ok`, targets inside the clip (`recordings/pc_shadow_replay_R8_try1/`).
+`run.py --obs pc --replay --no-arm` (15 s): 747 steps at 50 Hz, 10.0 / 10.1 ms compute, perception
+30.0 Hz at 4.8 / 6.6 ms, 0 overruns, 1 stale frame, 0 empty-workspace holds
+(`recordings/pc_runpy_replay_R8_try1/`; its review page failed to render on an OpenCV resize, the
+data is intact).  The runbook's GO-for-shadow conditions are all met.  **Real motion stays a human
+decision** under the runbook's step 4: e-stop in hand, one object, `--home-first`,
+`--command-rate-scale 0.5`, `--max-joint-speed-fraction 0.6`, 20 s.

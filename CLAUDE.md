@@ -13,11 +13,15 @@ vision actor + state critic (PPO fine-tune) → evaluation → ONNX/TorchScript
 export → D455 + PiPER-X deployment. Root `README.md` has the status, the task
 table and the layout; read it first.
 
-Current branch `yf/pc`: mask-free point-cloud/depth students from the qualified
-teacher `v11_nosight_36s` (`results/pc/REPORT.md`, `docs/pc_shadow_runbook.md`).
-First generation is NO-GO for real motion, GO for shadow. The mask-based
-`d455_v4_final` (Action API v1) is the rollback and the only policy that has
-placed objects on the arm.
+Current branch `yf/pc`: mask-free point-cloud students from the qualified
+teacher `v11_nosight_36s`. Round 3 (2026-09-07, `results/pc/gen2/REPORT.md`
+sections 5-7) passes the gate with R8 = route `P1BZ6` (6 mm table cut) at
+budget × 2: 23.4 placed/min, late/early 1.07, bundle
+`hardware/deploy/policies/pc_P1BZ6_R8_20260907T0230`, GO for shadow; real
+motion is the user's call. Environment since `ad49e04`: the `object_astray`
+termination (`OBJECT_ASTRAY_TERMINATE=0` reproduces the epoch before). The
+mask-based `d455_v4_final` (Action API v1) is the rollback and the only policy
+that has placed objects on the arm.
 
 ## Environment and tests
 
