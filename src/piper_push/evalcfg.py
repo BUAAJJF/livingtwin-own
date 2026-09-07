@@ -59,6 +59,8 @@ ENV_KNOBS: tuple[str, ...] = (
   "PUSH_PENALTY_W",
   "APPROACH_SPEED_W",
   "GRIPPER_KP_SCALE",
+  "PC_CLOUD_DR",
+  "RECON_W",
   "PIPER_X_URDF",
   "PIPER_COLD_START_STAGE",
 )

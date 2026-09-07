@@ -100,6 +100,20 @@ class SetRecurrentModel(MLPModel):
                  hidden_state: HiddenState = None) -> torch.Tensor:
     return self.rnn(self._encode(obs), masks, hidden_state).squeeze(0)
 
+  def recon_loss(self, obs: TensorDict) -> torch.Tensor:
+    """Sum of the encoders' masked-reconstruction losses on this batch (0 when none has one)."""
+    total = None
+    for g, shape in zip(self.obs_groups_nd, self.obs_shapes_nd):
+      enc = self.encoders[g]
+      if hasattr(enc, "recon_loss") and getattr(enc, "recon", False):
+        x = obs[g].reshape(-1, *shape)
+        l = enc.recon_loss(x)
+        total = l if total is None else total + l
+    if total is None:
+      first = obs[self.obs_groups_nd[0]]
+      return first.new_zeros(())
+    return total
+
   def reset(self, dones: torch.Tensor | None = None, hidden_state: HiddenState = None) -> None:
     self.rnn.reset(dones, hidden_state)
 

@@ -162,8 +162,29 @@ def draw_indices(inside: torch.Tensor, num_points: int) -> tuple[torch.Tensor, t
   return idx, count
 
 
+@dataclasses.dataclass(frozen=True)
+class CloudDrCfg:
+  """Per-episode randomisation of what the cloud pipeline itself gets wrong on the robot.
+
+  ``plane_offset_m``   the table plane the cut is measured from is off by up to this (both signs):
+                       the calibrated plane's error and the mat's unevenness.
+  ``dropout_max``      up to this fraction of the surviving pixels is dropped (holes, dark or
+                       specular surfaces the fitted noise model does not place).
+  ``frame_offset_m``   the whole cloud shifts by up to this per frame (calibration residual;
+                       training's fixed 5 mm before).
+  ``jitter_m``         per-point Gaussian jitter (2 mm before).
+  Drawn per environment at reset, like the latency lag.
+  """
+
+  plane_offset_m: float = 0.005
+  dropout_max: float = 0.5
+  frame_offset_m: float = 0.010
+  jitter_m: float = 0.003
+
+
 def sample_points(pts: torch.Tensor, inside: torch.Tensor, num_points: int,
-                  augment: bool, idx: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+                  augment: bool, idx: torch.Tensor | None = None,
+                  jitter_m: float | None = None, frame_offset_m: float | None = None) -> tuple[torch.Tensor, torch.Tensor]:
   """Draw ``num_points`` from the surviving pixels, with replacement.
 
   Returns ``(B, N, 4)`` and the per-environment count of survivors.  ``idx``
@@ -179,7 +200,9 @@ def sample_points(pts: torch.Tensor, inside: torch.Tensor, num_points: int,
   sel = torch.gather(flat, 1, idx.unsqueeze(-1).expand(-1, -1, 3))
   ok = (count >= MIN_POINTS).view(b, 1, 1)
   if augment:
-    sel = sel + 0.002 * torch.randn_like(sel) + (0.010 * torch.rand(b, 1, 3, device=sel.device) - 0.005)
+    j = float(jitter_m) if jitter_m is not None else 0.002
+    o = float(frame_offset_m) if frame_offset_m is not None else 0.005
+    sel = sel + j * torch.randn_like(sel) + (2.0 * o * torch.rand(b, 1, 3, device=sel.device) - o)
   sel = torch.where(ok, sel, torch.zeros_like(sel))
   flag = ok.float().expand(b, num_points, 1)
   return torch.cat([sel, flag], dim=-1), count
@@ -234,6 +257,8 @@ class WorkspaceCloud:
     self._t_last = None
     self._history = None
     self._meta_hist = None
+    self._dr_plane = None
+    self._dr_drop = None
     self._write = 0
     self._stamp = None
     self._epoch = 0
@@ -259,11 +284,22 @@ class WorkspaceCloud:
     length = MAX_LAG + 1
     self._phase = torch.randint(0, CADENCE[1], (n,), device=dev)
     self._lag = draw_lags(latency_probs, n, dev)
+    self._dr_plane = torch.zeros(n, device=dev)
+    self._dr_drop = torch.zeros(n, device=dev)
+    self._draw_dr(torch.arange(n, device=dev))
     self._t_last = torch.zeros(n, dtype=torch.long, device=dev)
     self._history = torch.zeros((length, n, *shape), device=dev)
     self._meta_hist = torch.zeros((length, n, META_DIM), device=dev)
     self._write = 0
     self.lags = self._lag
+
+  def _draw_dr(self, ids: torch.Tensor) -> None:
+    dr = self.params.get("dr")
+    if dr is None or ids.numel() == 0:
+      return
+    dev = ids.device
+    self._dr_plane[ids] = (2.0 * torch.rand(ids.numel(), device=dev) - 1.0) * float(dr.plane_offset_m)
+    self._dr_drop[ids] = torch.rand(ids.numel(), device=dev) * float(dr.dropout_max)
 
   def reset(self, env_ids=None) -> None:
     self._scene.reset(env_ids)
@@ -277,6 +313,7 @@ class WorkspaceCloud:
       return
     self._phase[ids] = torch.randint(0, CADENCE[1], (ids.numel(),), device=dev)
     self._lag[ids] = draw_lags(self.params.get("latency_probs", DEFAULT_LATENCY_PROBS), ids.numel(), dev)
+    self._draw_dr(ids)
     self._t_last[ids] = 0
     self._history[:, ids] = 0.0
     self._meta_hist[:, ids] = 0.0
@@ -303,6 +340,12 @@ class WorkspaceCloud:
     cam_quat = env.sim.model.cam_quat[:, ci].to(torch.float32)
     pts = unproject(depth, self._rays, cam_pos, cam_quat)
     inside = valid & in_workspace(pts, workspace)
+    dr = self.params.get("dr")
+    if dr is not None and self._dr_plane is not None and self._dr_plane.shape[0] == b:
+      # The cut measured from a plane that is off by the drawn amount, and a
+      # drawn fraction of the survivors missing: both per environment.
+      inside = inside & (pts[..., 2] > (workspace.z_min + self._dr_plane).view(b, 1, 1))
+      inside = inside & (torch.rand_like(depth) >= self._dr_drop.view(b, 1, 1))
     self.full_points, self.full_inside = pts, inside
     self.last_depth = depth        # the corrupted metric depth this capture came from, for viewers
     tmask = target_px & inside
@@ -316,7 +359,9 @@ class WorkspaceCloud:
       self.target_sampled_count = self.target_full_count
     else:
       idx, count = draw_indices(inside, int(num_points))
-      out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx)
+      out, _ = sample_points(pts, inside, int(num_points), bool(augment), idx=idx,
+                             jitter_m=(dr.jitter_m if dr is not None else None),
+                             frame_offset_m=(dr.frame_offset_m if dr is not None else None))
       # Same draw as the points, masked by the frame's validity flag (column 3),
       # so an invalid frame carries no label either.
       tflag = torch.gather(tmask.reshape(b, -1).float(), 1, idx) * out[..., 3]
@@ -334,14 +379,14 @@ class WorkspaceCloud:
                mask_jitter_px: int = 0, scenery_dr: bool = False,
                latency_probs=DEFAULT_LATENCY_PROBS, augment: bool = False,
                mode: str = "cloud", workspace: WorkspaceCfg = WORKSPACE,
-               target_channel: str = "none") -> torch.Tensor:
+               target_channel: str = "none", dr: CloudDrCfg | None = None) -> torch.Tensor:
     stamp = (int(env.common_step_counter), self._epoch)
     if stamp == self._stamp and self._out is not None:
       return self._out
     if target_channel not in TARGET_CHANNELS:
       raise ValueError(f"target_channel must be one of {TARGET_CHANNELS}, not {target_channel!r}")
     self.params = {"latency_probs": tuple(float(x) for x in latency_probs), "mode": mode,
-                   "num_points": int(num_points), "target_channel": target_channel}
+                   "num_points": int(num_points), "target_channel": target_channel, "dr": dr}
     out_new, count = self._capture(env, sensor_name, command_name, num_points, cutoff_distance,
                                    min_depth, noise_cfg, mask_jitter_px, scenery_dr, augment,
                                    mode, workspace, target_channel)

@@ -103,11 +103,23 @@ def farthest_points(xyz: torch.Tensor, valid: torch.Tensor, n_groups: int) -> to
 
 class PointPatchEncoder(nn.Module):
   def __init__(self, in_dim: int = 4, n_groups: int = 32, group_size: int = 16, dim: int = 128,
-               n_layers: int = 2, n_heads: int = 4, out_dim: int = 256) -> None:
+               n_layers: int = 2, n_heads: int = 4, out_dim: int = 256,
+               recon: bool = False, mask_ratio: float = 0.4) -> None:
     super().__init__()
     self.n_groups, self.group_size, self.dim = n_groups, group_size, dim
     self.feat_dim = max(0, int(in_dim) - 4)
     self.patch = _mlp((3 + self.feat_dim, 64, dim))
+    # PointPatchRL's masked-reconstruction objective (Gyenes et al., 2024), the
+    # piece the first generation left out: a fraction of the patch tokens is
+    # replaced by a learned mask token before the transformer and a small
+    # decoder has to reproduce each masked patch's local points (Chamfer).
+    # Lives in ``recon_loss``, never in ``forward``, so the exported graph is
+    # untouched and the policy always encodes the unmasked cloud.
+    self.recon = bool(recon)
+    self.mask_ratio = float(mask_ratio)
+    if self.recon:
+      self.mask_token = nn.Parameter(torch.zeros(dim))
+      self.decoder = nn.Sequential(nn.Linear(dim, 128), nn.ELU(), nn.Linear(128, group_size * 3))
     self.centre = nn.Linear(3, dim)
     layer = nn.TransformerEncoderLayer(dim, n_heads, dim_feedforward=2 * dim, dropout=0.0,
                                        activation="gelu", batch_first=True, norm_first=True)
@@ -116,10 +128,9 @@ class PointPatchEncoder(nn.Module):
     self.head = nn.Linear(2 * dim, out_dim)
     self.output_dim = out_dim
 
-  def forward(self, x: torch.Tensor) -> torch.Tensor:
+  def _patches(self, x: torch.Tensor):
     xyz = x[..., :3]
     valid = x[..., 3] > 0.5
-    b, n, _ = xyz.shape
     with torch.no_grad():
       cidx = farthest_points(xyz, valid, self.n_groups)                    # (B, G)
       centres = torch.gather(xyz, 1, cidx.unsqueeze(-1).expand(-1, -1, 3))  # (B, G, 3)
@@ -134,12 +145,40 @@ class PointPatchEncoder(nn.Module):
       gf = torch.gather(feats.unsqueeze(1).expand(-1, self.n_groups, -1, -1), 2,
                         nidx.unsqueeze(-1).expand(-1, -1, -1, self.feat_dim))  # (B, G, K, F)
       local = torch.cat([local, gf], dim=-1)
+    return local, centres, valid.any(dim=1)
+
+  def forward(self, x: torch.Tensor) -> torch.Tensor:
+    local, centres, frame_valid = self._patches(x)
     tokens = self.patch(local).amax(dim=2) + self.centre(centres)           # (B, G, D)
-    frame_valid = valid.any(dim=1)
     tokens = self.norm(self.encoder(tokens))
     pooled = torch.cat([tokens.mean(dim=1), tokens.amax(dim=1)], dim=-1)
     out = self.head(pooled)
     return torch.where(frame_valid.unsqueeze(-1), out, torch.zeros_like(out))
+
+  @torch.jit.unused
+  def recon_loss(self, x: torch.Tensor) -> torch.Tensor:
+    """Symmetric Chamfer distance of the decoded masked patches to the true ones, in metres.
+
+    A fraction ``mask_ratio`` of the patch tokens is replaced by the mask token
+    (the centre embedding is kept, as in PointPatchRL); the decoder predicts
+    the masked patch's ``group_size`` local points.  Frames with no valid
+    point contribute nothing.
+    """
+    if not self.recon:
+      return x.new_zeros(())
+    local, centres, frame_valid = self._patches(x)
+    b, g = centres.shape[:2]
+    tokens = self.patch(local).amax(dim=2) + self.centre(centres)
+    m = torch.rand(b, g, device=x.device) < self.mask_ratio
+    m = m & frame_valid.unsqueeze(1)
+    if not bool(m.any()):
+      return x.new_zeros(())
+    masked_in = torch.where(m.unsqueeze(-1), self.mask_token + self.centre(centres), tokens)
+    enc = self.norm(self.encoder(masked_in))
+    pred = self.decoder(enc[m]).view(-1, self.group_size, 3)
+    target = local[m][..., :3]
+    d = torch.cdist(pred, target)                                            # (M, K, K)
+    return 0.5 * (d.amin(dim=2).mean() + d.amin(dim=1).mean())
 
 
 class _Basic(nn.Module):
@@ -192,7 +231,8 @@ def build_encoder(spec: dict, shape: tuple[int, ...]) -> nn.Module:
   if kind == "pointpatch":
     return PointPatchEncoder(in_dim=int(shape[-1]), n_groups=int(spec.get("n_groups", 32)),
                              group_size=int(spec.get("group_size", 16)), dim=int(spec.get("dim", 128)),
-                             n_layers=int(spec.get("n_layers", 2)), out_dim=out_dim)
+                             n_layers=int(spec.get("n_layers", 2)), out_dim=out_dim,
+                             recon=bool(spec.get("recon", False)), mask_ratio=float(spec.get("mask_ratio", 0.4)))
   if kind == "setmlp":
     return SetMLPEncoder(in_dim=int(shape[-1]), dims=(64, 128, 128), out_dim=out_dim)
   if kind == "depthresnet":

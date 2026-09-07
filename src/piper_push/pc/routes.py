@@ -20,12 +20,17 @@ registering tasks.
 
 from __future__ import annotations
 
-ROUTES = ("P0", "P1A", "P1B", "P2", "P1BZ", "P1BT", "P1BZ6")
-_BASE = {"P1BZ": "P1B", "P1BT": "P1B", "P1BZ6": "P1B"}
-_TARGET_CHANNEL = {"P1BZ": "zero", "P1BT": "oracle", "P1BZ6": "zero"}
+ROUTES = ("P0", "P1A", "P1B", "P2", "P1BZ", "P1BT", "P1BZ6", "P1BZ6R")
+_BASE = {"P1BZ": "P1B", "P1BT": "P1B", "P1BZ6": "P1B", "P1BZ6R": "P1B"}
+_TARGET_CHANNEL = {"P1BZ": "zero", "P1BT": "oracle", "P1BZ6": "zero", "P1BZ6R": "zero"}
 ORACLE_ROUTES = ("P1BT",)
 DEFAULT_CROP_Z_MIN = 0.010
-_CROP_Z_MIN = {"P1BZ6": 0.006}
+_CROP_Z_MIN = {"P1BZ6": 0.006, "P1BZ6R": 0.006}
+_RECON = {"P1BZ6R": True}
+"""P1BZ6R = P1BZ6 whose point-patch encoder carries PointPatchRL's masked-reconstruction head
+(mask token + patch decoder).  The head is part of the network so the checkpoint, the evaluation
+and the export build the same module; the loss it trains with is the RECON_W knob of the
+distillation stage.  The policy's forward pass and the exported graph never use the head."""
 """P1BZ6 = P1BZ with the height-above-table cut at 6 mm instead of 10 mm.  Measured 2026-09-07
 (results/pc/gen3/crop): at 10 mm the shortest objects in the distribution contribute no point on
 83 % of frames and accumulate on the table over a long run; at 6 mm that is 56 % for 3.5 % more
@@ -40,6 +45,11 @@ def base_route(route: str) -> str:
 def target_channel(route: str) -> str:
   """``none`` (4 columns), ``zero`` or ``oracle`` (5 columns)."""
   return _TARGET_CHANNEL.get(route, "none")
+
+
+def has_recon_head(route: str) -> bool:
+  """Whether the route's point-patch encoder is built with the masked-reconstruction head."""
+  return bool(_RECON.get(route, False))
 
 
 def crop_z_min(route: str) -> float:

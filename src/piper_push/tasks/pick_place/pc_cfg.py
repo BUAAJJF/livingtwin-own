@@ -39,9 +39,18 @@ from piper_push.runners import PickPlaceOnPolicyRunner
 from piper_push.tasks.pick_place.rl_cfg import _distribution_cfg, pick_place_ppo_runner_cfg
 from piper_push.tasks.pick_place.robust_cfg import make_robust_env_cfg
 
+import os
+
 ROUTES = pc_routes.ROUTES
 ORACLE_ROUTES = pc_routes.ORACLE_ROUTES
 NUM_POINTS = 512
+# Round-4 knobs (2026-09-07), read at import like the rest and recorded by evalcfg:
+# PC_CLOUD_DR=1 puts cloud.CloudDrCfg on the TRAINING config (plane offset, point
+# dropout, wider frame offset and jitter); RECON_W is the weight of the
+# masked-reconstruction loss in distillation for a route whose encoder has the
+# head (P1BZ6R); on a route without it the knob does nothing.
+PC_CLOUD_DR = os.environ.get("PC_CLOUD_DR", "0") not in ("0", "", "false", "False")
+RECON_W = float(os.environ.get("RECON_W", "0"))
 HELDOUT_CLASS = "capped"
 _MODEL = "piper_push.pc.models:SetRecurrentModel"
 
@@ -70,13 +79,17 @@ def actor_groups(route: str) -> tuple[str, ...]:
 
 
 def encoder_cfg(route: str) -> dict:
+  recon = pc_routes.has_recon_head(route)
   route = pc_routes.base_route(route)
   if route == "P0":
     return {"camera": {"type": "depthresnet", "out_dim": 256}}
   if route == "P1A":
     return {"camera": {"type": "pointnet", "out_dim": 256}}
   if route == "P1B":
-    return {"camera": {"type": "pointpatch", "out_dim": 256, "n_groups": 32, "group_size": 16, "dim": 128, "n_layers": 2}}
+    spec = {"camera": {"type": "pointpatch", "out_dim": 256, "n_groups": 32, "group_size": 16, "dim": 128, "n_layers": 2}}
+    if recon:
+      spec["camera"].update({"recon": True, "mask_ratio": 0.4})
+    return spec
   if route == "P2":
     return {"grasp_topk": {"type": "setmlp", "out_dim": 128}}
   raise ValueError(route)
@@ -104,6 +117,7 @@ def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
     "mode": "depth" if base == "P0" else "cloud",
     "target_channel": pc_routes.target_channel(route),
     "workspace": dataclasses.replace(cloud.WORKSPACE, z_min=pc_routes.crop_z_min(route)),
+    "dr": (cloud.CloudDrCfg() if (PC_CLOUD_DR and not play and base != "P0") else None),
   }
   # The ``camera`` group keeps its name and its ``scene`` term so that
   # evalcfg.apply_sensor and robust_cfg address the sensor the same way.
@@ -170,6 +184,7 @@ def pc_distill_runner_cfg(route: str, max_iterations: int = 3000) -> RslRlDistil
       class_name="piper_push.distill:BoundedDistillation",
       max_grad_norm=1.0,
       loss_type="mse",
+      recon_w=RECON_W,
     ),
     experiment_name=f"piperx_pc_{route.lower()}_distill",
     logger="wandb",

@@ -45,6 +45,10 @@ class RslRlDistillationAlgorithmCfg:
   loss_type: Literal["mse", "huber"] = "mse"
   optimizer: Literal["adam", "adamw", "sgd", "rmsprop"] = "adam"
   class_name: str = "Distillation"
+  recon_w: float = 0.0
+  """Weight of the point-patch encoder's masked-reconstruction loss (metres of
+  Chamfer distance) added to the behaviour loss.  0 = off; the encoder must be
+  built with ``recon: True`` for it to do anything."""
 
 
 @dataclass
@@ -115,11 +119,35 @@ class BoundedDistillation(Distillation):
   loss is therefore on what the arm receives.
   """
 
-  def __init__(self, *args, **kwargs) -> None:
+  def __init__(self, *args, recon_w: float = 0.0, **kwargs) -> None:
     super().__init__(*args, **kwargs)
     base = self.loss_fn
+    self.recon_w = float(recon_w)
+    self.last_recon = 0.0
+    # The behaviour loss is called with actions only; the observations the
+    # student just saw are kept by a pre-hook so the auxiliary reconstruction
+    # loss can be computed on the same batch.
+    self._last_obs = None
+    if self.recon_w > 0:
+      model = getattr(self.student, "module", self.student)
+      model.register_forward_pre_hook(lambda mod, args, kwargs=None: self._keep(args), with_kwargs=False)
 
     def on_tanh(student_out: torch.Tensor, teacher_out: torch.Tensor) -> torch.Tensor:
-      return base(torch.tanh(student_out), torch.tanh(teacher_out))
+      loss = base(torch.tanh(student_out), torch.tanh(teacher_out))
+      if self.recon_w > 0 and self._last_obs is not None:
+        model = getattr(self.student, "module", self.student)
+        aux = model.recon_loss(self._last_obs)
+        self.last_recon = float(aux.detach())
+        loss = loss + self.recon_w * aux
+      return loss
 
     self.loss_fn = on_tanh
+
+  def _keep(self, args) -> None:
+    self._last_obs = args[0] if args else None
+
+  def update(self) -> dict[str, float]:
+    out = super().update()
+    if self.recon_w > 0:
+      out["recon"] = self.last_recon
+    return out

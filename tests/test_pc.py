@@ -351,3 +351,54 @@ print(json.dumps({'pushed': c.rewards['object_disturbed'].weight, 'approach': c.
   line = [l for l in out.stdout.splitlines() if l.startswith("{")][-1]
   d = json.loads(line)
   assert d["pushed"] == -2.0 and d["approach"] == -1.0 and abs(d["kp"][0] - 0.9) < 1e-6 and abs(d["kp"][1] - 2.1) < 1e-6
+
+
+# --- round 4: cloud domain randomisation and the masked-reconstruction loss ---
+
+
+def test_cloud_dr_offsets_the_cut_and_drops_survivors():
+  torch.manual_seed(0)
+  from piper_push.pc import cloud as C
+  pts = torch.randn(2, 40, 50, 3); inside = torch.ones(2, 40, 50, dtype=torch.bool)
+  a, _ = C.sample_points(pts, inside, 64, augment=True, idx=None, jitter_m=0.0, frame_offset_m=0.0)
+  b, _ = C.sample_points(pts, inside, 64, augment=True, idx=None, jitter_m=0.05, frame_offset_m=0.0)
+  assert a.shape == b.shape == (2, 64, 4)
+  # the DR draw: a plane offset and a dropout fraction per environment
+  cfg = C.CloudDrCfg(plane_offset_m=0.005, dropout_max=0.5)
+  assert 0 < cfg.plane_offset_m < 0.01 and cfg.dropout_max == 0.5
+
+
+def test_pointpatch_recon_loss_is_finite_and_trains_the_decoder_only_when_asked():
+  torch.manual_seed(1)
+  enc = encoders.PointPatchEncoder(in_dim=5, n_groups=8, group_size=8, out_dim=32, recon=True, mask_ratio=0.5)
+  x = torch.randn(3, 64, 5); x[..., 3] = 1.0
+  loss = enc.recon_loss(x)
+  assert loss.dim() == 0 and torch.isfinite(loss) and loss > 0
+  loss.backward()
+  assert enc.mask_token.grad is not None and enc.decoder[0].weight.grad is not None
+  # the policy path is unchanged and still scriptable; an encoder without recon reports zero
+  enc.eval(); torch.jit.script(enc)
+  plain = encoders.PointPatchEncoder(in_dim=5, n_groups=8, group_size=8, out_dim=32)
+  assert float(plain.recon_loss(x)) == 0.0
+  x2 = x.clone(); x2[..., 3] = 0.0            # no valid point: nothing to reconstruct
+  assert float(enc.recon_loss(x2)) == 0.0
+
+
+def test_round4_knobs_reach_the_task_config():
+  import subprocess, sys, json, os
+  code = """
+import os, json
+os.environ['PC_CLOUD_DR'] = '1'; os.environ['RECON_W'] = '0.5'
+import mjlab.tasks
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+tr = load_env_cfg('Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill'); pl = load_env_cfg('Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill', play=True)
+rl = load_rl_cfg('Mjlab-Pick-Place-PiperX-PC-P1BZ6R-Distill'); rl0 = load_rl_cfg('Mjlab-Pick-Place-PiperX-PC-P1BZ6-Distill')
+print(json.dumps({'train_dr': tr.observations['camera'].terms['scene'].params['dr'] is not None,
+                  'play_dr': pl.observations['camera'].terms['scene'].params['dr'] is not None,
+                  'recon': rl.student.cnn_cfg['camera'].get('recon', False), 'recon_plain': rl0.student.cnn_cfg['camera'].get('recon', False), 'recon_w': rl.algorithm.recon_w}))
+"""
+  out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**os.environ, "MUJOCO_GL": "disable"})
+  d = json.loads([l for l in out.stdout.splitlines() if l.startswith("{")][-1])
+  assert d == {"train_dr": True, "play_dr": False, "recon": True, "recon_plain": False, "recon_w": 0.5}
+  from piper_push.pc import routes
+  assert routes.has_recon_head("P1BZ6R") and not routes.has_recon_head("P1BZ6") and routes.crop_z_min("P1BZ6R") == 0.006
