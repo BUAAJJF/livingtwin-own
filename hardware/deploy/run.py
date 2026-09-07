@@ -690,6 +690,13 @@ def main() -> int:
                  help="--obs pc only: the cut above the calibrated table plane in metres, "
                       "overriding the route's (P1BZ6: 0.006).  Lower is safe, higher is not: "
                       "the simulator loses 18%% of its throughput at +4 mm and nothing at -4 mm")
+  p.add_argument("--empty-table-px", type=int, default=200,
+                 help="--obs pc only: object points (above 15 mm, outside the arm and the bin, at the D455's "
+                      "848x480) a frame needs for the table to count as occupied; below it for --empty-table-s "
+                      "the loop holds, because the policy was never trained on an empty table and wanders on "
+                      "one.  Measured on the first real motion (2026-09-07): an object gives >= 290 even while "
+                      "carried, the empty table 0-130 (arm and bin edges the sphere cover misses)")
+  p.add_argument("--empty-table-s", type=float, default=1.0)
   p.add_argument("--obs", choices=("mask", "pc"), default="mask",
                  help="what the policy is shown.  'mask': the depth image with "
                       "the segmented target (every policy before yf/pc).  'pc': "
@@ -1217,7 +1224,8 @@ def main() -> int:
       from .pc_perception import PcPerception
       vision = PcPerception(reader, rig, pol.pc_route, pol.num_points,
                             proprio.Kinematics(), device=a.device,
-                            stereo=stereo_backend, height_min_m=a.cloud_height_min)
+                            stereo=stereo_backend, height_min_m=a.cloud_height_min,
+                            min_object_px=a.empty_table_px, idle_s=a.empty_table_s)
     else:
       vision = Perception(reader, reproj, segmenter, tracker,
                           proprio.Kinematics(), rig=rig,

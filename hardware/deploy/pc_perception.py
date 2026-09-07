@@ -25,16 +25,18 @@ import threading
 import time
 
 import numpy as np
+import torch
 
 from . import proprio
-from .pc_obs import CloudObs, GraspObs
+from .pc_obs import ARM_BODIES, CloudObs, GraspObs, object_points
 from piper_push.pc import cloud as pc_cloud
 from piper_push.pc import routes as pc_routes
 
 
 class PcPerception(threading.Thread):
   def __init__(self, reader, rig, route: str, num_points: int, kin: proprio.Kinematics,
-               device: str = "cuda:0", stereo=None, height_min_m: float | None = None) -> None:
+               device: str = "cuda:0", stereo=None, height_min_m: float | None = None,
+               min_object_px: int = 200, idle_s: float = 1.0) -> None:
     super().__init__(daemon=True, name="pc-perception")
     pc_routes.check_deployable(route)
     base = pc_routes.base_route(route)
@@ -51,6 +53,18 @@ class PcPerception(threading.Thread):
                         height_min_m=self.height_min_m)
     self.kin = kin
     self.grasp = GraspObs(kin, device=device) if base == "P2" else None
+    # The empty-table detector (2026-09-07, after the first real motion: the
+    # arm wanders when nothing is on the table).  ``target_available`` goes
+    # false once no frame has shown ``min_object_px`` object points for
+    # ``idle_s``, and true again on the first frame that does; the loop's
+    # hold_no_target branch freezes the target meanwhile.
+    self.min_object_px = int(min_object_px)
+    self.idle_s = float(idle_s)
+    self._last_object_time: float | None = None
+    self.object_px = collections.deque(maxlen=2000)
+    self.idle_frames = 0
+    import mujoco
+    self._body_ids = [mujoco.mj_name2id(kin.model, mujoco.mjtObj.mjOBJ_BODY, n) for n in ARM_BODIES]
     self._lock = threading.Lock()
     self._stopping = threading.Event()
     self._joints = None
@@ -116,11 +130,25 @@ class PcPerception(threading.Thread):
           depth = self.stereo(frame.ir, frame.ir_right)
       cf = self.obs(np.asarray(depth, dtype=np.float32))
       extra = None
+      if q is not None:
+        self.kin.update(q)
       if self.grasp is not None:
-        if q is not None:
-          self.kin.update(q)
         self.grasp.update(cf)
         extra = (self.grasp.topk.copy(), self.grasp.locked.copy())
+      # Is there anything on the table?  Needs the arm's pose to take the arm out.
+      present = True
+      if self.obs.mode == "cloud" and q is not None and cf.valid:
+        arm = torch.as_tensor(np.asarray(self.kin.data.xpos[self._body_ids], dtype=np.float32), device=self.obs.device)
+        n_obj = object_points(cf, arm, self.obs._p0, self.obs._n)
+        self.object_px.append(n_obj)
+        now = time.time()
+        if n_obj >= self.min_object_px:
+          self._last_object_time = now
+        elif self._last_object_time is None:
+          self._last_object_time = now       # give the first frames the benefit of the doubt
+        present = (now - self._last_object_time) < self.idle_s
+        if not present:
+          self.idle_frames += 1
       finished = time.perf_counter()
       published_at = time.time()
       self.periods.append(finished - t0)
@@ -134,10 +162,11 @@ class PcPerception(threading.Thread):
         self._first_finished = finished
       self._last_finished = finished
       frame.mask_state = f"pc:{self.route}"
-      frame.detections = [{"workspace_points": int(cf.count)}]
       frame.pc_extra = extra
+      frame.detections = [{"workspace_points": int(cf.count), "object_points": (int(self.object_px[-1]) if self.object_px else None),
+                           "table_empty": (not present)}]
       with self._lock:
-        self._out = (cf.obs, published_at, frame, 0, False, bool(cf.valid))
+        self._out = (cf.obs, published_at, frame, 0, False, bool(cf.valid) and present)
         self._view = (frame, None, 0, cf.obs, q)
 
   def close(self) -> None:
@@ -159,7 +188,8 @@ class PcPerception(threading.Thread):
       "route": self.route, "height_min_m": self.height_min_m, "frames": self.frames, "dropped_by_mailbox": self.dropped,
       "invalid_frames": self.invalid_frames, "rate_hz": rate,
       "compute_ms": stats(self.compute_ms), "capture_to_publish_ms": stats(self.capture_to_publish_ms),
-      "workspace_points": stats(self.counts), "stereo_misses": self.stereo_misses,
+      "workspace_points": stats(self.counts), "object_points": stats(self.object_px), "table_empty_frames": self.idle_frames,
+      "min_object_px": self.min_object_px, "idle_s": self.idle_s, "stereo_misses": self.stereo_misses,
       "num_points": self.obs.num_points if self.obs.mode == "cloud" else None, "mode": self.obs.mode,
     }
     if self.grasp is not None:
@@ -175,7 +205,7 @@ class PcPerception(threading.Thread):
             + (f" at {r['rate_hz']:.1f} Hz" if r["rate_hz"] else "")
             + f", compute {c.get('p50', float('nan')):.1f} ms median / {c.get('p95', float('nan')):.1f} ms p95, "
             f"capture-to-publish {a.get('p50', float('nan')):.1f} / {a.get('p95', float('nan')):.1f} ms, "
-            f"{r['invalid_frames']} frame(s) with too few workspace points, {r['dropped_by_mailbox']} dropped"
+            f"{r['invalid_frames']} frame(s) with too few workspace points, {r['table_empty_frames']} with the table empty, {r['dropped_by_mailbox']} dropped"
             + (f", p2 switches {r['p2']['switches']} no-candidate {r['p2']['no_candidate_frames']}" if "p2" in r else ""))
 
 

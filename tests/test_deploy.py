@@ -2233,3 +2233,25 @@ def test_replay_restores_raw_streams_and_starts_from_native_depth(tmp_path):
   assert frame.ir.mean() == 5
   assert frame.ir_right.mean() == 6
   assert frame.sensor_meta["color_frame_number"] == 17
+
+
+def test_object_points_ignores_the_arm_the_bin_and_the_table_noise():
+  import torch
+  from hardware.deploy import pc_obs
+  from piper_push import objects, pc as _pc
+  from piper_push.pc import grasp
+  bx, by = objects.BIN_CENTER
+  pts = torch.tensor([
+    [0.45, 0.15, 0.030],   # an object, 3 cm up, clear of arm and bin
+    [0.45, 0.15, 0.040],
+    [0.46, 0.16, 0.025],
+    [0.35, 0.35, 0.008],   # table noise below 15 mm
+    [bx, by, 0.05],        # inside the bin footprint
+    [0.10, 0.20, 0.20],    # on the arm (a body sits here)
+  ])
+  frame = pc_obs.CloudFrame(obs=None, count=6, valid=True, points_base=pts.unsqueeze(0), inside=torch.ones(1, 6, dtype=torch.bool))
+  arm = torch.tensor([[0.10, 0.20, 0.20]] * len(grasp.ARM_BODIES))
+  n = pc_obs.object_points(frame, arm, torch.zeros(3), torch.tensor([0.0, 0.0, 1.0]))
+  assert n == 3
+  n0 = pc_obs.object_points(pc_obs.CloudFrame(obs=None, count=0, valid=False), arm, torch.zeros(3), torch.tensor([0.0, 0.0, 1.0]))
+  assert n0 == 0

@@ -119,6 +119,39 @@ class CloudObs:
                       points_base=pts.unsqueeze(0), inside=inside.unsqueeze(0))
 
 
+def object_points(frame: CloudFrame, arm_pos: torch.Tensor, plane_p0: torch.Tensor, plane_n: torch.Tensor,
+                  h_min: float = grasp.H_MIN, h_max: float = grasp.H_MAX) -> int:
+  """How many of the frame's workspace points could belong to an object.
+
+  Points more than ``h_min`` above the calibrated plane (a real object, not
+  table noise), outside the sphere cover of the arm's bodies (``ARM_BODIES``,
+  ``ARM_RADII`` as the P2 proposer uses them) and outside the bin's footprint
+  with its walls.  Zero for a few frames means the table is empty and the
+  policy has nothing to do -- a state it was never trained in (the simulator
+  refills the table the instant a placement registers) and in which it
+  wanders.  ``run.py`` holds on it.
+  """
+  if frame.points_base is None or frame.inside is None:
+    return 0
+  pts = frame.points_base[0][frame.inside[0]]
+  if pts.shape[0] == 0:
+    return 0
+  h = ((pts - plane_p0) * plane_n).sum(-1)
+  keep = (h > float(h_min)) & (h < float(h_max))
+  pts = pts[keep]
+  if pts.shape[0] == 0:
+    return 0
+  radii = torch.tensor(grasp.ARM_RADII, device=pts.device).view(1, -1)
+  d_arm = torch.cdist(pts, arm_pos.reshape(-1, 3))
+  keep = ~((d_arm < radii).any(dim=-1))
+  from piper_push import objects
+  bx, by = objects.BIN_CENTER
+  hx = objects.BIN_INNER[0] + objects.BIN_WALL_THICKNESS + 0.015
+  hy = objects.BIN_INNER[1] + objects.BIN_WALL_THICKNESS + 0.015
+  keep &= ~(((pts[:, 0] - bx).abs() < hx) & ((pts[:, 1] - by).abs() < hy))
+  return int(keep.sum())
+
+
 class GraspObs:
   """P2 on the robot: proposals from the frame's base-frame points, and the lock.
 
