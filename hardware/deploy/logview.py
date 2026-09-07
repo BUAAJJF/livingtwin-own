@@ -13,6 +13,11 @@ labels reconstructed or unavailable products instead of presenting them as
 historical outputs. This server keeps the HTML small and renders one requested
 frame at a time.
 
+Point-cloud sessions (``run.py --obs pc``) get their own page: the cloud the
+policy saw is rebuilt from the archived depth, the joints, the rig and the cut
+with the deployment's own ``CloudObs`` (``CloudReplay``), drawn from above and
+from the side, over the session's jaw / effort / object-point / speed traces.
+
 Playback uses every recorded perception frame and its real ``frame_stamp``.
 There is no review stride.  At 1x, irregular camera cadence is preserved; MAX
 advances as soon as the browser receives the next frame.
@@ -100,10 +105,14 @@ pre{margin:0;padding:10px 12px;max-height:310px;overflow:auto;font:11px/1.5 var(
    <span class="counter" id="counter">—</span>
   </div>
  </div>
- <p class="hint">Eight panes: raw RGB, legacy aligned gray, raw left/right IR,
- native/policy depth, detector instances, and RGB→depth→policy masks.
- Every recorded perception frame is available—no stride.
- Space plays/pauses; arrows step one frame; MAX waits only for decoding.</p>
+ <p class="hint">Mask-line sessions: eight panes — raw RGB, legacy aligned gray,
+ raw left/right IR, native/policy depth, detector instances, RGB→depth→policy
+ masks.  Point-cloud sessions (<code>run.py --obs pc</code>): RGB, the depth the
+ cloud was built from, the cloud from above (sector, bin, arm cover, grasp
+ site) and from the side (cut / 15 mm / 24 mm lines), and the whole session's
+ jaw gap, |effort|, object points and joint speed with a cursor.  Every
+ recorded perception frame is available—no stride.  Space plays/pauses; arrows
+ step one frame; MAX waits only for decoding.</p>
  <div class="below">
   <div class="box"><h2>frame telemetry</h2><div id="telemetry"></div></div>
   <div class="box"><h2>run configuration and timing</h2><pre id="run"></pre></div>
@@ -558,6 +567,253 @@ class DepthReplay:
       return {"detail": f"depth rebuild failed: {type(e).__name__}: {e}"}
 
 
+def _is_pc_session(manifest: dict) -> bool:
+  args = ((manifest.get("run") or {}).get("args") or {})
+  if args.get("obs") == "pc":
+    return True
+  first = (manifest.get("frames") or [{}])[0]
+  return str(first.get("mask_state") or "").startswith("pc:")
+
+
+class CloudReplay:
+  """The point-cloud line's observation, rebuilt from the archived depth.
+
+  ``run.py --obs pc`` archives the camera's depth and the joints; the cloud
+  the policy saw is a deterministic function of those, the rig and the cut,
+  so it is rebuilt here with the deployment's own ``CloudObs`` (on the CPU:
+  the viewer never touches the GPU) rather than stored.  One per session:
+  the rig, the kinematics and the session's timeline are loaded once.
+  """
+
+  def __init__(self, session: pathlib.Path, manifest: dict) -> None:
+    import torch
+    from . import config, proprio
+    from .pc_obs import ARM_BODIES, CloudObs
+    from piper_push.pc import cloud as pc_cloud, grasp as pc_grasp, routes as pc_routes
+    from piper_push import objects
+    import mujoco
+    run = manifest.get("run") or {}
+    args = run.get("args") or {}
+    camera = str(args.get("camera", "d455"))
+    rig_file = session / "rig.json"
+    if not rig_file.exists():
+      rig_file = (pathlib.Path(args["rig_file"]) if args.get("rig_file") else
+                  pathlib.Path(config.RIG_FILE).with_name(
+                    f"rig{'' if camera == 'd405' else '_' + camera}.json"))
+    self.rig = config.Rig.load(rig_file if rig_file.exists() else config.RIG_FILE)
+    route = None
+    try:
+      route = json.loads((pathlib.Path(args["policy"]) / "manifest.json").read_text())["route"]
+    except Exception:
+      pass
+    self.route = route or str(manifest["frames"][0].get("mask_state") or "pc:?").split(":", 1)[-1]
+    cut = args.get("cloud_height_min")
+    self.cut = float(cut) if cut is not None else (
+      pc_routes.crop_z_min(self.route) if self.route in pc_routes.ROUTES else pc_cloud.WORKSPACE.z_min)
+    self.obs = CloudObs(self.rig, mode="cloud", num_points=pc_cloud.POINT_DIM * 128, device="cpu",
+                        height_min_m=self.cut)
+    self.kin = proprio.Kinematics()
+    self.body_ids = [mujoco.mj_name2id(self.kin.model, mujoco.mjtObj.mjOBJ_BODY, n) for n in ARM_BODIES]
+    self.radii = np.asarray(pc_grasp.ARM_RADII, dtype=np.float32)
+    self.h_obj = (float(pc_grasp.H_MIN), float(pc_grasp.H_MAX))
+    ws = self.obs.workspace
+    self.sector = (ws.r_min, ws.r_max, ws.angle_lo, ws.angle_hi)
+    bx, by = objects.BIN_CENTER
+    hx = objects.BIN_INNER[0] + objects.BIN_WALL_THICKNESS
+    hy = objects.BIN_INNER[1] + objects.BIN_WALL_THICKNESS
+    self.bin_box = (bx - hx, by - hy, bx + hx, by + hy)
+    self.bin_pad = 0.015
+    self._torch = torch
+    self.timeline = self._timeline(manifest)
+
+  @staticmethod
+  def _timeline(manifest: dict) -> dict:
+    fr = manifest["frames"]
+    t = np.asarray([f["t_s"] for f in fr], dtype=np.float64)
+    gap = np.asarray([f["gripper_gap_mm"] if f.get("gripper_gap_mm") is not None else np.nan for f in fr])
+    eff = np.asarray([abs(f["gripper_effort"]) if f.get("gripper_effort") is not None else np.nan for f in fr])
+    obj = np.asarray([((f.get("detections") or [{}])[0] or {}).get("object_points", np.nan) for f in fr],
+                     dtype=np.float64)
+    vel = np.asarray([max(abs(v) for v in f["joint_vel"][:6]) if f.get("joint_vel") else np.nan for f in fr])
+    hold = np.asarray([str(f.get("event") or "").startswith("hold") for f in fr])
+    return {"t": t, "gap": gap, "effort": eff, "object": obj, "speed": vel, "hold": hold}
+
+  def analyse(self, depth: np.ndarray, q) -> dict:
+    """Base-frame workspace points above the cut, their heights, and which are arm or bin."""
+    torch = self._torch
+    cf = self.obs(np.asarray(depth, dtype=np.float32))
+    out = {"count": int(cf.count), "valid": bool(cf.valid), "pts": np.zeros((0, 3), np.float32),
+           "h": np.zeros(0, np.float32), "arm": np.zeros(0, bool), "bin": np.zeros(0, bool),
+           "object": 0, "site": None, "arm_pos": None}
+    if cf.points_base is None or cf.inside is None:
+      return out
+    pts = cf.points_base[0][cf.inside[0]]
+    if pts.shape[0] == 0:
+      return out
+    h = ((pts - self.obs._p0) * self.obs._n).sum(-1)
+    arm_mask = np.zeros(pts.shape[0], bool)
+    if q is not None and len(q) >= 6:
+      self.kin.update(np.asarray(q, dtype=np.float64))
+      arm_pos = np.asarray(self.kin.data.xpos[self.body_ids], dtype=np.float32)
+      d = torch.cdist(pts, torch.as_tensor(arm_pos)).numpy()
+      arm_mask = (d < self.radii[None, :]).any(axis=1)
+      out["arm_pos"] = arm_pos
+      out["site"] = np.asarray(self.kin.site_pos, dtype=np.float32)
+    p = pts.numpy(); hh = h.numpy()
+    x0, y0, x1, y1 = self.bin_box
+    pad = self.bin_pad
+    bin_mask = (p[:, 0] > x0 - pad) & (p[:, 0] < x1 + pad) & (p[:, 1] > y0 - pad) & (p[:, 1] < y1 + pad)
+    obj = (hh > self.h_obj[0]) & (hh < self.h_obj[1]) & ~arm_mask & ~bin_mask
+    out.update({"pts": p, "h": hh, "arm": arm_mask, "bin": bin_mask, "object": int(obj.sum())})
+    return out
+
+
+def _height_colours(h_m: np.ndarray, lo: float = 0.0, hi: float = 0.15) -> np.ndarray:
+  v = np.clip((h_m - lo) / (hi - lo), 0, 1)
+  return cv2.applyColorMap((v * 255).astype(np.uint8).reshape(-1, 1), cv2.COLORMAP_TURBO).reshape(-1, 3)
+
+
+def _plot_points(img: np.ndarray, u: np.ndarray, v: np.ndarray, colours: np.ndarray, size: int = 2) -> None:
+  h, w = img.shape[:2]
+  for du in range(size):
+    for dv in range(size):
+      uu = u + du; vv = v + dv
+      ok = (uu >= 0) & (uu < w) & (vv >= 0) & (vv < h)
+      img[vv[ok], uu[ok]] = colours[ok]
+
+
+def _render_pc_frame(session: pathlib.Path, manifest: dict, index: int, replay: "CloudReplay",
+                     quality: int) -> bytes:
+  """The point-cloud line's page: RGB, depth, the cloud from above and from the side, the timeline."""
+  frames = manifest["frames"]
+  row = frames[index]
+  with np.load(session / pathlib.PurePath(row["file"]).name, allow_pickle=False) as z:
+    depth = np.asarray(z["depth"], dtype=np.float32) / 10000.0
+    rgb = np.asarray(z["rgb"], dtype=np.uint8) if "rgb" in z else None
+    computed = np.asarray(z["policy_depth"], dtype=np.float32) / 10000.0 if "policy_depth" in z else None
+  h, w = depth.shape[:2]
+  used = computed if computed is not None else depth
+  det = ((row.get("detections") or [{}])[0] or {})
+  an = replay.analyse(used, row.get("joint_pos"))
+
+  tile_rgb = _color_tile(rgb, (h, w), "1  synchronized raw RGB", "not a policy input on this line")
+  tile_depth = _turbo(used)
+  fill = float((used > 0).mean())
+  _caption(tile_depth, "2  depth the cloud was built from",
+           f"{'Fast-FoundationStereo' if computed is not None else 'D455 native'}; fill {fill * 100:.0f}%; "
+           f"0.35-1.20 m turbo")
+
+  # -- top view: base frame, x to the right, y up, the sector and the bin drawn.
+  top = np.zeros((h, w, 3), np.uint8); top[:] = (18, 22, 28)
+  r_min, r_max, a_lo, a_hi = replay.sector
+  ang = np.linspace(a_lo, a_hi, 48)
+  arc_o = np.stack([r_max * np.cos(ang), r_max * np.sin(ang)], 1)
+  arc_i = np.stack([r_min * np.cos(ang[::-1]), r_min * np.sin(ang[::-1])], 1)
+  poly = np.vstack([arc_o, arc_i])
+  x0, y0, x1, y1 = replay.bin_box
+  allx = np.concatenate([poly[:, 0], [x0, x1, 0.0]]); ally = np.concatenate([poly[:, 1], [y0, y1, 0.0]])
+  margin = 0.04
+  sx = (w - 20) / (allx.max() - allx.min() + 2 * margin); sy = (h - 60) / (ally.max() - ally.min() + 2 * margin)
+  scale = min(sx, sy)
+  ox = allx.min() - margin; oy = ally.max() + margin
+  def to_px(x, y):
+    return (np.asarray((x - ox) * scale + 10)).astype(np.int32), (np.asarray((oy - y) * scale + 50)).astype(np.int32)
+  pu, pv = to_px(poly[:, 0], poly[:, 1])
+  cv2.polylines(top, [np.stack([pu, pv], 1).reshape(-1, 1, 2)], True, (90, 105, 125), 1, cv2.LINE_AA)
+  bu, bv = to_px(np.array([x0, x1]), np.array([y0, y1]))
+  cv2.rectangle(top, (int(bu[0]), int(bv[1])), (int(bu[1]), int(bv[0])), (140, 120, 80), 1)
+  bu0, bv0 = to_px(0.0, 0.0)
+  cv2.drawMarker(top, (int(bu0), int(bv0)), (160, 160, 160), cv2.MARKER_TILTED_CROSS, 12, 1)
+  p, hh = an["pts"], an["h"]
+  if p.shape[0]:
+    u, v = to_px(p[:, 0], p[:, 1])
+    col = _height_colours(hh)
+    col[an["arm"]] = (110, 110, 110)
+    col[an["bin"] & ~an["arm"]] = (60, 100, 140)
+    order = np.argsort(hh)
+    _plot_points(top, u[order], v[order], col[order], 2)
+  if an["arm_pos"] is not None:
+    for (ax, ay, az), rr in zip(an["arm_pos"], replay.radii):
+      cu, cv_ = to_px(ax, ay)
+      cv2.circle(top, (int(cu), int(cv_)), max(2, int(rr * scale)), (110, 110, 110), 1, cv2.LINE_AA)
+  if an["site"] is not None:
+    su, sv = to_px(an["site"][0], an["site"][1])
+    cv2.drawMarker(top, (int(su), int(sv)), (80, 255, 120), cv2.MARKER_CROSS, 16, 2)
+  gap = row.get("gripper_gap_mm"); eff = row.get("gripper_effort")
+  _caption(top, "3  cloud from above (base frame)",
+           f"{replay.route}, cut {replay.cut * 1000:.0f} mm: {an['count']} workspace pts"
+           f" ({det.get('workspace_points', '?')} live), {an['object']} object pts ({det.get('object_points', '?')} live)"
+           f"{', table empty' if det.get('table_empty') else ''}; grey = arm cover, brown = bin, green + = grasp site")
+
+  # -- side view: radial distance against height above the plane, the thresholds drawn.
+  side = np.zeros((h, w, 3), np.uint8); side[:] = (18, 22, 28)
+  h_lo, h_hi = -0.010, 0.160
+  def to_side(r, z):
+    return ((np.asarray(r) - r_min) / (r_max - r_min) * (w - 20) + 10).astype(np.int32), \
+           ((h_hi - np.asarray(z)) / (h_hi - h_lo) * (h - 60) + 50).astype(np.int32)
+  for zz, colour, name in ((0.0, (80, 90, 105), "plane"), (replay.cut, (90, 200, 240), f"cut {replay.cut * 1000:.0f} mm"),
+                           (replay.h_obj[0], (80, 220, 120), "object 15 mm"), (0.024, (240, 200, 90), "S0 floor 24 mm")):
+    _, zv = to_side(r_min, zz)
+    cv2.line(side, (10, int(zv)), (w - 10, int(zv)), colour, 1)
+    cv2.putText(side, name, (w - 200, int(zv) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA)
+  if p.shape[0]:
+    r = np.hypot(p[:, 0], p[:, 1])
+    u, v = to_side(r, hh)
+    _plot_points(side, u[order], v[order], col[order], 2)
+  lo = hh[~an["arm"] & ~an["bin"]] if p.shape[0] else np.zeros(0)
+  short = int(((lo > replay.cut) & (lo < 0.024)).sum()) if lo.size else 0
+  _caption(side, "4  height above the plane against distance from the base",
+           f"{short} loose pts between the cut and 24 mm; jaw {gap if gap is None else f'{gap:.1f}'} mm, "
+           f"effort {eff if eff is None else f'{eff:+.2f}'}")
+
+  # -- timeline: the whole session with a cursor on this frame.
+  tl = replay.timeline
+  th, tw = 300, 4 * w
+  strip = np.zeros((th, tw, 3), np.uint8); strip[:] = (14, 18, 24)
+  t = tl["t"]; t_end = max(float(t[-1]), 1e-6)
+  def tx(tt):
+    return (np.asarray(tt) / t_end * (tw - 40) + 20).astype(np.int32)
+  lanes = (("jaw gap mm", tl["gap"], 0.0, 100.0, (80, 255, 120)),
+           ("|effort|", tl["effort"], 0.0, 1.2, (90, 200, 240)),
+           ("object pts", tl["object"], 0.0, max(200.0, np.nanmax(tl["object"]) if np.isfinite(tl["object"]).any() else 200.0), (240, 200, 90)),
+           ("max |joint vel| rad/s", tl["speed"], 0.0, 4.0, (200, 120, 240)))
+  lane_h = (th - 30) // len(lanes)
+  for k, (name, y, lo_, hi_, colour) in enumerate(lanes):
+    top_y = 20 + k * lane_h
+    cv2.putText(strip, name, (24, top_y + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA)
+    ok = np.isfinite(y)
+    if ok.any():
+      yy = top_y + lane_h - 4 - np.clip((y[ok] - lo_) / (hi_ - lo_), 0, 1) * (lane_h - 22)
+      pts_ = np.stack([tx(t[ok]), yy.astype(np.int32)], 1).reshape(-1, 1, 2)
+      cv2.polylines(strip, [pts_], False, colour, 1, cv2.LINE_AA)
+    cv2.line(strip, (20, top_y + lane_h - 4), (tw - 20, top_y + lane_h - 4), (40, 46, 56), 1)
+  if tl["hold"].any():
+    # Hold events as a translucent band, so a ten-second hold reads as a
+    # period rather than a wall of lines over the traces.
+    band = strip.copy()
+    hx = tx(t[tl["hold"]])
+    for x in np.unique(hx):
+      cv2.line(band, (int(x), 16), (int(x), th - 8), (200, 90, 60), 1)
+    strip = cv2.addWeighted(band, 0.45, strip, 0.55, 0)
+  cx = int(tx(np.array([row["t_s"]]))[0])
+  cv2.line(strip, (cx, 8), (cx, th - 4), (255, 255, 255), 2)
+  cv2.putText(strip, f"t = {row['t_s']:.2f} s of {t_end:.1f} s   blue = hold events", (tw - 420, 14),
+              cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+
+  image = np.vstack([np.hstack([tile_rgb, tile_depth, top, side]), strip])
+  bar = np.zeros((46, image.shape[1], 3), dtype=np.uint8); bar[:] = (22, 28, 35)
+  event = str(row.get("event") or "unknown")
+  colour = ((100, 210, 125) if event == "command" else
+            (90, 105, 225) if event.startswith("hold") else (180, 180, 180))
+  cv2.putText(bar, f"{manifest['name']}   t={row['t_s']:.3f}s   frame {index + 1}/{len(frames)}   {event}",
+              (12, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.58, colour, 2, cv2.LINE_AA)
+  image = np.vstack([bar, image])
+  ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(np.clip(quality, 40, 95))])
+  if not ok:
+    raise RuntimeError(f"could not encode {manifest['name']}/{row['file']}")
+  return encoded.tobytes()
+
+
 def render_frame(root: pathlib.Path, manifest: dict, index: int,
                  quality: int = 84, replay: DepthReplay | None = None) -> bytes:
   """Render D455 inputs, detector instances and final target masks."""
@@ -566,6 +822,8 @@ def render_frame(root: pathlib.Path, manifest: dict, index: int,
     raise IndexError(index)
   row = frames[index]
   session = _safe_session(root, manifest["name"])
+  if isinstance(replay, CloudReplay):
+    return _render_pc_frame(session, manifest, index, replay, quality)
   frame_file = pathlib.PurePath(row["file"]).name
   with np.load(session / frame_file, allow_pickle=False) as z:
     schema = int(np.asarray(z["schema_version"]).item()) \
@@ -694,7 +952,7 @@ class Store:
     self._manifests: dict[str, tuple[int, dict]] = {}
     self._frames: collections.OrderedDict[tuple[str, int], bytes] = (
       collections.OrderedDict())
-    self._replays: dict[str, DepthReplay] = {}
+    self._replays: dict[str, "DepthReplay | CloudReplay"] = {}
 
   def sessions(self):
     return list_sessions(self.root)
@@ -723,7 +981,12 @@ class Store:
     with self._render_lock:
       manifest = self.session(name)
       replay = None
-      if not (manifest.get("visuals") or {}).get("exact", False):
+      if _is_pc_session(manifest):
+        replay = self._replays.get(name)
+        if not isinstance(replay, CloudReplay):
+          replay = CloudReplay(_safe_session(self.root, name), manifest)
+          self._replays[name] = replay
+      elif not (manifest.get("visuals") or {}).get("exact", False):
         replay = self._replays.get(name)
         if replay is None:
           replay = DepthReplay(_safe_session(self.root, name),

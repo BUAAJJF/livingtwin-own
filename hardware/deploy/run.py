@@ -1610,7 +1610,12 @@ def main() -> int:
         "final_feedback": final,
       }, indent=2) + "\n")
     print("\n" + rates.summary())
-    if not getattr(a, "no_review", False):
+    if getattr(a, "obs", None) == "pc":
+      # review.py re-segments frames for the mask line and fails on a
+      # point-cloud session's placeholder gray; the log viewer rebuilds the
+      # cloud the policy saw instead.
+      print(f"view: scripts/pc/deploy_pc.sh review {writer.dir}")
+    elif not getattr(a, "no_review", False):
       _write_review(writer.dir, stride=a.review_stride)
   return 0
 

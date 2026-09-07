@@ -6,7 +6,7 @@
 #   scripts/pc/deploy_pc.sh shadow                   # 2. live D455 + real joint feedback, drives OFF, 30 s
 #   scripts/pc/deploy_pc.sh noarm                    # 3. the guarded loop with the live camera and the DRY arm, 20 s
 #   scripts/pc/deploy_pc.sh move                     # 4. first motion, 20 s -- e-stop in hand, one object, asks for `move`
-#   scripts/pc/deploy_pc.sh review <recording dir>   #    render a session
+#   scripts/pc/deploy_pc.sh review <recording dir>   #    open a session in the browser log viewer
 #
 # Every step writes a fresh recordings/<step>_<bundle>_<stamp>/ and prints where.  Nothing here
 # lowers a guard: `move` runs run.py with --home-first, --command-rate-scale 0.5,
@@ -105,8 +105,13 @@ case "$STEP" in
     $M -m hardware.deploy.run --obs pc --policy "$POLICY" --camera d455 --policy-device "$DEVICE" \
       --cloud-height-min "$CUT" --home-first --command-rate-scale "$RATE" --max-joint-speed-fraction "$SPEED" \
       --seconds "${SECONDS_RUN:-20}" --record "$OUT" $RECORD_FLAGS $DEPTH_FLAGS
-    echo "recorded $OUT; render with: scripts/pc/deploy_pc.sh review $OUT" ;;
+    echo "recorded $OUT; view with: scripts/pc/deploy_pc.sh review $OUT" ;;
   review)
-    $M -m hardware.deploy.review "${2:?recording dir}" ;;
+    # The mask line's review.py re-segments frames and has nothing to say about a
+    # point-cloud session; the log viewer rebuilds the cloud the policy saw
+    # (hardware/deploy/logview.py, CloudReplay) and plays every frame.
+    DIR=${2:?recording dir}
+    echo "open http://127.0.0.1:${PORT:-8765}/?log=$(basename "$DIR")   (space plays, arrows step; ctrl-c stops the viewer)"
+    PORT=${PORT:-8765} exec scripts/logview.sh --root "$(dirname "$DIR")" ;;
   *) echo "unknown step $STEP" >&2; exit 2 ;;
 esac
