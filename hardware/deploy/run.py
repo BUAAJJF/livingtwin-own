@@ -1651,12 +1651,6 @@ def _write_review(session: pathlib.Path, stride: int = 12) -> None:
           f"{session}")
 
 
-def _logged_depth(frame):
-  """The depth a recording should hold: the one the policy was given."""
-  d = getattr(frame, "policy_depth", None)
-  return frame.depth if d is None else d
-
-
 def _encode_binary_mask(out: dict, name: str, value) -> None:
   mask_value = np.asarray(value, dtype=bool)
   out[f"{name}_shape"] = np.asarray(mask_value.shape, dtype=np.uint16)
@@ -2274,6 +2268,13 @@ class _Recorder:
       value = getattr(frame, attr, None)
       if value is not None:
         arrays[name] = np.asarray(value, dtype=dtype).copy()
+    # The depth the policy was given, when --depth-source replaced the
+    # camera's map.  ``depth`` in the archive stays the camera's own (schema
+    # 3), so a computed-depth session carries both and an offline comparison
+    # runs on identical frames.
+    computed = getattr(frame, "policy_depth", None)
+    if computed is not None:
+      arrays["policy_depth"] = (np.asarray(computed, dtype=np.float32) * 10000).astype(np.uint16)
     for name in ("detection_labels", "detection_rgb_labels"):
       value = getattr(frame, name, None)
       if value is not None:

@@ -577,6 +577,8 @@ def render_frame(root: pathlib.Path, manifest: dict, index: int,
     gray = np.asarray(z["gray"], dtype=np.uint8) if "gray" in z else None
     sensor_depth = (np.asarray(z["sensor_depth"], dtype=np.float32) / 10000.0
                     if "sensor_depth" in z else None)
+    computed_depth = (np.asarray(z["policy_depth"], dtype=np.float32) / 10000.0
+                      if "policy_depth" in z else None)
     exact = ("detection_labels" in z or "detection_labels_shape" in z)
     labels = _decode_labels(z, "detection_labels") if exact else None
     rgb_labels = _decode_labels(z, "detection_rgb_labels")
@@ -586,7 +588,9 @@ def render_frame(root: pathlib.Path, manifest: dict, index: int,
     policy = _decode_mask(z, "policy_mask")
 
   if schema >= 3:
-    native_depth, policy_depth = stored_depth, None
+    # The archive's ``depth`` is the camera's; ``policy_depth`` is present only
+    # when --depth-source replaced it, and is then what the policy saw.
+    native_depth, policy_depth = stored_depth, computed_depth
   else:
     native_depth = sensor_depth if sensor_depth is not None else stored_depth
     policy_depth = stored_depth

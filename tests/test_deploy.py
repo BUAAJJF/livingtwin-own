@@ -2004,6 +2004,40 @@ def test_a_holding_run_still_archives_what_the_camera_saw(tmp_path):
   assert all((writer.dir / m["frame_file"]).exists() for m in meta)
 
 
+def test_recorder_archives_the_computed_depth_beside_the_cameras(tmp_path):
+  """A --depth-source stereo session keeps both maps of every frame.
+
+  The archive's ``depth`` stays the camera's own (schema 3); the depth the
+  policy was given lands in ``policy_depth``.  Both are needed: the run can
+  only be reviewed as the run on the computed map, and the two depth sources
+  can only be compared on identical frames.  A sensor session writes no
+  ``policy_depth`` at all, so a comparison cannot mistake depth for itself.
+  """
+  import json
+  from types import SimpleNamespace
+
+  from hardware.deploy import run, sensor
+
+  writer = run._Recorder(str(tmp_path / "s"), queue_size=8)
+  fb = SimpleNamespace(position=np.zeros(8), velocity=np.zeros(8),
+                       target=np.zeros(8), gripper_effort=0.0)
+  camera = np.full((8, 9), 0.7, np.float32)
+  computed = np.full((8, 9), 0.7042, np.float32)
+  plain = sensor.Frame(depth=camera, gray=np.zeros((8, 9), np.uint8), stamp=0.0, index=0)
+  stereo = sensor.Frame(depth=camera, gray=np.zeros((8, 9), np.uint8), stamp=0.0, index=1)
+  stereo.policy_depth = computed
+  writer.event(fb, np.zeros(7), 0, "command", None, frame=plain)
+  writer.event(fb, np.zeros(7), 0, "command", None, frame=stereo)
+  writer.close()
+
+  meta = json.loads((writer.dir / "meta.json").read_text())
+  first = np.load(writer.dir / meta[0]["frame_file"])
+  second = np.load(writer.dir / meta[1]["frame_file"])
+  assert "policy_depth" not in first.files
+  assert second["depth"][0, 0] == 7000 and second["policy_depth"][0, 0] == 7042
+  assert second["policy_depth"].dtype == np.uint16
+
+
 def test_gripper_sweep_never_commands_the_arm_anywhere():
   import json
 

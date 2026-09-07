@@ -128,6 +128,10 @@ class PcPerception(threading.Thread):
           self.stereo_misses += 1
         else:
           depth = self.stereo(frame.ir, frame.ir_right)
+          # The recorder stores this in preference to the camera's map, so a
+          # session run on computed depth replays and reviews on the depth the
+          # policy was actually given (the mask line does the same).
+          frame.policy_depth = depth
       cf = self.obs(np.asarray(depth, dtype=np.float32))
       extra = None
       if q is not None:

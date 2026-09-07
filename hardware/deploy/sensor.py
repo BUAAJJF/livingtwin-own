@@ -68,9 +68,10 @@ class Frame:
   """The depth the POLICY was given, when that is not ``depth``.
 
   Set by the perception thread when ``--depth-source stereo`` replaces the
-  camera's own map with a computed one.  The recorder writes this in
-  preference to ``depth``, because a recording whose depth is not the run's
-  depth cannot be replayed or reviewed as that run."""
+  camera's own map with a computed one.  The recorder archives it as
+  ``policy_depth`` beside the camera's ``depth``, so a computed-depth session
+  keeps both maps of every frame and can be replayed and reviewed as the run
+  it was."""
   ir_right: np.ndarray | None = None
   """``(480, 848)`` uint8 from the RIGHT infrared imager, or None unless the
   reader was opened with ``stereo=True``.
