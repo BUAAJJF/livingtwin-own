@@ -1,0 +1,172 @@
+{
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1bz6_vision/2026-09-07_02-16-02_pc_gen3_R9_P1BZ6_x2_20260906T1515_finetune/model_1599.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 600,
+  "bounded": true,
+  "action_dim": 7,
+  "frac_sat99": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "frac_sat999": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mean_abs_u": [
+    0.6860217358668645,
+    0.2242852551986774,
+    0.48974588026603066,
+    0.40146865233778956,
+    0.2739685771862666,
+    0.17524506963789463,
+    0.6382848338782787
+  ],
+  "max_abs_u": [
+    1.726766586303711,
+    1.378964900970459,
+    1.7087010145187378,
+    1.5579620599746704,
+    1.5612338781356812,
+    1.0159595012664795,
+    2.5118465423583984
+  ],
+  "mean_abs_da": [
+    0.05547165386503149,
+    0.0897475839382619,
+    0.08748410307555048,
+    0.078360158527186,
+    0.10178559669643292,
+    0.07430101179506922,
+    0.07417078970469695
+  ],
+  "mean_abs_da_all": 0.08018869965746127,
+  "jaw_cmd_mm_mean": 24.694260953304667,
+  "jaw_meas_mm_mean": 27.186570016710903,
+  "jaw_cmd_mm_last100": 24.51601503416896,
+  "jaw_meas_mm_last100": 27.638266403228045,
+  "jaw_end_mm_median": 29.276140213012695,
+  "jaw_end_mm_p10": 14.094887733459473,
+  "gripper_action_hist20": [
+    0.09186848998069763,
+    0.08583984524011612,
+    0.044518228620290756,
+    0.026282552629709244,
+    0.021562499925494194,
+    0.021250000223517418,
+    0.02024739608168602,
+    0.01874348893761635,
+    0.020462239161133766,
+    0.031751301139593124,
+    0.05542968586087227,
+    0.07854166626930237,
+    0.0923958346247673,
+    0.09388020634651184,
+    0.09884114563465118,
+    0.10544271022081375,
+    0.06812500208616257,
+    0.022897135466337204,
+    0.001914062537252903,
+    6.510416824312415e-06
+  ],
+  "terminations": {
+    "over_speed": 17,
+    "object_lost": 44,
+    "object_astray": 91,
+    "nan": 0,
+    "time_out": 0
+  },
+  "terminations_per_arm_minute": {
+    "over_speed": 0.33203125,
+    "object_lost": 0.859375,
+    "object_astray": 1.77734375,
+    "nan": 0.0,
+    "time_out": 0.0
+  },
+  "safe_env_fraction": 0.78515625,
+  "safe_env_fraction_def": "environments with no over_speed and no object_lost termination over the whole rollout",
+  "nonfinite_action_steps": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/pc/eval_actions.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1bz6_vision/2026-09-07_02-16-02_pc_gen3_R9_P1BZ6_x2_20260906T1515_finetune/model_1599.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "600",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen3_R9_P1BZ6_x2_20260906T1515/actions_final_s101.json"
+    ],
+    "weights": {
+      "key": "actor_state_dict",
+      "n_tensors": 56,
+      "iter": 1599,
+      "action_api": {
+        "status": "ok",
+        "api": {
+          "version": 2,
+          "convention": "bounded",
+          "spec_hash": "51c919a9dd2e92db"
+        }
+      },
+      "config_buffers_filled": []
+    }
+  }
+}
