@@ -1,0 +1,90 @@
+{
+  "placed_per_min": [
+    12.65625,
+    17.109375,
+    17.8125,
+    17.8125,
+    19.1015625,
+    19.3359375,
+    20.9765625,
+    19.3359375,
+    16.7578125,
+    16.5234375,
+    18.984375,
+    17.34375
+  ],
+  "early_per_min": 17.3046875,
+  "late_per_min": 18.3203125,
+  "late_over_early": 1.0586907449209932,
+  "started_envs": 108,
+  "stopped_envs": 48,
+  "survivor_fraction": 0.5555555555555556,
+  "survivor_placements_last": 1.1833333333333333,
+  "survivor_placements_first": 1.0,
+  "jaw_mm_stopped": 28.637426905333996,
+  "jaw_mm_running": 30.862899497151375,
+  "checkpoint": "logs/rsl_rl/piperx_pc_p1bz6_distill/2026-09-06_23-37-32_pc_gen3_R9_P1BZ6_x2_20260906T1515_distill/model_2999.pt",
+  "task": "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision",
+  "seed": 101,
+  "num_envs": 256,
+  "steps": 1200,
+  "reset_every": 0,
+  "provenance": {
+    "env_knobs": {
+      "TARGET_VISIBLE_FLOOR": null,
+      "TARGET_VISIBLE_CEIL": null,
+      "TARGET_GAP_SCALE": null,
+      "OBS_LATENCY_PROBS": null,
+      "SMOOTH_SCALE": null,
+      "SIGHT_RAMP": null,
+      "SIGHT_ARM_W": null,
+      "SIGHT_HAND_W": null,
+      "WRIST_W": null,
+      "HELD_PROXY_M": null,
+      "RESET_FULL_RANGE": null,
+      "OBJECT_ASTRAY_TERMINATE": null,
+      "PIPER_X_URDF": null,
+      "PIPER_COLD_START_STAGE": null
+    },
+    "sensor": {
+      "setting": "measured",
+      "camera": {
+        "noise_model": "DepthNoiseCfg",
+        "mask_jitter_px": 0,
+        "strength": 1.35,
+        "surface_fill": [
+          0.78,
+          0.995
+        ],
+        "texture_penalty": [
+          1.0,
+          2.8
+        ]
+      },
+      "camera_pose": {
+        "mode": "reset",
+        "pos_jitter": 0.03,
+        "rot_jitter": 0.05235987755982989
+      }
+    },
+    "argv": [
+      "scripts/eval_endurance.py",
+      "--checkpoint",
+      "logs/rsl_rl/piperx_pc_p1bz6_distill/2026-09-06_23-37-32_pc_gen3_R9_P1BZ6_x2_20260906T1515_distill/model_2999.pt",
+      "--task",
+      "Mjlab-Pick-Place-PiperX-PC-P1BZ6-Vision",
+      "--num-envs",
+      "256",
+      "--steps",
+      "1200",
+      "--seed",
+      "101",
+      "--device",
+      "cuda:5",
+      "--sensor",
+      "measured",
+      "--out",
+      "results/pc/routes/pc_gen3_R9_P1BZ6_x2_20260906T1515/endurance_student_s101.json"
+    ]
+  }
+}
