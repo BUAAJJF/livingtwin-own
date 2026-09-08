@@ -9,9 +9,9 @@
 # ITERS is the absolute iteration target (finetune.py counts that way); the
 # optimizer, the critic and the schedule resume with the checkpoint.
 set -Eeuo pipefail
-ROOT=${ROOT:-/home/yunfan/work/piper-push/LivingTwin}
-MM=${MM:-/home/yunfan/.local/bin/micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=${ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 OUT=${OUT:?set OUT}
 RESUME=${RESUME:?set RESUME}
 TASK=${TASK:?set TASK}
@@ -25,16 +25,14 @@ EVAL_ENVS=${EVAL_ENVS:-256}
 EVAL_SEEDS=${EVAL_SEEDS:-"101 202 303"}
 LONG_STEPS=${LONG_STEPS:-9000}
 cd "$ROOT"
+source "$ROOT/scripts/conda_env.sh"
 [ -e "$OUT" ] && { echo "refusing to reuse $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
 exec >>"$OUT/watcher.log" 2>&1
-ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
-export PATH="$(dirname "$MM"):$PATH"
-export LD_LIBRARY_PATH="$ENV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
+export WANDB_MODE=offline
 unset PIPER_ALLOW_LEGACY_ACTION_API RESET_FULL_RANGE
 TRAIN_ENV=${TRAIN_ENV:-}   # knobs for the fine-tune only; the evaluation runs the standard ruler
-PY="$MM run -n $ENV_NAME python -u"
+PY="python -u"
 say() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 RSHA=$(sha256sum "$RESUME" | cut -d' ' -f1)
 cat >"$OUT/manifest.json" <<JSON

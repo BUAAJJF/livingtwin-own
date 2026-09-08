@@ -10,9 +10,9 @@
 #                      eval_occlusion 256 x 300 (engaged); eval_actions 256 x 600
 # Nothing is loaded through a legacy path: no -V1 id, no PIPER_ALLOW_LEGACY_ACTION_API.
 set -Eeuo pipefail
-ROOT=${ROOT:-/home/yunfan/work/piper-push/LivingTwin}
-MM=${MM:-/home/yunfan/.local/bin/micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=${ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 TAG=${TAG:?set TAG}
 GPU=${GPU:?set GPU}
 CKPT=${CKPT:?set CKPT}
@@ -22,11 +22,8 @@ SEEDS=${SEEDS:-"101 202 303"}
 ENVS=${ENVS:-256}
 OUT=${OUT:-results/pc/teacher_eval/$TAG}
 cd "$ROOT"
-ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
-[ -n "$ENV_PREFIX" ] || { echo "no micromamba env named $ENV_NAME" >&2; exit 2; }
-export PATH="$(dirname "$MM"):$PATH"
-export LD_LIBRARY_PATH="$ENV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
+source "$ROOT/scripts/conda_env.sh"
+export WANDB_MODE=offline
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 unset PIPER_ALLOW_LEGACY_ACTION_API RESET_FULL_RANGE
 mkdir -p "$OUT"
@@ -39,7 +36,7 @@ cat >"$OUT/manifest.json" <<JSON
  "started": "$(date -Is)", "host": "$(hostname)"}
 JSON
 say "teacher $TAG  ckpt $CKPT  sha256 $sha  gpu $GPU"
-PY="$MM run -n $ENV_NAME python -u"
+PY="python -u"
 
 chain_a() {
   for s in $SEEDS; do

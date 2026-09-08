@@ -7,26 +7,28 @@
 #
 # Environment:
 #   TASK        mjlab task id         (default: Mjlab-Pick-Place-PiperX)
-#   MJLAB_ENV   micromamba env name   (default: mjlab)
+#   CONDA_ENV   Conda environment name (default: livingtwin)
 #   NUM_ENVS    envs to render        (default: 4)
 #   DEVICE      torch device          (default: cuda:0)
 #   VIEWER      native | viser | auto (default: auto)
 set -Eeuo pipefail
 
 TASK=${TASK:-Mjlab-Pick-Place-PiperX}
-MJLAB_ENV=${MJLAB_ENV:-mjlab}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 NUM_ENVS=${NUM_ENVS:-4}
 DEVICE=${DEVICE:-cuda:0}
 VIEWER=${VIEWER:-auto}
 
 cd "$(dirname "$0")/.."
+ROOT=$PWD
+source "$ROOT/scripts/conda_env.sh"
 
 if [ $# -ge 1 ]; then
-  exec micromamba run -n "$MJLAB_ENV" play "$TASK" \
+  exec play "$TASK" \
     --checkpoint-file "$1" --num-envs "$NUM_ENVS" \
     --device "$DEVICE" --viewer "$VIEWER" "${@:2}"
 else
-  exec micromamba run -n "$MJLAB_ENV" play "$TASK" \
+  exec play "$TASK" \
     --agent zero --num-envs "$NUM_ENVS" \
     --device "$DEVICE" --viewer "$VIEWER"
 fi

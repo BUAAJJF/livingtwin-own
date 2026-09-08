@@ -5,9 +5,12 @@
 #   scripts/pc/robustness_sweep.sh <checkpoint> <task> <out dir> [device]
 set -Eeuo pipefail
 CK=$1; TASK=$2; OUT=$3; DEV=${4:-cuda:0}
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$ROOT"
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
+source "$ROOT/scripts/conda_env.sh"
 mkdir -p "$OUT"
-export MUJOCO_GL=disable PYTHONUNBUFFERED=1
-PY="micromamba run -n mjlab python -u"
+PY="python -u"
 LEVELS=${LEVELS:-"none plane=0.004 plane=-0.004 plane=0.008 drop=0.3 drop=0.6 offset=0.01 offset=0.02 jitter=0.005 noise=1.5 noise=2.0 campos=0.02,camrot=2 campos=0.04,camrot=4"}
 for lv in $LEVELS; do
   name=$(echo "$lv" | tr '=,' '_-')

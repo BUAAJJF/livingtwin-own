@@ -56,9 +56,10 @@ SPEED=${SPEED:-0.9}
 # of RAM) rides out any stall.  A run is still never left unlogged.
 RECORD_FLAGS=${RECORD_FLAGS:---no-record-compress --record-queue 600}
 cd "$(dirname "$0")/../.."
-export MUJOCO_GL=disable
-export LD_LIBRARY_PATH="${MAMBA_ROOT:-$HOME/micromamba}/envs/mjlab/lib:${LD_LIBRARY_PATH:-}"
-M="micromamba run -n mjlab python"
+ROOT=$PWD
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
+source "$ROOT/scripts/conda_env.sh"
+M="python"
 STAMP=$(date +%Y%m%dT%H%M%S)
 NAME=$(basename "$POLICY")
 [ "$DEPTH" = sensor ] || NAME="${NAME}_${DEPTH}"

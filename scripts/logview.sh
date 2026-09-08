@@ -9,9 +9,10 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 
-MM_BIN=${MM_BIN:-micromamba}
-MJLAB_ENV=${MJLAB_ENV:-mjlab}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 PORT=${PORT:-8765}
+ROOT=$PWD
+source "$ROOT/scripts/conda_env.sh"
 
-exec "$MM_BIN" run -a "" -n "$MJLAB_ENV" python -u \
+exec python -u \
   -m hardware.deploy.logview --port "$PORT" "$@"

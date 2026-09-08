@@ -12,9 +12,9 @@
 # spec by every loader.  Nothing here edits a config after launch: every knob is
 # an environment variable recorded in manifest.json before the first stage.
 set -Eeuo pipefail
-ROOT=${ROOT:-/home/yunfan/work/piper-push/LivingTwin}
-MM=${MM:-/home/yunfan/.local/bin/micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=${ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 TAG=${TAG:?set TAG}
 ROUTE=${ROUTE:?set ROUTE (P0 P1A P1B P2)}
 GPU=${GPU:?set GPU}
@@ -48,19 +48,16 @@ LONG_SEEDS=${LONG_SEEDS:-"101 202 303"}
 VIEWER_STEPS=${VIEWER_STEPS:-3000}
 VIEWER_SEEDS=${VIEWER_SEEDS:-"101 202"}
 cd "$ROOT"
+source "$ROOT/scripts/conda_env.sh"
 [ -e "$OUT" ] && { echo "refusing to reuse $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
 if [ "$PC_ROUTE" = true ]; then
-  ORACLE=$("$MM" run -n "$ENV_NAME" python -c "from piper_push.pc import routes; print('true' if routes.is_oracle('$ROUTE') else 'false')" 2>/dev/null || echo unknown)
+  ORACLE=$(python -c "from piper_push.pc import routes; print('true' if routes.is_oracle('$ROUTE') else 'false')" 2>/dev/null || echo unknown)
   [ "$ORACLE" = true ] || [ "$ORACLE" = false ] || { echo "route $ROUTE unknown to piper_push.pc.routes" >&2; exit 2; }
 else
   ORACLE=false
 fi
-ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
-[ -n "$ENV_PREFIX" ] || { echo "no micromamba env named $ENV_NAME" >&2; exit 2; }
-export PATH="$(dirname "$MM"):$PATH"
-export LD_LIBRARY_PATH="$ENV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
+export WANDB_MODE=offline
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 export PIPER_U_TELEMETRY="$OUT/u_telemetry.jsonl"
 unset PIPER_ALLOW_LEGACY_ACTION_API RESET_FULL_RANGE
@@ -80,7 +77,7 @@ mark_done()  {
   date -Is >"$(marker "$1")"
   printf '{"stage": "%s", "started": %d, "finished": %d, "seconds": %d, "gpu": %d}\n' "$1" "$STAGE_T0" "$now" "$((now - STAGE_T0))" "$GPU" >>"$OUT/timing.jsonl"
 }
-PY="$MM run -n $ENV_NAME python -u"
+PY="python -u"
 latest_checkpoint() {
   local run=$1 file
   file=$(find "$run" -maxdepth 1 -type f -name 'model_*.pt' -printf '%f\n' | sort -V | tail -n 1)

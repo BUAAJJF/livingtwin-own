@@ -18,9 +18,9 @@
 # (scripts/pc/eval_teacher.sh) is run on the final checkpoint and on any
 # checkpoint whose one-seed late/early clears the gate.
 set -Eeuo pipefail
-ROOT=${ROOT:-/home/yunfan/work/piper-push/LivingTwin}
-MM=${MM:-/home/yunfan/.local/bin/micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=${ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 TAG=${TAG:?set TAG}
 GPU=${GPU:?set GPU}
 BASE=${BASE:?set BASE checkpoint}
@@ -36,18 +36,15 @@ OUT=${OUT:-results/pc/teacher/$TAG}
 EXP=piperx_pick_place_robust_cold
 if [ "$SIGHT" = "1" ]; then TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; else TASK=Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight; fi
 cd "$ROOT"
+source "$ROOT/scripts/conda_env.sh"
 [ -e "$OUT" ] && { echo "refusing to reuse $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
-ENV_PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
-[ -n "$ENV_PREFIX" ] || { echo "no micromamba env named $ENV_NAME" >&2; exit 2; }
-export PATH="$(dirname "$MM"):$PATH"
-export LD_LIBRARY_PATH="$ENV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export MUJOCO_GL=disable WANDB_MODE=offline PYTHONUNBUFFERED=1
+export WANDB_MODE=offline
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 unset PIPER_ALLOW_LEGACY_ACTION_API
 say()  { printf '[%s] %s\n' "$(date -Is)" "$*"; }
 fail() { printf '[%s] FAILED: %s\n' "$(date -Is)" "$*" >&2; date -Is >"$OUT/FAILED"; exit 1; }
-PY="$MM run -n $ENV_NAME python -u"
+PY="python -u"
 [ -f "$BASE" ] || fail "no base checkpoint at $BASE"
 BSHA=$(sha256sum "$BASE" | cut -d' ' -f1)
 start_name=$(basename "$BASE")

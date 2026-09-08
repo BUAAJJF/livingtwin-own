@@ -4,7 +4,7 @@
 #   scripts/eval.sh <TaskId> <checkpoint> <label> [extra accept_s1 flags...]
 #
 # Environment:
-#   MJLAB_ENV   micromamba env name        (default: mjlab)
+#   CONDA_ENV   Conda environment name     (default: livingtwin)
 #   GPU         cuda device index          (default: 0)
 #   NUM_ENVS    parallel environments      (default: 512)
 #   STEPS       control steps              (default: 2400)
@@ -24,7 +24,7 @@ fi
 
 TASK=$1; CKPT=$2; LABEL=$3; shift 3
 
-MJLAB_ENV=${MJLAB_ENV:-mjlab}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
 GPU=${GPU:-0}
 NUM_ENVS=${NUM_ENVS:-512}
 STEPS=${STEPS:-2400}
@@ -32,23 +32,14 @@ SEED=${SEED:-20260823}
 OUT=${OUT:-results/eval/baseline}
 
 cd "$(dirname "$0")/.."
+ROOT=$PWD
+source "$ROOT/scripts/conda_env.sh"
 
 # The camera sensors go through mujoco_warp's rasteriser and need no GL at
 # all; importing mujoco still initialises a backend, which fails on a box
 # without glvnd's libEGL.so.1.
-export MUJOCO_GL=${MUJOCO_GL:-disable}
-
-# The env ships libicui18n.so.78, which wants CXXABI_1.3.15, and the system
-# libstdc++ under /lib/x86_64-linux-gnu does not have it.  Without this the
-# loader picks the system one and `import sqlite3` dies inside mjlab's own
-# import of mediapy -> IPython.  `micromamba run` does not set this; an
-# interactive `micromamba activate` does, which is why this only bites
-# non-interactive invocations.
-PREFIX="$(micromamba env list | awk -v e="$MJLAB_ENV" '$1==e {print $NF}')"
-[ -n "$PREFIX" ] && export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
-
 mkdir -p "$OUT"
-exec micromamba run -n "$MJLAB_ENV" python scripts/accept_s1.py \
+exec python scripts/accept_s1.py \
   "$TASK" "$CKPT" \
   --num-envs "$NUM_ENVS" \
   --steps "$STEPS" \

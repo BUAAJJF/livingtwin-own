@@ -23,8 +23,6 @@ TE=${2:-}
 OUT=${3:-results/student_accept/$(basename "${ST%.pt}")}
 DEV=${DEV:-cuda:0}
 SEEDS=${SEEDS:-"11 33 44 55 66"}
-MM=${MM:-micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
 # Students distilled before 2026-09-05 were trained under the unbounded action
 # convention and need TASK=Mjlab-Pick-Place-PiperX-Distill-Robust-V1; the
 # default id raises at the first step for them.
@@ -50,27 +48,32 @@ if [ -f "$DOMAIN_ENV" ]; then
 else
   echo "domain: no $DOMAIN_ENV; evaluating under the defaults of $TASK"
 fi
-export MUJOCO_GL=disable PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
+source "$ROOT/scripts/conda_env.sh"
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 mkdir -p "$OUT"
 say() { printf '\n===== %s\n' "$*"; }
+PY="python -u"
 
 say "1. endurance (no reset, which is what the arm does)"
-$MM run -n "$ENV_NAME" python scripts/eval_endurance.py --checkpoint "$ST" \
+$PY scripts/eval_endurance.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps ${STEPS:-1200} --device "$DEV" --seed 101 \
   --sensor "$SENSOR" \
   --out "$OUT/endurance.json" 2>&1 | grep -aE "^placed/min|^early |^of |^survivors|^final jaw"
 # The control.  If resetting inside the training horizon restores the rate,
 # the decay is the policy leaving its distribution rather than the task
 # getting harder -- that distinction cost a session to establish once.
-$MM run -n "$ENV_NAME" python scripts/eval_endurance.py --checkpoint "$ST" \
+$PY scripts/eval_endurance.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps ${STEPS:-1200} --reset-every 300 --device "$DEV" \
   --seed 101 --sensor "$SENSOR" --out "$OUT/endurance_reset.json" 2>&1 | grep -aE "^early "
 
 say "2. occlusion while engaged (300 steps: before any collapse)"
-$MM run -n "$ENV_NAME" python scripts/eval_occlusion.py --checkpoint "$ST" \
+$PY scripts/eval_occlusion.py --checkpoint "$ST" \
   --task "$TASK" --num-envs ${ENVS:-128} --steps 300 --device "$DEV" --seed 101 \
   --sensor "$SENSOR" --out "$OUT/occlusion.json" >/dev/null 2>&1 || true
-$MM run -n "$ENV_NAME" python -c "
+$PY -c "
 import json; d=json.load(open('$OUT/occlusion.json')); e=d['engaged']
 print('engaged blocked %.1f%%  visible %.3f  engaged frames %.0f%%  placed/min %.1f'
       % (100*e['blocked_rate'], e['visible_mean'],
@@ -82,11 +85,11 @@ if [ -n "$TE" ]; then
   # the state task can run; the student imitates it, so this is the domain the
   # student will deploy into.
   for s in $SEEDS; do
-    $MM run -n "$ENV_NAME" python scripts/sim_perception_check.py --steps 300 \
+    $PY scripts/sim_perception_check.py --steps 300 \
       --policy "$TE" --sam --seed "$s" --device "$DEV" \
       --out "$OUT/perc_seed$s.json" >/dev/null 2>&1 || true
   done
-  $MM run -n "$ENV_NAME" python -c "
+  $PY -c "
 import glob, json, numpy as np
 rows = [json.load(open(f)) for f in sorted(glob.glob('$OUT/perc_seed*.json'))]
 for ph in ('approach','holding'):
@@ -98,7 +101,7 @@ for ph in ('approach','holding'):
 fi
 
 say "4. the per-frame page"
-$MM run -n "$ENV_NAME" python scripts/sight_viewer.py \
+$PY scripts/sight_viewer.py \
   --checkpoint "student=$ST@$TASK" ${TE:+--checkpoint "teacher=$TE"} \
   --steps 300 --seed 101 --device "$DEV" --out "$OUT/frames.html" 2>&1 | tail -3
 

@@ -28,7 +28,10 @@ simulator's action term did the same, and the `actions` observation is
 No drive is ever enabled by `pc_run.py`.  Three joint sources:
 
 ```bash
-M="micromamba run -n mjlab python"
+# 本机：脚本会激活 Conda livingtwin；远端实验室主机可让 conda_env.sh
+# 自动回退到它已有的 micromamba mjlab 环境。
+source scripts/conda_env.sh
+M="python"
 # 1. recorded D455 session + its recorded joints, on the recording's own 30 Hz clock
 $M -m hardware.deploy.pc_run --policy hardware/deploy/policies/<bundle> \
     --replay recordings/v4_stereo_try3 --seconds 30 --record recordings/pc_shadow_replay_<try>
@@ -97,11 +100,11 @@ clear, and ONE textured object of the trained size class on the mat.
 
    ```bash
    # 4a. the loop on the rig with the real camera and the DRY arm first (no CAN, nothing moves)
-   micromamba run -n mjlab python -m hardware.deploy.run --obs pc \
+   python -m hardware.deploy.run --obs pc \
        --policy hardware/deploy/policies/pc_P1B_20260906T0319 --camera d455 --no-arm \
        --seconds 20 --record recordings/pc_noarm_<try>
    # 4b. first motion: e-stop in hand, one object, low rate, guarded.  The run asks for the word `move`.
-   micromamba run -n mjlab python -m hardware.deploy.run --obs pc \
+   python -m hardware.deploy.run --obs pc \
        --policy hardware/deploy/policies/pc_P1B_20260906T0319 --camera d455 --policy-device cuda \
        --home-first --command-rate-scale 0.5 --max-joint-speed-fraction 0.6 \
        --seconds 20 --record recordings/pc_motion_<try>

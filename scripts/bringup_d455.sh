@@ -20,8 +20,8 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-MM=${MM:-micromamba}
-ENV_NAME=${ENV_NAME:-mjlab}
+CONDA_ENV=${CONDA_ENV:-${MJLAB_ENV:-livingtwin}}
+source "$ROOT/scripts/conda_env.sh"
 
 # The deployment task.  NOT the distillation task, and not "whatever the
 # checkpoint came from" -- a distillation checkpoint is converted to an actor
@@ -47,10 +47,7 @@ fi
 DEST=hardware/deploy/policies/$NAME
 STAMP=$(date -Is)
 
-export MUJOCO_GL=${MUJOCO_GL:-disable}
-PREFIX=$("$MM" env list | awk -v e="$ENV_NAME" '$1==e {print $NF}')
-[ -n "$PREFIX" ] && export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
-M=("$MM" run -n "$ENV_NAME" python -u)
+M=(python -u)
 
 say() { printf '\n=== %s\n' "$*"; }
 fail() { printf '\nNO-GO: %s\n' "$*" >&2; exit 1; }
@@ -172,14 +169,14 @@ matter, in this order.
      A fresh solve is NOT the safe default: piper_push.camera is pinned to the
      2026-08-26 D455 hand-eye result and this policy was trained for it.
 
-       $MM run -n $ENV_NAME python -m hardware.deploy.rig_check \\
+       python -m hardware.deploy.rig_check \\
          --camera $CAMERA --table-only
 
   2. The dress rehearsal.  Real camera, real perception, real policy, real
      guard evaluation -- and DryRunArm, so the arm does not move at all.  This
      is where the height floor gets chosen, not on the arm.
 
-       $MM run -n $ENV_NAME python -m hardware.deploy.run \\
+       python -m hardware.deploy.run \\
          --policy $DEST --camera $CAMERA --device cuda \\
          --no-arm --seconds 60 --record recordings/${NAME}_noarm_try1 \\
          --min-grasp-height 0.05 --guard-mode hold

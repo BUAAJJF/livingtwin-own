@@ -68,29 +68,41 @@ distill eval → finetune → 3-seed eval + held-out + actions + occlusion →
 export) into `results/pc/routes/<tag>/` with a manifest; `scripts/pc/report_routes.py`
 tabulates the routes and applies the deployment gate.
 
-## Setup
+单卡运行 v10c teacher（训练本身只占用指定的一张卡；三个评估 seed 会在同一张卡上依次执行）：
 
 ```bash
-git clone --recurse-submodules <this repo> && cd LivingTwin
-micromamba create -y -n mjlab -c conda-forge python=3.11 pip
-micromamba run -n mjlab pip install "mjlab==1.6.0"
-micromamba run -n mjlab pip install -e .
-micromamba run -n mjlab list-envs --keyword Pick
+TAG=v10c_local_nosight SIGHT=0 GPU=0 bash scripts/run_v10c.sh
 ```
 
-Two settings any non-interactive run needs (both baked into `scripts/eval.sh`
-and the `scripts/pc/*.sh` drivers):
+## Setup
+
+本地训练和评估使用已有的 Conda 环境 `livingtwin`。先进入仓库并激活环境：
+
+```bash
+conda activate livingtwin
+cd /home/yhh/LivingTwin
+python -m pip install -e .       # 若仓库已安装，可跳过
+list-envs --keyword Pick
+```
+
+所有本地 `scripts/*.sh` 和 `scripts/pc/*.sh` 都会自行调用
+`scripts/conda_env.sh` 激活该环境，因此 `nohup`/`setsid` 也不依赖当前 shell
+是否已经激活。也可以用 `CONDA_ENV=<name>` 临时切换环境。
+`scripts/pc/launch_gen2.sh` 和 `launch_gen3.sh` 是 SSH 编排脚本，实际训练仍在
+实验室主机的 micromamba `mjlab` 环境中运行；同步过去的脚本会自动回退到该环境。
+
+两个无交互运行需要的设置已经由脚本自动设置（也可以手动确认）：
 
 ```bash
 export MUJOCO_GL=disable                       # mujoco initialises a GL backend it never uses
-export LD_LIBRARY_PATH=$MAMBA_ROOT/envs/mjlab/lib:$LD_LIBRARY_PATH   # libicui18n.so.78 needs CXXABI_1.3.15
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH             # Conda runtime libraries
 ```
 
 ## Evaluate, test
 
 ```bash
 scripts/eval.sh Mjlab-Pick-Place-PiperX-PC-P1B-Vision <checkpoint.pt> my_run   # accept_s1, 512 x 2400, provenance JSON
-micromamba run -n mjlab python -m pytest tests -q                                # 408 tests, ~35 s
+python -m pytest tests -q                                                        # 408 tests, ~35 s
 ```
 
 Every evaluation goes through `piper_push.evalcfg.load_weights` (raises if the
@@ -108,14 +120,14 @@ needs the physical emergency stop in hand, a clear workspace, a **fresh**
 `--record` directory and the typed word `move`. Restore the table first:
 
 ```bash
-micromamba run -n mjlab python -m hardware.deploy.scene --like recordings/v4_stereo_try3
+python -m hardware.deploy.scene --like recordings/v4_stereo_try3
 ```
 
 The rollback, the only policy that has placed objects on the arm (mask
 pipeline, Action API v1):
 
 ```bash
-micromamba run -n mjlab python -m hardware.deploy.run \
+python -m hardware.deploy.run \
     --policy hardware/deploy/policies/d455_v4_final \
     --camera d455 --mask depth --policy-device cpu \
     --record recordings/<fresh dir> --seconds 20 \
@@ -131,7 +143,7 @@ point-cloud bundle runs through the same guarded loop with `--obs pc` (the
 mask-only flags are refused):
 
 ```bash
-micromamba run -n mjlab python -m hardware.deploy.run --obs pc \
+python -m hardware.deploy.run --obs pc \
     --policy hardware/deploy/policies/pc_P1B_20260906T0319 --camera d455 --no-arm \
     --seconds 20 --record recordings/pc_noarm_<try>          # camera + dry arm first
 ```
