@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from dataclasses import asdict
@@ -41,6 +42,8 @@ def main() -> int:
   configure_torch_backends()
 
   task = f"Mjlab-Pick-Place-PiperX-PC-{a.route}-Distill"
+  if os.environ.get("MASS_GT", "0") == "1":
+    task += "-Mass"
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = a.num_envs
   cfg.episode_length_s = 36.0

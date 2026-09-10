@@ -21,6 +21,8 @@ GPU=${GPU:?set GPU}
 TEACHER=${TEACHER:?set TEACHER checkpoint}
 COMMIT=${COMMIT:-unknown}
 SEED=${SEED:-42}
+MASS_GT=${MASS_GT:-0}
+export MASS_GT
 EVAL_SEEDS=${EVAL_SEEDS:-"101 202 303"}
 VISION_ENVS=${VISION_ENVS:-512}
 DISTILL_ITERS=${DISTILL_ITERS:-1500}
@@ -42,6 +44,11 @@ else
   VISION_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision
   HELDOUT_TASK=Mjlab-Pick-Place-PiperX-PC-$ROUTE-Vision-Heldout
   PC_ROUTE=true
+fi
+if [ "$MASS_GT" = 1 ]; then
+  DISTILL_TASK="${DISTILL_TASK}-Mass"
+  VISION_TASK="${VISION_TASK}-Mass"
+  [ -n "$HELDOUT_TASK" ] && HELDOUT_TASK="${HELDOUT_TASK}-Mass"
 fi
 LONG_STEPS=${LONG_STEPS:-9000}
 LONG_SEEDS=${LONG_SEEDS:-"101 202 303"}
@@ -113,7 +120,7 @@ cat >"$OUT/manifest.json" <<JSON
  "budget": {"steps_per_env_per_iter": $STEPS_PER_ITER, "distill_env_steps": $DISTILL_ENV_STEPS, "finetune_env_steps": $FINETUNE_ENV_STEPS,
             "distill_gradient_length": $GRAD_LEN, "distill_optimizer_updates": $DISTILL_UPDATES,
             "finetune_optimizer_updates": $FINETUNE_UPDATES, "finetune_epochs_x_minibatches": "5x4"},
- "distill_task": "$DISTILL_TASK", "vision_task": "$VISION_TASK", "heldout_task": "$HELDOUT_TASK",
+ "mass_gt": "$MASS_GT", "distill_task": "$DISTILL_TASK", "vision_task": "$VISION_TASK", "heldout_task": "$HELDOUT_TASK",
  "train_env": "$TRAIN_ENV",
  "gpu_name": "$(nvidia-smi --query-gpu=name --format=csv,noheader -i "$GPU" 2>/dev/null | head -n 1)",
  "started": "$(date -Is)", "host": "$(hostname)"}

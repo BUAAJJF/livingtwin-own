@@ -18,6 +18,7 @@ from piper_push.runners import PickPlaceOnPolicyRunner
 from .rl_cfg import (
   V10D_ENTROPY_COEF,
   V10D_STD_MIN,
+  pick_place_mass_ppo_runner_cfg,
   pick_place_distill_runner_cfg,
   pick_place_ppo_runner_cfg,
   pick_place_vision_ppo_runner_cfg,
@@ -39,6 +40,17 @@ register_mjlab_task(
   env_cfg=make_robust_env_cfg(),
   play_env_cfg=make_robust_env_cfg(play=True),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust"),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+
+# Mass-conditioned state teacher.  This is a separate task ID so the original
+# actor input and checkpoints remain a fair baseline; only the actor receives
+# the clean ``mass`` group, while the critic keeps ``privileged`` unchanged.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Mass",
+  env_cfg=make_robust_env_cfg(mass_gt=True),
+  play_env_cfg=make_robust_env_cfg(play=True, mass_gt=True),
+  rl_cfg=pick_place_mass_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_mass"),
   runner_cls=PickPlaceOnPolicyRunner,
 )
 
@@ -86,6 +98,17 @@ register_mjlab_task(
   runner_cls=PickPlaceOnPolicyRunner,
 )
 
+# Mass-conditioned vision branch.  Keep the original vision task IDs intact;
+# this parallel branch is the Stage-B/C route from the physical-memory plan.
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Vision-Robust-Mass",
+  env_cfg=make_robust_env_cfg(vision=True, mass_gt=True),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True, mass_gt=True),
+  rl_cfg=pick_place_vision_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_vision_robust_mass", mass_gt=True),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+
 
 # The bootstrap.  Same environment as the vision task plus one extra
 # observation group: the proprioception the state teacher was trained on, which
@@ -107,6 +130,15 @@ register_mjlab_task(
   play_env_cfg=make_robust_env_cfg(play=True, vision=True),
   rl_cfg=pick_place_distill_runner_cfg(
     experiment_name="piperx_pick_place_distill_robust"),
+  runner_cls=PickPlaceDistillationRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Distill-Robust-Mass",
+  env_cfg=make_robust_env_cfg(vision=True, mass_gt=True),
+  play_env_cfg=make_robust_env_cfg(play=True, vision=True, mass_gt=True),
+  rl_cfg=pick_place_distill_runner_cfg(
+    experiment_name="piperx_pick_place_distill_robust_mass", mass_gt=True),
   runner_cls=PickPlaceDistillationRunner,
 )
 
@@ -324,6 +356,23 @@ register_mjlab_task(
   runner_cls=PickPlaceOnPolicyRunner,
 )
 
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold-Mass",
+  env_cfg=make_cold_env_cfg(sight=True, mass_gt=True),
+  play_env_cfg=make_cold_env_cfg(sight=True, play=True, mass_gt=True),
+  rl_cfg=pick_place_mass_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_robust_cold_mass", max_iterations=9000),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold-Mass-NoSight",
+  env_cfg=make_cold_env_cfg(sight=False, mass_gt=True),
+  play_env_cfg=make_cold_env_cfg(sight=False, play=True, mass_gt=True),
+  rl_cfg=pick_place_mass_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_robust_cold_mass", max_iterations=9000),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+
 # v10d: the cold-start curriculum plus the approach terms (slow arrival, object
 # undisturbed, top-down wrist).  Play mode is -Robust plus the same three
 # terms at zero weight, purely so they are logged during evaluation.
@@ -341,6 +390,25 @@ register_mjlab_task(
   play_env_cfg=make_cold_env_cfg(sight=False, play=True, approach=True),
   rl_cfg=pick_place_ppo_runner_cfg(experiment_name="piperx_pick_place_robust_cold2", max_iterations=9000,
                                    entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold2-Mass",
+  env_cfg=make_cold_env_cfg(sight=True, approach=True, mass_gt=True),
+  play_env_cfg=make_cold_env_cfg(sight=True, play=True, approach=True, mass_gt=True),
+  rl_cfg=pick_place_mass_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_robust_cold2_mass", max_iterations=9000,
+    entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
+  runner_cls=PickPlaceOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-Pick-Place-PiperX-Robust-Cold2-Mass-NoSight",
+  env_cfg=make_cold_env_cfg(sight=False, approach=True, mass_gt=True),
+  play_env_cfg=make_cold_env_cfg(sight=False, play=True, approach=True, mass_gt=True),
+  rl_cfg=pick_place_mass_ppo_runner_cfg(
+    experiment_name="piperx_pick_place_robust_cold2_mass", max_iterations=9000,
+    entropy_coef=V10D_ENTROPY_COEF, std_min=V10D_STD_MIN),
   runner_cls=PickPlaceOnPolicyRunner,
 )
 

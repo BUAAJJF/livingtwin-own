@@ -26,6 +26,7 @@ GPU=${GPU:?set GPU}
 BASE=${BASE:?set BASE checkpoint}
 COMMIT=${COMMIT:-unknown}
 SIGHT=${SIGHT:-0}
+MASS_GT=${MASS_GT:-0}
 NUM_ENVS=${NUM_ENVS:-8192}
 ITERS=${ITERS:-2000}
 EPISODE_S=${EPISODE_S:-36.0}
@@ -34,7 +35,13 @@ EVAL_EVERY=${EVAL_EVERY:-250}
 GATE=${GATE:-0.85}
 OUT=${OUT:-results/pc/teacher/$TAG}
 EXP=piperx_pick_place_robust_cold
-if [ "$SIGHT" = "1" ]; then TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; else TASK=Mjlab-Pick-Place-PiperX-Robust-Cold-NoSight; fi
+TASK=Mjlab-Pick-Place-PiperX-Robust-Cold
+if [ "$MASS_GT" = "1" ]; then
+  TASK=${TASK}-Mass
+  EXP=piperx_pick_place_robust_cold_mass
+fi
+if [ "$SIGHT" != "1" ]; then TASK=${TASK}-NoSight; fi
+if [ "$MASS_GT" = "1" ]; then EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust-Mass; else EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust; fi
 cd "$ROOT"
 source "$ROOT/scripts/conda_env.sh"
 [ -e "$OUT" ] && { echo "refusing to reuse $OUT" >&2; exit 2; }
@@ -52,7 +59,7 @@ bootstrap="logs/rsl_rl/$EXP/${TAG}_bootstrap"
 mkdir -p "$bootstrap"
 cp "$BASE" "$bootstrap/$start_name"
 cat >"$OUT/manifest.json" <<JSON
-{"tag": "$TAG", "task": "$TASK", "gpu": $GPU, "base": "$BASE", "base_sha256": "$BSHA",
+{"tag": "$TAG", "task": "$TASK", "mass_gt": "$MASS_GT", "gpu": $GPU, "base": "$BASE", "base_sha256": "$BSHA",
  "code_commit_local": "$COMMIT", "remote_git_head": "$(git rev-parse HEAD)",
  "num_envs": $NUM_ENVS, "additional_iterations": $ITERS, "episode_s": $EPISODE_S,
  "env": {"RESET_FULL_RANGE": "1", "WRIST_W": "0.30", "PIPER_COLD_START_STAGE": "$START_STAGE", "SMOOTH_SCALE": "unset (1.0)"},
@@ -62,7 +69,7 @@ say "continue $TAG from $BASE (sha256 $BSHA) on $TASK, +$ITERS iterations, episo
 
 # -- training, in the background ----------------------------------------------
 (
-  export RESET_FULL_RANGE=1 WRIST_W=0.30 PIPER_COLD_START_STAGE=$START_STAGE \
+  export RESET_FULL_RANGE=1 WRIST_W=0.30 PIPER_COLD_START_STAGE=$START_STAGE MASS_GT=$MASS_GT \
          PIPER_CURRICULUM_LOG="$OUT/curriculum.jsonl" PIPER_U_TELEMETRY="$OUT/u_telemetry.jsonl" PIPER_U_TELEMETRY_TAG=teacher
   TASK=$TASK NUM_ENVS=$NUM_ENVS ITERS=$ITERS GPUS="[$GPU]" RUN_NAME="${TAG}_teacher" \
     bash scripts/train.sh --agent.resume True --agent.load-run "$(basename "$bootstrap")" \
@@ -93,10 +100,10 @@ while kill -0 "$TRAIN_PID" 2>/dev/null; do
     # the trainer may still be writing it
     sleep 5
     say "periodic endurance on $ck"
-    RESET_FULL_RANGE=1 $PY scripts/eval_endurance.py --checkpoint "$ck" --task Mjlab-Pick-Place-PiperX-Robust \
+    RESET_FULL_RANGE=1 MASS_GT=$MASS_GT $PY scripts/eval_endurance.py --checkpoint "$ck" --task "$EVAL_TASK" \
       --num-envs 128 --steps 1200 --seed 101 --device "cuda:$GPU" --sensor measured \
       --out "$OUT/periodic_full_$it.json" >"$OUT/periodic_full_$it.log" 2>&1 || say "periodic eval $it failed"
-    $PY scripts/eval_endurance.py --checkpoint "$ck" --task Mjlab-Pick-Place-PiperX-Robust \
+    MASS_GT=$MASS_GT $PY scripts/eval_endurance.py --checkpoint "$ck" --task "$EVAL_TASK" \
       --num-envs 128 --steps 1200 --seed 101 --device "cuda:$GPU" --sensor measured \
       --out "$OUT/periodic_narrow_$it.json" >"$OUT/periodic_narrow_$it.log" 2>&1 || say "periodic eval $it failed"
     done_evals="$done_evals $it"
@@ -113,6 +120,6 @@ rd=$(run_dir)
 final=$(ls "$rd"/model_*.pt | sort -V | tail -n 1)
 printf '%s\n' "$final" >"$OUT/final_checkpoint.txt"
 say "final checkpoint $final; full three-seed screen"
-TAG="${TAG}_final" GPU=$GPU CKPT="$final" COMMIT=$COMMIT OUT="$OUT/screen_final" bash scripts/pc/eval_teacher.sh >"$OUT/screen_final.log" 2>&1 || say "screen failed"
+TAG="${TAG}_final" GPU=$GPU CKPT="$final" TASK="$EVAL_TASK" COMMIT=$COMMIT OUT="$OUT/screen_final" bash scripts/pc/eval_teacher.sh >"$OUT/screen_final.log" 2>&1 || say "screen failed"
 say "done"
 date -Is >"$OUT/all.done"

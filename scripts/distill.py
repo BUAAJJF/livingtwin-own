@@ -66,7 +66,7 @@ def main() -> int:
                       "must therefore also be rolled out over, or it inherits "
                       "the blind spot instead of the behaviour.")
   p.add_argument("--log-root", default="logs/rsl_rl")
-  p.add_argument("--logger", default="wandb", choices=("wandb", "tensorboard"))
+  p.add_argument("--logger", default="tensorboard", choices=("wandb", "tensorboard"))
   from piper_push import evalcfg as _evalcfg  # noqa: E402
   _evalcfg.add_action_api_arg(p)
   a = p.parse_args()

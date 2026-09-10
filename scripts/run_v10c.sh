@@ -28,6 +28,9 @@ GPU=${GPU:?set GPU (physical index as nvidia-smi lists it)}
 # 说明：要求提供物理 GPU 编号，编号必须与 nvidia-smi 显示的一致。
 SIGHT=${SIGHT:?set SIGHT=1 or 0}
 # 说明：要求明确是否启用 sight 视觉奖励/观测分支，1 是启用，0 是 NoSight。
+MASS_GT=${MASS_GT:-0}
+# 说明：是否训练带目标物体质量真值的 state teacher；默认关闭以保留 v10c 基线。
+export MASS_GT
 OUT=${OUT:-results/d455_heavy_dr/$TAG}
 # 说明：设置总输出目录；调用者可用 OUT 指定其他目录。
 SEED=${SEED:-42}
@@ -51,10 +54,17 @@ EVAL_SEEDS=${EVAL_SEEDS:-"101 202 303"}
 APPROACH=${APPROACH:-0}   # 1: the v10d variant with the approach terms (-Cold2 ids)
 # 说明：根据 APPROACH 选择冷启动任务的基础 task id。
 if [ "$APPROACH" = "1" ]; then BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold2; else BASE_TASK=Mjlab-Pick-Place-PiperX-Robust-Cold; fi
+# 说明：质量真值只改变 teacher actor 的观测，因此使用独立的注册 task id。
+if [ "$MASS_GT" = "1" ]; then BASE_TASK=${BASE_TASK}-Mass; fi
 # 说明：根据 SIGHT 选择 Sight 或 NoSight 任务。
 if [ "$SIGHT" = "1" ]; then TASK=$BASE_TASK; else TASK=${BASE_TASK}-NoSight; fi
 # 说明：未显式指定评估任务时，v10c 训练任务在普通 Robust 域评估，Cold2 则在自身任务评估。
-if [ -z "$EVAL_TASK" ]; then if [ "$APPROACH" = "1" ]; then EVAL_TASK=$TASK; else EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust; fi; fi
+if [ -z "$EVAL_TASK" ]; then
+  if [ "$APPROACH" = "1" ]; then EVAL_TASK=$TASK
+  elif [ "$MASS_GT" = "1" ]; then EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust-Mass
+  else EVAL_TASK=Mjlab-Pick-Place-PiperX-Robust
+  fi
+fi
 
 # 说明：切换到仓库根目录，保证相对路径都以仓库为基准。
 cd "$ROOT"
@@ -122,7 +132,7 @@ if [ -n "${SELFCHECK:-}" ]; then
   # 说明：声明当前为自检模式。
   say "SELFCHECK: nothing is launched"
   # 说明：打印本次运行将使用的关键参数。
-  say "tag $TAG  task $TASK  gpu $GPU  seed $SEED  envs $TEACHER_ENVS  iters $TEACHER_ITERS"
+  say "tag $TAG  task $TASK  mass_gt $MASS_GT  gpu $GPU  seed $SEED  envs $TEACHER_ENVS  iters $TEACHER_ITERS"
   # 说明：打印 GPU 名称和当前显存占用。
   say "gpu $GPU: $(nvidia-smi --query-gpu=index,name,memory.used --format=csv,noheader -i "$GPU")"
   # tests/test_cold_curriculum.py asserts this script carries no resume/warm-start flag
@@ -143,11 +153,11 @@ export PIPER_U_TELEMETRY="$OUT/u_telemetry.jsonl" PIPER_U_TELEMETRY_TAG=teacher
 # 说明：记录课程阶段切换信息。
 export PIPER_CURRICULUM_LOG="$OUT/curriculum.jsonl"
 # 说明：输出实际训练配置摘要。
-say "v10c ($TAG) task $TASK on physical GPU $GPU, seed $SEED, budget $TEACHER_ITERS iterations"
+say "v10c ($TAG) task $TASK (mass_gt=$MASS_GT) on physical GPU $GPU, seed $SEED, budget $TEACHER_ITERS iterations"
 
 # --- the declaration, before anything trains --------------------------------
 # 说明：把训练命令完整保存下来，供配置快照和日志复现。
-TRAIN_CMD="TASK=$TASK NUM_ENVS=$TEACHER_ENVS ITERS=$TEACHER_ITERS GPUS=[$GPU] RUN_NAME=${TAG}_teacher bash scripts/train.sh --agent.logger tensorboard --agent.seed $SEED"
+TRAIN_CMD="MASS_GT=$MASS_GT TASK=$TASK NUM_ENVS=$TEACHER_ENVS ITERS=$TEACHER_ITERS GPUS=[$GPU] RUN_NAME=${TAG}_teacher bash scripts/train.sh --agent.logger tensorboard --agent.seed $SEED"
 # 说明：训练前先冻结 task、seed、环境数、迭代数和评估任务等声明。
 $PY scripts/v10c_verdict.py --snapshot-only --task "$TASK" --sight "$SIGHT" --seed "$SEED" \
   --envs "$TEACHER_ENVS" --iters "$TEACHER_ITERS" --gpu "$GPU" --command "$TRAIN_CMD" --eval-task "$EVAL_TASK" --out "$OUT/config_snapshot.json" \

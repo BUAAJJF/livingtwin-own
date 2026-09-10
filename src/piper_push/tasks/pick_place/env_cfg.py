@@ -161,6 +161,7 @@ def make_pick_place_env_cfg(
   wrist: bool = False,
   num_objects: int = 1,
   bounded_actions: bool = True,
+  mass_gt: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Build the task.
 
@@ -284,6 +285,11 @@ def make_pick_place_env_cfg(
       func=pick_mdp.object_physics, params={"command_name": TASK}
     ),
   }
+  mass = {
+    "mass_gt": ObservationTermCfg(
+      func=pick_mdp.object_mass, params={"command_name": TASK}
+    ),
+  }
   if multi:
     # The critic is told where the rest of the table is.  The actor is not: it
     # is given one target and the depth image, which already contains the
@@ -300,6 +306,13 @@ def make_pick_place_env_cfg(
     "object": ObservationGroupCfg(dict(object_state), enable_corruption=not play),
     "privileged": ObservationGroupCfg(dict(privileged), enable_corruption=False),
   }
+  if mass_gt:
+    # The mass is a teacher-only oracle.  Keep it in its own clean group so
+    # actor selection is explicit in the runner and no observation corruption
+    # can turn the ground-truth label into a different training target.
+    observations["mass"] = ObservationGroupCfg(
+      dict(mass), enable_corruption=False
+    )
 
   actions: dict[str, ActionTermCfg] = {
     "arm": RateLimitedJointPositionActionCfg(

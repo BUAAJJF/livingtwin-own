@@ -49,8 +49,9 @@ def add_approach_terms(cfg) -> None:
   cfg.actions["arm"].velocity_limit = {j: V10D_COMMAND_DERATE * v for j, v in piper.JOINT_TRIP_RAD_S.items()}
 
 
-def make_cold_env_cfg(*, sight: bool = True, play: bool = False, approach: bool = False):
-  cfg = make_robust_env_cfg(play=play, vision=False, wrist=False)
+def make_cold_env_cfg(*, sight: bool = True, play: bool = False, approach: bool = False,
+                      mass_gt: bool = False):
+  cfg = make_robust_env_cfg(play=play, vision=False, wrist=False, mass_gt=mass_gt)
   if approach:
     add_approach_terms(cfg)   # in play too, so the evaluation logs the same terms
   if play:

@@ -33,6 +33,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from piper_push import camera, objects
 from piper_push.distill import PickPlaceDistillationRunner, RslRlDistillationAlgorithmCfg, RslRlDistillationRunnerCfg
+from .rl_cfg import pick_place_mass_ppo_runner_cfg, pick_place_ppo_runner_cfg
 from piper_push.pc import cloud, grasp
 from piper_push.pc import routes as pc_routes
 from piper_push.runners import PickPlaceOnPolicyRunner
@@ -72,10 +73,11 @@ def shape_weights(split: str) -> tuple[float, ...] | None:
   return tuple(x / s for x in w)
 
 
-def actor_groups(route: str) -> tuple[str, ...]:
+def actor_groups(route: str, mass_gt: bool = False) -> tuple[str, ...]:
+  mass = (("mass",) if mass_gt else ())
   if pc_routes.base_route(route) == "P2":
-    return ("proprio", "grasp_locked", "grasp_topk", "vision_meta")
-  return ("proprio", "camera", "vision_meta")
+    return ("proprio", "grasp_locked", "grasp_topk", "vision_meta") + mass
+  return ("proprio", "camera", "vision_meta") + mass
 
 
 def encoder_cfg(route: str) -> dict:
@@ -95,11 +97,12 @@ def encoder_cfg(route: str) -> dict:
   raise ValueError(route)
 
 
-def make_pc_env_cfg(route: str, play: bool = False, split: str = "train"):
+def make_pc_env_cfg(route: str, play: bool = False, split: str = "train",
+                    mass_gt: bool = False):
   if route not in ROUTES:
     raise ValueError(f"route must be one of {ROUTES}")
   base = pc_routes.base_route(route)
-  cfg = make_robust_env_cfg(play=play, vision=True)
+  cfg = make_robust_env_cfg(play=play, vision=True, mass_gt=mass_gt)
   old = cfg.observations["camera"].terms["scene"]
   params = dict(old.params)
   latency = tuple(params.get("latency_probs", cloud.DEFAULT_LATENCY_PROBS))
@@ -161,19 +164,22 @@ def pc_model_cfg(route: str, bounded: bool = True) -> RslRlModelCfg:
   )
 
 
-def pc_vision_ppo_runner_cfg(route: str, max_iterations: int = 6000):
+def pc_vision_ppo_runner_cfg(route: str, max_iterations: int = 6000,
+                             mass_gt: bool = False):
   cfg = pick_place_ppo_runner_cfg(f"piperx_pc_{route.lower()}_vision", max_iterations, bounded=True)
   cfg.actor = pc_model_cfg(route)
   cfg.obs_groups = {
-    "actor": actor_groups(route),
+    "actor": actor_groups(route, mass_gt),
     "critic": ("full_proprio", "object", "privileged"),
   }
   cfg.wandb_tags = ("piperx", "pick-place", "pc", route.lower())
   return cfg
 
 
-def pc_distill_runner_cfg(route: str, max_iterations: int = 3000) -> RslRlDistillationRunnerCfg:
-  ppo = pick_place_ppo_runner_cfg(bounded=True)
+def pc_distill_runner_cfg(route: str, max_iterations: int = 3000,
+                          mass_gt: bool = False) -> RslRlDistillationRunnerCfg:
+  ppo = (pick_place_mass_ppo_runner_cfg(bounded=True)
+         if mass_gt else pick_place_ppo_runner_cfg(bounded=True))
   return RslRlDistillationRunnerCfg(
     student=pc_model_cfg(route),
     teacher=ppo.actor,
@@ -194,8 +200,8 @@ def pc_distill_runner_cfg(route: str, max_iterations: int = 3000) -> RslRlDistil
     num_steps_per_env=32,
     max_iterations=max_iterations,
     obs_groups={
-      "student": actor_groups(route),
-      "teacher": ("full_proprio", "object"),
+      "student": actor_groups(route, mass_gt),
+      "teacher": ("full_proprio", "object") + (("mass",) if mass_gt else ()),
     },
   )
 
@@ -214,6 +220,29 @@ def register() -> None:
       env_cfg=make_pc_env_cfg(route),
       play_env_cfg=make_pc_env_cfg(route, play=True),
       rl_cfg=pc_vision_ppo_runner_cfg(route),
+      runner_cls=PickPlaceOnPolicyRunner,
+    )
+
+    # Oracle-mass counterparts for the Stage-B/C physical-memory route.
+    register_mjlab_task(
+      task_id=f"Mjlab-Pick-Place-PiperX-PC-{route}-Distill-Mass",
+      env_cfg=make_pc_env_cfg(route, mass_gt=True),
+      play_env_cfg=make_pc_env_cfg(route, play=True, mass_gt=True),
+      rl_cfg=pc_distill_runner_cfg(route, mass_gt=True),
+      runner_cls=PickPlaceDistillationRunner,
+    )
+    register_mjlab_task(
+      task_id=f"Mjlab-Pick-Place-PiperX-PC-{route}-Vision-Mass",
+      env_cfg=make_pc_env_cfg(route, mass_gt=True),
+      play_env_cfg=make_pc_env_cfg(route, play=True, mass_gt=True),
+      rl_cfg=pc_vision_ppo_runner_cfg(route, mass_gt=True),
+      runner_cls=PickPlaceOnPolicyRunner,
+    )
+    register_mjlab_task(
+      task_id=f"Mjlab-Pick-Place-PiperX-PC-{route}-Vision-Heldout-Mass",
+      env_cfg=make_pc_env_cfg(route, play=True, split="heldout", mass_gt=True),
+      play_env_cfg=make_pc_env_cfg(route, play=True, split="heldout", mass_gt=True),
+      rl_cfg=pc_vision_ppo_runner_cfg(route, mass_gt=True),
       runner_cls=PickPlaceOnPolicyRunner,
     )
     # Evaluation on the held-out class only.  Training under this id is not a

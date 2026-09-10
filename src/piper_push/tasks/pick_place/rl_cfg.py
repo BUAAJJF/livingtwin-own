@@ -119,6 +119,35 @@ def pick_place_ppo_runner_cfg(
   )
 
 
+def pick_place_mass_ppo_runner_cfg(
+  experiment_name: str = "piperx_pick_place_mass",
+  max_iterations: int = 3000,
+  bounded: bool = True,
+  entropy_coef: float = 0.012,
+  std_min: list[float] | None = None,
+) -> RslRlOnPolicyRunnerCfg:
+  """State teacher with target mass exposed only to its actor.
+
+  The environment owns a separate, uncorrupted ``mass`` group.  The critic
+  deliberately keeps the original privileged tuple, so this variant changes
+  only the actor input and cannot accidentally become a different asymmetric
+  critic setup.
+  """
+  cfg = pick_place_ppo_runner_cfg(
+    experiment_name=experiment_name,
+    max_iterations=max_iterations,
+    bounded=bounded,
+    entropy_coef=entropy_coef,
+    std_min=std_min,
+  )
+  cfg.obs_groups = {
+    "actor": ("proprio", "object", "mass"),
+    "critic": ("proprio", "object", "privileged"),
+  }
+  cfg.wandb_tags = ("piperx", "pick-place", "state", "mass_gt")
+  return cfg
+
+
 # Two convolutions and a spatial softmax: the softmax turns the last feature
 # maps into coordinates, which is the representation a reaching task actually
 # wants and a flattened feature vector makes the network rediscover.
@@ -141,6 +170,7 @@ def pick_place_vision_ppo_runner_cfg(
   max_iterations: int = 6000,
   wrist: bool = False,
   bounded: bool = True,
+  mass_gt: bool = False,
 ) -> RslRlOnPolicyRunnerCfg:
   """The same task through the camera.
 
@@ -171,7 +201,8 @@ def pick_place_vision_ppo_runner_cfg(
     # 2D group.  Separate encoders rather than extra channels on one image:
     # the two views share no intrinsics, no range and no noise model, and a
     # filter bank that had to serve both would be worse at each.
-    "actor": ("proprio", "camera") + (("wrist",) if wrist else ()),
+    "actor": ("proprio", "camera") + (("wrist",) if wrist else ()) +
+             (("mass",) if mass_gt else ()),
     # ``full_proprio``, not ``proprio``: the critic never runs on the robot, so
     # handing it the deployment-constrained proprioception costs information
     # for nothing.  It also makes this critic dimensionally and semantically
@@ -188,6 +219,7 @@ def pick_place_distill_runner_cfg(
   max_iterations: int = 3000,
   wrist: bool = False,
   bounded: bool = True,
+  mass_gt: bool = False,
 ) -> RslRlDistillationRunnerCfg:
   """Bootstrap the vision policy off the state policy.
 
@@ -202,8 +234,10 @@ def pick_place_distill_runner_cfg(
   because it is loaded from that actor's weights with ``strict=True``.  Change
   one and this has to change with it.
   """
-  ppo = pick_place_ppo_runner_cfg(bounded=bounded)
-  vision = pick_place_vision_ppo_runner_cfg(wrist=wrist, bounded=bounded)
+  ppo = (pick_place_mass_ppo_runner_cfg(bounded=bounded)
+         if mass_gt else pick_place_ppo_runner_cfg(bounded=bounded))
+  vision = pick_place_vision_ppo_runner_cfg(
+    wrist=wrist, bounded=bounded, mass_gt=mass_gt)
   return RslRlDistillationRunnerCfg(
     student=vision.actor,
     teacher=ppo.actor,
@@ -228,7 +262,8 @@ def pick_place_distill_runner_cfg(
     obs_groups={
       # Byte-identical to the vision PPO actor's tuple, so the student the
       # distillation produces loads into that stage without a rename.
-      "student": ("proprio", "camera") + (("wrist",) if wrist else ()),
-      "teacher": ("full_proprio", "object"),
+      "student": ("proprio", "camera") + (("wrist",) if wrist else ()) +
+                 (("mass",) if mass_gt else ()),
+      "teacher": ("full_proprio", "object") + (("mass",) if mass_gt else ()),
     },
   )

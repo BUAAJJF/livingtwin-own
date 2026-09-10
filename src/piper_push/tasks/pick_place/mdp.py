@@ -1271,6 +1271,23 @@ def object_physics(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
   return torch.cat([mass, fric, ipos], dim=-1)
 
 
+def object_mass(env: "ManagerBasedRlEnv", command_name: str) -> torch.Tensor:
+  """Ground-truth mass of the currently selected target object, in kg.
+
+  This is intentionally separate from ``object_physics``: the mass-conditioned
+  teacher actor gets only this scalar, while the critic keeps its existing
+  privileged mass/friction/COM tuple.
+  """
+  cmd: PickCommand = env.command_manager.get_term(command_name)
+  bodies = torch.tensor(
+    [o.indexing.body_ids[0] for o in cmd._objects], device=cmd.device
+  )
+  body = bodies[cmd.target]
+  rows0 = torch.arange(cmd.num_envs, device=cmd.device)
+  mass = torch.as_tensor(env.sim.model.body_mass[:])[rows0, body]
+  return mass.unsqueeze(-1)
+
+
 # ---------------------------------------------------------------------------
 # Rewards
 # ---------------------------------------------------------------------------
